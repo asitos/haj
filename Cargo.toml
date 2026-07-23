@@ -8,7 +8,7 @@ description = "Fast, quiet, beautiful package management for BlahArch"
 [dependencies]
 clap = { version = "4.4", features = ["derive"] }
 
-alpm = "3.0"
+alpm = { git = "https://github.com/archlinux/alpm.rs", branch = "master" }
 
 tokio = { version = "1.34", features = ["full"] }
 reqwest = "0.11"
