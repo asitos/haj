@@ -4,15 +4,19 @@ mod core;
 mod network;
 mod ui;
 
-use std::io::{self, Write};
 use clap::Parser;
 use cli::{Cli, Commands};
 use owo_colors::OwoColorize;
+use std::io::{self, Write};
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_run: bool) {
     if is_dry_run {
-        println!("{} {}", "[dry run]".bold().yellow(), "no system changes will be made.");
+        println!(
+            "{} {}",
+            "[dry run]".bold().yellow(),
+            "no system changes will be made."
+        );
         println!("{} would execute: pacman {}", "→".cyan(), args.join(" "));
         return;
     }
@@ -45,7 +49,7 @@ async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_
             Ok(Some(line)) = reader.next_line() => {
                 let clean = line.trim();
                 if clean.is_empty() { continue; }
-                
+
                 if clean.starts_with("::") {
                     spinner.set_message(format!("{}", clean.replace("::", "→").cyan().bold()));
                 } else if clean.starts_with('(') || clean.contains("downloading") || clean.contains("installing") || clean.contains("removing") || clean.contains("upgrading") || clean.contains("cleaning") {
@@ -53,7 +57,7 @@ async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_
                 }
             }
             result = child.wait() => {
-                break result; 
+                break result;
             }
         }
     };
@@ -66,13 +70,15 @@ async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_
         }
         Ok(stat) => {
             spinner.finish_with_message(format!(
-                "{} operation failed (code {}):\n{}", 
-                "✗".red(), 
-                stat.code().unwrap_or(1), 
+                "{} operation failed (code {}):\n{}",
+                "✗".red(),
+                stat.code().unwrap_or(1),
                 err_output.trim().red()
             ));
         }
-        Err(e) => spinner.finish_with_message(format!("{} failed to execute pacman: {}", "✗".red(), e)),
+        Err(e) => {
+            spinner.finish_with_message(format!("{} failed to execute pacman: {}", "✗".red(), e))
+        }
     }
 }
 
@@ -85,13 +91,14 @@ async fn main() -> anyhow::Result<()> {
     match &cli.command {
         Commands::Update => {
             run_pacman(
-                &["-Sy", "--noconfirm"], 
-                "syncing package databases from mirrors...", 
+                &["-Sy", "--noconfirm"],
+                "syncing package databases from mirrors...",
                 "repositories synced successfully.",
-                cli.dry_run
-            ).await;
+                cli.dry_run,
+            )
+            .await;
         }
-        
+
         cmd => {
             let alpm_handle = core::alpm_init::init_alpm()?;
             let local_db = alpm_handle.localdb();
@@ -114,7 +121,7 @@ async fn main() -> anyhow::Result<()> {
 
                             println!("\n{:<15} {:.2} MB", "download:", total_dl);
                             println!("{:<15} {:.2} MB", "disk Usage:", total_inst);
-                            
+
                             print!("\ncontinue? [y/n] ");
                             io::stdout().flush()?;
 
@@ -124,11 +131,17 @@ async fn main() -> anyhow::Result<()> {
                             if input.trim().eq_ignore_ascii_case("y") || input.trim().is_empty() {
                                 let mut args = vec!["-S", "--noconfirm"];
                                 args.extend(packages.iter().map(|s| s.as_str()));
-                                
+
                                 // rop(local_db);
                                 drop(alpm_handle);
 
-                                run_pacman(&args, "initializing transaction...", "packages installed successfully.", cli.dry_run).await;
+                                run_pacman(
+                                    &args,
+                                    "initializing transaction...",
+                                    "packages installed successfully.",
+                                    cli.dry_run,
+                                )
+                                .await;
                             } else {
                                 println!("{} aborted.", "✗".red());
                             }
@@ -136,10 +149,10 @@ async fn main() -> anyhow::Result<()> {
                         Err(e) => println!("{} {}", "✗".red(), e),
                     }
                 }
-                
+
                 Commands::Remove { packages } => {
                     println!("{} resolving targets...\n", "✓".green());
-                    
+
                     let mut found = true;
                     for pkg in packages {
                         if local_db.pkg(pkg.as_str()).is_err() {
@@ -166,23 +179,35 @@ async fn main() -> anyhow::Result<()> {
                     if input.trim().eq_ignore_ascii_case("y") {
                         let mut args = vec!["-Rs", "--noconfirm"];
                         args.extend(packages.iter().map(|s| s.as_str()));
-                        
+
                         // drop(local_db);
                         drop(alpm_handle);
 
-                        run_pacman(&args, "tossing packages back into the ocean...", "packages removed successfully.", cli.dry_run).await;
+                        run_pacman(
+                            &args,
+                            "tossing packages back into the ocean...",
+                            "packages removed successfully.",
+                            cli.dry_run,
+                        )
+                        .await;
                     } else {
                         println!("{} aborted.", "✗".red());
                     }
                 }
-                
+
                 Commands::Clean => {
                     // drop(local_db);
                     drop(alpm_handle);
-                    
-                    run_pacman(&["-Sc", "--noconfirm"], "scrubbing the package cache...", "cache cleared successfully.", cli.dry_run).await;
+
+                    run_pacman(
+                        &["-Sc", "--noconfirm"],
+                        "scrubbing the package cache...",
+                        "cache cleared successfully.",
+                        cli.dry_run,
+                    )
+                    .await;
                 }
-                
+
                 Commands::Search { query } => {
                     println!("{} searching for '{}'...\n", "✓".green(), query.cyan());
                     let mut found = false;
@@ -195,32 +220,45 @@ async fn main() -> anyhow::Result<()> {
                             }
                         }
                     }
-                    if !found { println!("{} no packages found matching '{}'.", "✗".red(), query.bold()); }
-                }
-                
-                Commands::Show { package } => {
-                    match local_db.pkg(package.as_str()) {
-                        Ok(pkg) => {
-                            println!("found locally: {} v{}", pkg.name(), pkg.version());
-                            println!("description: {}", pkg.desc().unwrap_or("none"));
-                        }
-                        Err(_) => println!("{} package '{}' not found in local database.", "✗".red(), package),
+                    if !found {
+                        println!(
+                            "{} no packages found matching '{}'.",
+                            "✗".red(),
+                            query.bold()
+                        );
                     }
                 }
-                
+
+                Commands::Show { package } => match local_db.pkg(package.as_str()) {
+                    Ok(pkg) => {
+                        println!("found locally: {} v{}", pkg.name(), pkg.version());
+                        println!("description: {}", pkg.desc().unwrap_or("none"));
+                    }
+                    Err(_) => println!(
+                        "{} package '{}' not found in local database.",
+                        "✗".red(),
+                        package
+                    ),
+                },
+
                 Commands::Orphan => {
                     println!("{} scanning local database for orphans...\n", "✓".green());
                     let mut orphans = Vec::new();
-                    
+
                     for pkg in local_db.pkgs() {
-                        if pkg.reason() == alpm::PackageReason::Depend 
-                           && pkg.required_by().is_empty() 
-                           && pkg.optional_for().is_empty() 
-                        { orphans.push(pkg); }
+                        if pkg.reason() == alpm::PackageReason::Depend
+                            && pkg.required_by().is_empty()
+                            && pkg.optional_for().is_empty()
+                        {
+                            orphans.push(pkg);
+                        }
                     }
 
                     if orphans.is_empty() {
-                        println!("{} no orphaned packages found. system is clean!", "✓".green());
+                        println!(
+                            "{} no orphaned packages found. system is clean!",
+                            "✓".green()
+                        );
                     } else {
                         println!("{}", "orphans found:".bold().white());
                         let mut total_size = 0.0;

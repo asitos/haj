@@ -38,7 +38,7 @@ impl Default for GeneralConfig {
 
 pub fn load_config() -> HajConfig {
     let config_path = Path::new("/etc/haj.conf");
-    
+
     if config_path.exists() {
         if let Ok(contents) = fs::read_to_string(config_path) {
             if let Ok(config) = toml::from_str(&contents) {
@@ -46,6 +46,6 @@ pub fn load_config() -> HajConfig {
             }
         }
     }
-    
+
     HajConfig::default()
 }

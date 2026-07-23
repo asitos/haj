@@ -13,7 +13,7 @@ pub fn get_install_summaries(alpm: &Alpm, targets: &[String]) -> Result<Vec<Inst
 
     for target in targets {
         let mut found = false;
-        
+
         for db in alpm.syncdbs() {
             if let Ok(pkg) = db.pkg(target.as_str()) {
                 summaries.push(InstallSummary {

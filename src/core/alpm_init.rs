@@ -5,8 +5,12 @@ pub fn init_alpm() -> Result<Alpm> {
     let root_path = "/";
     let db_path = "/var/lib/pacman/";
 
-    let handle = Alpm::new(root_path, db_path)
-        .with_context(|| format!("Failed to initialize ALPM at root: {} and db: {}", root_path, db_path))?;
+    let handle = Alpm::new(root_path, db_path).with_context(|| {
+        format!(
+            "Failed to initialize ALPM at root: {} and db: {}",
+            root_path, db_path
+        )
+    })?;
 
     let repos = ["core", "extra", "multilib"];
     for repo in repos {

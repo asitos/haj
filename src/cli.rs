@@ -42,15 +42,11 @@ pub enum Commands {
 
     /// search all remote sync databases
     #[command(alias = "s")]
-    Search {
-        query: String,
-    },
+    Search { query: String },
 
     /// show local package details
     #[command(alias = "info")]
-    Show {
-        package: String,
-    },
+    Show { package: String },
 
     /// scrub the package cache
     #[command(alias = "c")]
