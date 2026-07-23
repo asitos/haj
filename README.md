@@ -3,8 +3,6 @@
 [![AUR](https://img.shields.io/aur/version/haj?logo=archlinux)](https://aur.archlinux.org/packages/haj)
 [![Rust](https://img.shields.io/badge/built_with-Rust-dca282.svg?logo=rust)](https://www.rust-lang.org/)
 
-all hail the best shark ever!
-
 fast, quiet, beautiful package management for BlahArch. 
 (and yes, it is named after the ikea shark. all hail blahaj. 🦈)
 
