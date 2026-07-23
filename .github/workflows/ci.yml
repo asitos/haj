@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [ "master", "main" ]
+  pull_request:
+    branches: [ "master", "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build_and_test:
+    name: Build, Lint, and Test
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Cache Cargo registry
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        
+    - name: Install Rust Toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+        
+    - name: Install System Dependencies
+      run: sudo apt-get update && sudo apt-get install -y libalpm-dev pkg-config
+      
+    - name: Check Formatting
+      run: cargo fmt -- --check
+      
+    - name: Run Clippy (Linter)
+      run: cargo clippy -- -D warnings
+      
+    - name: Build (Debug)
+      run: cargo build --verbose

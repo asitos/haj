@@ -100,6 +100,13 @@ verbose = false
 
 *Note: `parallel_downloads` here is currently reserved for future internal Rust-native downloading features. Standard installations will still respect your `/etc/pacman.conf` settings.*
 
+##  architecture & technical details
+`haj` is built with a focus on memory safety, zero-cost abstractions, and concurrent execution.
+
+* **asynchronous pty parsing:** uses `tokio` to spawn non-blocking pseudo-terminals, capturing and formatting `pacman`'s c-level standard streams in real-time without deadlocking background workers.
+* **ffi & memory safety:** utilizes `alpm.rs` to interface with arch linux's `libalpm`. database locks are explicitly managed and safely dropped from memory before handing state mutation over to external processes.
+* **dag traversal:** the `orphan` detection engine completely avoids bash scripting, instead traversing the system's directed acyclic graph (dag) directly in memory via c-bindings to calculate unneeded dependencies in microseconds.
+
 ## license
 
 MIT License. See `LICENSE` for more information.
