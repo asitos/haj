@@ -13,11 +13,12 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_run: bool) {
     if is_dry_run {
         println!(
-            "{} {}",
-            "[dry run]".bold().yellow(),
-            "no system changes will be made."
+            "{} no system changes will be made.",
+            "[dry run]".bold().yellow()
         );
-        println!("{} would execute: pacman {}", "→".cyan(), args.join(" "));
+        let arrow = "→".cyan();
+        let cmd = args.join(" ");
+        println!("{arrow} would execute: pacman {cmd}");
         return;
     }
 
@@ -216,7 +217,7 @@ async fn main() -> anyhow::Result<()> {
                             for pkg in results {
                                 found = true;
                                 let is_installed = local_db.pkg(pkg.name()).is_ok();
-                                ui::formatter::print_search_result(&pkg, db.name(), is_installed);
+                                ui::formatter::print_search_result(pkg, db.name(), is_installed);
                             }
                         }
                     }
