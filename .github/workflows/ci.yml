@@ -1,4 +1,4 @@
-name: CI
+name: ci
 
 on:
   push:
@@ -11,34 +11,38 @@ env:
 
 jobs:
   build_and_test:
-    name: Build, Lint, and Test
+    name: build, lint, and test
     runs-on: ubuntu-latest
     
+    container: archlinux:latest 
+
     steps:
     - uses: actions/checkout@v4
-    
-    - name: Cache Cargo registry
+
+    - name: install arch dependencies
+      run: |
+        pacman -Syu --noconfirm
+        pacman -S --noconfirm rustup gcc pkgconf pacman
+      
+    - name: setup rust toolchain
+      run: |
+        rustup default stable
+        rustup component add rustfmt clippy
+        
+    - name: cache cargo registry
       uses: actions/cache@v3
       with:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
           target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        key: arch-cargo-${{ hashFiles('**/Cargo.lock') }}
         
-    - name: Install Rust Toolchain
-      uses: dtolnay/rust-toolchain@stable
-      with:
-        components: rustfmt, clippy
-        
-    - name: Install System Dependencies
-      run: sudo apt-get update && sudo apt-get install -y libalpm-dev pkg-config
-      
-    - name: Check Formatting
+    - name: check formatting
       run: cargo fmt -- --check
       
-    - name: Run Clippy (Linter)
+    - name: run clippy (linter)
       run: cargo clippy -- -D warnings
       
-    - name: Build (Debug)
+    - name: build (debug)
       run: cargo build --verbose
