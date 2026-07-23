@@ -3,7 +3,7 @@
 [![AUR](https://img.shields.io/aur/version/haj?logo=archlinux)](https://aur.archlinux.org/packages/haj)
 [![Rust](https://img.shields.io/badge/built_with-Rust-dca282.svg?logo=rust)](https://www.rust-lang.org/)
 
-fast, quiet, beautiful package management for BlahArch Linux. 
+fast, quiet, beautiful package management for BlahArch. 
 
 `haj` is a modern, memory-safe wrapper for `pacman` written in rust. It replaces arch's notoriously loud and verbose terminal output with the clean, minimalistic aesthetic of modern package managers like `cargo` and `bun`, without compromising on speed or safety.
 
