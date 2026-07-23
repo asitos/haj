@@ -50,15 +50,15 @@ sudo install -Dm755 target/release/haj /usr/bin/haj
 
 `haj` provides highly aliased commands for a faster typing experience.
 
-| command | aliases | action | underlying pacman equivalent |
-|---------|---------|--------|------------------------------|
-| `install <pkg>` | `i` | install one or more packages | `pacman -S` |
-| `remove <pkg>` | `rm`, `toss` | remove packages & unneeded dependencies | `pacman -Rs` |
-| `update` | `up`, `sync` | sync mirror databases | `pacman -Sy` |
-| `search <query>` | `s` | search all remote sync databases | `pacman -Ss` |
-| `show <pkg>` | `info` | show local package details | `pacman -Qi` |
-| `clean` | `c` | scrub the package cache | `pacman -Sc` |
-| `orphan` | `o` | detect orphaned dependencies | `pacman -Qtdq` |
+| command | aliases | action |
+|---------|---------|--------|
+| `install <pkg>` | `i` | install one or more packages | 
+| `remove <pkg>` | `rm`, `toss` | remove packages & unneeded dependencies | 
+| `update` | `up`, `sync` | sync mirror databases | 
+| `search <query>` | `s` | search all remote sync databases | 
+| `show <pkg>` | `info` | show local package details | 
+| `clean` | `c` | scrub the package cache | 
+| `orphan` | `o` | detect orphaned dependencies |
 
 ### global flags
 - `-d`, `--dry-run` : preview a command without modifying the system.
