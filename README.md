@@ -12,15 +12,15 @@ fast, quiet, beautiful package management for BlahArch.
 
 ## features
 
-- **the cargo/bun aesthetic:** No more jagged progress bars or walls of text. `haj` parses `pacman` output streams in real-time, displaying a single, elegant progress spinner and clean transaction summaries.
+- **the cargo/bun aesthetic:** no more jagged progress bars or walls of text. `haj` parses `pacman` output streams in real-time, displaying a single, elegant progress spinner and clean transaction summaries.
 - **native alpm engine:** `haj` uses `alpm.rs` (c bindings for `libalpm`) to query your local and sync databases directly in memory.
 - **blazing fast orphan detection:** instead of parsing text scripts, `haj orphan` traverses the true alpm directed acyclic graph (dag) to find unused dependencies in microseconds.
 - **deadlock-free concurrency:** built on `tokio`, `haj` safely drops database locks before handing state-mutation over to `pacman`, guaranteeing zero lockfile collisions.
-- **safe dry run:** Includes a built-in `--dry-run` flag to preview transactions without touching your system.
+- **safe dry run:** Includes a built-in `--dry-run` flag to preview commands without touching your system.
 
 ## working   
 
-`haj` is completely transparent and relies entirely on standard Arch Linux infrastructure:
+`haj` is completely transparent and relies entirely on standard arch linux infrastructure:
 1. **reads** (`search`, `show`, `orphan`) are done natively via `libalpm` bindings for maximum performance.
 2. **writes** (`install`, `remove`, `update`, `clean`) are handed off securely to standard `pacman` subprocesses (`pacman -S`, `pacman -Rs`, etc.). `haj` intercepts the `stdout`/`stderr` streams via pseudo-terminals (pty), filters out the verbose noise, applies color formatting, and pipes the cleaned data to your screen in real-time.
 
@@ -28,7 +28,7 @@ fast, quiet, beautiful package management for BlahArch.
 
 ### aur (arch user repository)
 
-You can install `haj` using your favorite AUR helper:
+you can install `haj` using your favorite aur helper:
 
 ```bash
 yay -S haj
@@ -101,7 +101,7 @@ color = "auto"
 verbose = false
 ```
 
-*Note: `parallel_downloads` here is currently reserved for future internal Rust-native downloading features. Standard installations will still respect your `/etc/pacman.conf` settings.*
+*note: `parallel_downloads` here is currently reserved for future internal rust-native downloading features. standard installations will still respect your `/etc/pacman.conf` settings.*
 
 ##  architecture & technical details
 `haj` is built with a focus on memory safety, zero-cost abstractions, and concurrent execution.
@@ -112,4 +112,4 @@ verbose = false
 
 ## license
 
-MIT License. See `LICENSE` for more information.
+mit license. see `LICENSE` for more information.
