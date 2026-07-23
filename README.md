@@ -57,8 +57,8 @@ sudo install -Dm755 target/release/haj /usr/bin/haj
 | `update` | `up`, `sync` | sync mirror databases | `pacman -Sy` |
 | `search <query>` | `s` | search all remote sync databases | `pacman -Ss` |
 | `show <pkg>` | `info` | show local package details | `pacman -Qi` |
-| `clean` | | scrub the package cache | `pacman -Sc` |
-| `orphan` | | detect orphaned dependencies | `pacman -Qtdq` |
+| `clean` | `c` | scrub the package cache | `pacman -Sc` |
+| `orphan` | `o` | detect orphaned dependencies | `pacman -Qtdq` |
 
 ### global flags
 - `-d`, `--dry-run` : preview a command without modifying the system.
