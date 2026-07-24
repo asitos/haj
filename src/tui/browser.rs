@@ -2,7 +2,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
     prelude::Stylize,
     Frame,
 };
@@ -27,33 +27,37 @@ pub fn render(f: &mut Frame, app: &mut App) {
     let items: Vec<ListItem> = app
         .package_list
         .iter()
-        .map(|pkg| ListItem::new(pkg.as_str()))
+        .map(|pkg| ListItem::new(pkg.name.clone()))
         .collect();
 
     let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title(" packages "))
+        .block(Block::default().borders(Borders::ALL).title(" installed packages "))
         .highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD))
         .highlight_symbol(">> ");
 
     f.render_stateful_widget(list, content_chunks[0], &mut app.list_state);
 
-    let selected_idx = app.list_state.selected().unwrap_or(0);
-    let selected_pkg = &app.package_list[selected_idx];
+    if let Some(selected_idx) = app.list_state.selected() {
+        if let Some(selected_pkg) = app.package_list.get(selected_idx) {
+            let details_text = vec![
+                Line::from(vec![
+                    Span::styled(selected_pkg.name.clone(), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                    Span::raw(format!(" v{}", selected_pkg.version)),
+                ]),
+                Line::from(""),
+                Line::from(format!("repository: {}", selected_pkg.repo)),
+                Line::from(""),
+                Line::from(Span::styled("description:", Style::default().fg(Color::DarkGray))),
+                Line::from(selected_pkg.desc.clone()),
+                Line::from(""),
+                Line::from(Span::styled("[i] install  [r] remove", Style::default().fg(Color::DarkGray))),
+            ];
 
-    let details_text = vec![
-        Line::from(vec![Span::styled(selected_pkg.clone(), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))]),
-        Line::from(""),
-        Line::from("version: 1.0.0-1 (mock)"),
-        Line::from("repository: extra"),
-        Line::from(""),
-        Line::from("description:"),
-        Line::from("this is a beautiful mock description for the tui."),
-        Line::from(""),
-        Line::from(Span::styled("[i] install  [r] remove", Style::default().fg(Color::DarkGray))),
-    ];
+            let details = Paragraph::new(details_text)
+                .block(Block::default().borders(Borders::ALL).title(" details "))
+                .wrap(Wrap { trim: true }); 
 
-    let details = Paragraph::new(details_text)
-        .block(Block::default().borders(Borders::ALL).title(" details "));
-
-    f.render_widget(details, content_chunks[1]);
+            f.render_widget(details, content_chunks[1]);
+        }
+    }
 }
