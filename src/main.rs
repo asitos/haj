@@ -2,6 +2,7 @@ mod cli;
 mod config;
 mod core;
 mod network;
+mod tui;
 mod ui;
 
 use clap::Parser;
@@ -90,6 +91,9 @@ async fn main() -> anyhow::Result<()> {
     let _config = config::load_config();
 
     match &cli.command {
+        Commands::Tui => {
+            tui::run().await?;
+        }
         Commands::Update => {
             run_pacman(
                 &["-Sy", "--noconfirm"],
@@ -99,12 +103,13 @@ async fn main() -> anyhow::Result<()> {
             )
             .await;
         }
-
         cmd => {
             let alpm_handle = core::alpm_init::init_alpm()?;
             let local_db = alpm_handle.localdb();
 
             match cmd {
+                Commands::Tui => unreachable!(),
+                Commands::Update => unreachable!(),
                 Commands::Install { packages } => {
                     println!("{} resolving dependencies...\n", "✓".green());
 
@@ -121,7 +126,7 @@ async fn main() -> anyhow::Result<()> {
                             }
 
                             println!("\n{:<15} {:.2} MB", "download:", total_dl);
-                            println!("{:<15} {:.2} MB", "disk Usage:", total_inst);
+                            println!("{:<15} {:.2} MB", "disk usage:", total_inst);
 
                             print!("\ncontinue? [y/n] ");
                             io::stdout().flush()?;
@@ -133,7 +138,6 @@ async fn main() -> anyhow::Result<()> {
                                 let mut args = vec!["-S", "--noconfirm"];
                                 args.extend(packages.iter().map(|s| s.as_str()));
 
-                                // rop(local_db);
                                 drop(alpm_handle);
 
                                 run_pacman(
@@ -181,7 +185,6 @@ async fn main() -> anyhow::Result<()> {
                         let mut args = vec!["-Rs", "--noconfirm"];
                         args.extend(packages.iter().map(|s| s.as_str()));
 
-                        // drop(local_db);
                         drop(alpm_handle);
 
                         run_pacman(
@@ -197,7 +200,6 @@ async fn main() -> anyhow::Result<()> {
                 }
 
                 Commands::Clean => {
-                    // drop(local_db);
                     drop(alpm_handle);
 
                     run_pacman(
@@ -271,7 +273,6 @@ async fn main() -> anyhow::Result<()> {
                         println!("\nrun {} to remove them.", "haj toss <packages>".cyan());
                     }
                 }
-                Commands::Update => unreachable!(),
             }
         }
     }

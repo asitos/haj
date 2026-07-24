@@ -7,7 +7,7 @@ pub fn init_alpm() -> Result<Alpm> {
 
     let handle = Alpm::new(root_path, db_path).with_context(|| {
         format!(
-            "Failed to initialize ALPM at root: {} and db: {}",
+            "failed to initialize alpm at root: {} and db: {}",
             root_path, db_path
         )
     })?;

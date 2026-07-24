@@ -22,6 +22,10 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
+    /// launch the interactive tui dashboard
+    #[command(alias = "t")]
+    Tui,
+
     /// install one or more packages
     #[command(alias = "i")]
     Install {
