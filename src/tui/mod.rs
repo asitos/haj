@@ -12,7 +12,7 @@ use ratatui::{
 };
 use std::{io, time::Duration};
 use tokio::sync::mpsc; 
-use tokio::io::AsyncReadExt; 
+use tokio::io::{AsyncReadExt, AsyncBufReadExt}; 
 
 use crate::core;
 use ansi_to_tui::IntoText;
@@ -26,12 +26,19 @@ pub enum CurrentScreen {
     Browser,
 }
 
+#[derive(PartialEq)]
+pub enum InputMode {
+    Normal,
+    Editing,
+}
+
 pub enum TuiEvent {
     Tick,
     Key(crossterm::event::KeyEvent),
     PacmanLog(String),
     PacmanProgress(u16),
     TransactionComplete,
+    CloseTransaction,
     DashboardArtFrame(Text<'static>),
 }
 
@@ -46,17 +53,18 @@ pub struct PackageInfo {
 pub struct App {
     pub should_quit: bool,
     pub screen: CurrentScreen,
-    
+    pub input_mode: InputMode,
     pub pending_g: bool,
     
     pub package_list: Vec<PackageInfo>,
+    pub filtered_packages: Vec<PackageInfo>,
+    pub search_query: String,
     pub list_state: ListState,
     
     pub is_installing: bool,
     pub current_action: String,
     pub progress: u16,
     pub transaction_logs: Vec<String>,
-
     pub dashboard_art: Text<'static>,
 }
 
@@ -78,6 +86,8 @@ impl App {
 
         package_list.sort_by(|a, b| a.name.cmp(&b.name));
         
+        let filtered_packages = package_list.clone();
+
         let mut list_state = ListState::default();
         if !package_list.is_empty() {
             list_state.select(Some(0));
@@ -86,8 +96,11 @@ impl App {
         Self {
             should_quit: false,
             screen: CurrentScreen::Dashboard,
+            input_mode: InputMode::Normal,
             pending_g: false, 
             package_list,
+            filtered_packages,
+            search_query: String::new(),
             list_state,
             is_installing: false,
             current_action: String::from("idle"),
@@ -97,38 +110,61 @@ impl App {
         }
     }
     
+    pub fn update_search(&mut self) {
+        if self.search_query.is_empty() {
+            self.filtered_packages = self.package_list.clone();
+        } else {
+            let query = self.search_query.to_lowercase();
+            self.filtered_packages = self.package_list
+                .iter()
+                .filter(|p| p.name.to_lowercase().contains(&query) || p.desc.to_lowercase().contains(&query))
+                .cloned()
+                .collect();
+        }
+        self.list_state.select(if self.filtered_packages.is_empty() { None } else { Some(0) });
+    }
+
     pub fn next_item(&mut self) {
-        if self.package_list.is_empty() { return; }
+        if self.filtered_packages.is_empty() { return; }
         let i = match self.list_state.selected() {
-            Some(i) => if i >= self.package_list.len() - 1 { 0 } else { i + 1 },
+            Some(i) => if i >= self.filtered_packages.len() - 1 { 0 } else { i + 1 },
             None => 0,
         };
         self.list_state.select(Some(i));
     }
 
     pub fn previous_item(&mut self) {
-        if self.package_list.is_empty() { return; }
+        if self.filtered_packages.is_empty() { return; }
         let i = match self.list_state.selected() {
-            Some(i) => if i == 0 { self.package_list.len() - 1 } else { i - 1 },
+            Some(i) => if i == 0 { self.filtered_packages.len() - 1 } else { i - 1 },
             None => 0,
         };
         self.list_state.select(Some(i));
     }
 
     pub fn go_to_top(&mut self) {
-        if !self.package_list.is_empty() {
+        if !self.filtered_packages.is_empty() {
             self.list_state.select(Some(0));
         }
     }
 
     pub fn go_to_bottom(&mut self) {
-        if !self.package_list.is_empty() {
-            self.list_state.select(Some(self.package_list.len() - 1));
+        if !self.filtered_packages.is_empty() {
+            self.list_state.select(Some(self.filtered_packages.len() - 1));
         }
     }
 }
 
 pub async fn run() -> Result<()> {
+    println!("🦈 haj requires root privileges for package management.");
+    let status = std::process::Command::new("sudo")
+        .arg("-v")
+        .status()?;
+    
+    if !status.success() {
+        return Err(anyhow::anyhow!("sudo authentication failed or was cancelled."));
+    }
+
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
@@ -153,6 +189,9 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Resul
 where
     <B as Backend>::Error: Send + Sync + 'static,
 {
+    let config = crate::config::load_config();
+    let use_3d_animation = config.animations;
+
     let (tx, mut rx) = mpsc::channel::<TuiEvent>(100);
 
     let tx_input = tx.clone();
@@ -168,8 +207,6 @@ where
 
     let tx_art = tx.clone();
     tokio::spawn(async move {
-        let use_3d_animation = true; 
-
         if use_3d_animation {
             let mut child = tokio::process::Command::new("display3d")
                 .args(&["./resources/blahaj.obj", "-t", "0,0,5.5"]) 
@@ -204,6 +241,45 @@ where
         }
     });
 
+    let spawn_pacman = |tx_channel: mpsc::Sender<TuiEvent>, args: Vec<String>, action_name: String| {
+        tokio::spawn(async move {
+            let mut child = tokio::process::Command::new("sudo") 
+                .args(args)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .expect("failed to spawn pacman");
+
+            if let Some(stdout) = child.stdout.take() {
+                let mut reader = tokio::io::BufReader::new(stdout).lines();
+                while let Ok(Some(line)) = reader.next_line().await {
+                    let clean = line.trim();
+                    if clean.is_empty() { continue; }
+
+                    let _ = tx_channel.send(TuiEvent::PacmanLog(clean.to_string())).await;
+
+                    if clean.contains('%') {
+                        let parts: Vec<&str> = clean.split('%').collect();
+                        if !parts.is_empty() {
+                            let num_str = parts[0].split_whitespace().last().unwrap_or("0");
+                            if let Ok(val) = num_str.parse::<u16>() {
+                                let _ = tx_channel.send(TuiEvent::PacmanProgress(val)).await;
+                            }
+                        }
+                    }
+                }
+            }
+
+            let _ = child.wait().await;
+            let _ = tx_channel.send(TuiEvent::PacmanProgress(100)).await;
+            let _ = tx_channel.send(TuiEvent::TransactionComplete).await;
+            
+            // Wait 2 seconds so the user can read the success message, then close popup
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            let _ = tx_channel.send(TuiEvent::CloseTransaction).await;
+        });
+    };
+
     loop {
         terminal.draw(|f| {
             match app.screen {
@@ -218,38 +294,114 @@ where
                 TuiEvent::DashboardArtFrame(text) => {
                     app.dashboard_art = text; 
                 }
+                TuiEvent::PacmanLog(log) => {
+                    app.transaction_logs.push(log);
+                    if app.transaction_logs.len() > 30 {
+                        app.transaction_logs.remove(0); 
+                    }
+                }
+                TuiEvent::PacmanProgress(val) => {
+                    app.progress = val.min(100);
+                }
+                TuiEvent::TransactionComplete => {
+                    app.current_action = "transaction complete ✓".to_string();
+                }
+                TuiEvent::CloseTransaction => {
+                    app.is_installing = false;
+                    app.progress = 0;
+                }
                 TuiEvent::Key(key) => {
-                    match key.code {
-                        KeyCode::Char('q') => app.should_quit = true,
-                        KeyCode::Char('/') | KeyCode::Char('s') => app.screen = CurrentScreen::Browser,
-                        KeyCode::Esc => app.screen = CurrentScreen::Dashboard,
-                        
-                        KeyCode::Down | KeyCode::Char('j') => {
-                            app.next_item();
-                            app.pending_g = false;
-                        }
-                        KeyCode::Up | KeyCode::Char('k') => {
-                            app.previous_item();
-                            app.pending_g = false;
-                        }
-                        KeyCode::Char('g') => {
-                            if app.pending_g {
-                                app.go_to_top();
-                                app.pending_g = false;
-                            } else {
-                                app.pending_g = true;
+                    match app.screen {
+                        CurrentScreen::Dashboard => {
+                            match key.code {
+                                KeyCode::Char('q') => app.should_quit = true,
+                                KeyCode::Char('/') | KeyCode::Char('s') => {
+                                    app.screen = CurrentScreen::Browser;
+                                    app.input_mode = InputMode::Editing;
+                                }
+                                KeyCode::Char('u') => {
+                                    app.is_installing = true;
+                                    app.current_action = "syncing & updating system...".to_string();
+                                    app.transaction_logs.clear();
+                                    app.progress = 0;
+                                    spawn_pacman(tx.clone(), vec!["pacman".into(), "-Syu".into(), "--noconfirm".into()], "updating system".into());
+                                }
+                                _ => {}
                             }
                         }
-                        KeyCode::Char('G') => {
-                            app.go_to_bottom();
-                            app.pending_g = false;
+                        CurrentScreen::Browser => {
+                            match app.input_mode {
+                                InputMode::Normal => {
+                                    match key.code {
+                                        KeyCode::Char('q') => app.should_quit = true,
+                                        KeyCode::Esc => app.screen = CurrentScreen::Dashboard,
+                                        
+                                        KeyCode::Char('/') | KeyCode::Char('s') | KeyCode::Char('f') => app.input_mode = InputMode::Editing,
+                                        
+                                        KeyCode::Down | KeyCode::Char('j') => { app.next_item(); app.pending_g = false; }
+                                        KeyCode::Up | KeyCode::Char('k') => { app.previous_item(); app.pending_g = false; }
+                                        KeyCode::Char('g') => {
+                                            if app.pending_g { app.go_to_top(); app.pending_g = false; }
+                                            else { app.pending_g = true; }
+                                        }
+                                        KeyCode::Char('G') => { app.go_to_bottom(); app.pending_g = false; }
+                                        
+                                        KeyCode::Char('i') => {
+                                            if let Some(idx) = app.list_state.selected() {
+                                                if let Some(pkg) = app.filtered_packages.get(idx) {
+                                                    app.is_installing = true;
+                                                    app.current_action = format!("installing {}...", pkg.name);
+                                                    app.transaction_logs.clear();
+                                                    app.progress = 0;
+                                                    spawn_pacman(tx.clone(), vec!["pacman".into(), "-S".into(), "--noconfirm".into(), pkg.name.clone()], "installing".into());
+                                                }
+                                            }
+                                        }
+                                        
+                                        KeyCode::Char('r') => {
+                                            if let Some(idx) = app.list_state.selected() {
+                                                if let Some(pkg) = app.filtered_packages.get(idx) {
+                                                    app.is_installing = true;
+                                                    app.current_action = format!("tossing {}...", pkg.name);
+                                                    app.transaction_logs.clear();
+                                                    app.progress = 0;
+                                                    spawn_pacman(tx.clone(), vec!["pacman".into(), "-Rs".into(), "--noconfirm".into(), pkg.name.clone()], "removing".into());
+                                                }
+                                            }
+                                        }
+                                        
+                                        KeyCode::Char('u') => {
+                                            if let Some(idx) = app.list_state.selected() {
+                                                if let Some(pkg) = app.filtered_packages.get(idx) {
+                                                    app.is_installing = true;
+                                                    app.current_action = format!("updating {}...", pkg.name);
+                                                    app.transaction_logs.clear();
+                                                    app.progress = 0;
+                                                    spawn_pacman(tx.clone(), vec!["pacman".into(), "-S".into(), "--noconfirm".into(), pkg.name.clone()], "updating".into());
+                                                }
+                                            }
+                                        }
+                                        _ => { app.pending_g = false; }
+                                    }
+                                }
+                        
+
+                                InputMode::Editing => {
+                                    match key.code {
+                                        KeyCode::Esc | KeyCode::Enter => app.input_mode = InputMode::Normal,
+                                        KeyCode::Backspace => {
+                                            app.search_query.pop();
+                                            app.update_search();
+                                        }
+                                        KeyCode::Char(c) => {
+                                            app.search_query.push(c);
+                                            app.update_search();
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
                         }
-                        KeyCode::Char('i') => {
-                            app.is_installing = !app.is_installing;
-                            app.current_action = "resolving dependencies...".to_string();
-                            app.progress = 45;
-                        }
-                        _ => { app.pending_g = false; }
                     }
                 }
                 _ => {}

@@ -24,6 +24,7 @@ anyhow = "1.0"
 ratatui = "0.30.2"
 crossterm = "0.29.0"
 ansi-to-tui = "8.0.1"
+directories = "6.0.0"
 
 [profile.release]
 opt-level = 3

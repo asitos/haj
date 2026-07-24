@@ -1,51 +1,44 @@
-#![allow(dead_code)]
-use serde::Deserialize;
+use directories::ProjectDirs;
+use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::Path;
+use std::path::PathBuf;
 
-#[derive(Deserialize, Debug)]
-#[serde(default)]
-pub struct HajConfig {
-    pub general: GeneralConfig,
-}
-
-#[derive(Deserialize, Debug)]
-pub struct GeneralConfig {
-    pub parallel_downloads: u8,
+#[derive(Serialize, Deserialize, Clone)]
+pub struct AppConfig {
     pub animations: bool,
-    pub color: String,
-    pub verbose: bool,
+    pub theme: String,
 }
 
-impl Default for HajConfig {
+impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            general: GeneralConfig {
-                parallel_downloads: 10,
-                animations: true,
-                color: "auto".to_string(),
-                verbose: false,
-            },
+            animations: true, // default spinning
+            theme: "catppuccin".to_string(),
         }
     }
 }
 
-impl Default for GeneralConfig {
-    fn default() -> Self {
-        HajConfig::default().general
-    }
-}
+pub fn load_config() -> AppConfig {
+    if let Some(proj_dirs) = ProjectDirs::from("", "", "haj") {
+        let config_dir = proj_dirs.config_dir();
+        let config_file = config_dir.join("config.toml");
 
-pub fn load_config() -> HajConfig {
-    let config_path = Path::new("/etc/haj.conf");
-
-    if config_path.exists() {
-        if let Ok(contents) = fs::read_to_string(config_path) {
-            if let Ok(config) = toml::from_str(&contents) {
-                return config;
+        if config_file.exists() {
+            if let Ok(contents) = fs::read_to_string(&config_file) {
+                if let Ok(config) = toml::from_str(&contents) {
+                    return config;
+                }
             }
+        } else {
+            let _ = fs::create_dir_all(config_dir);
+            let default_config = AppConfig::default();
+            if let Ok(toml_string) = toml::to_string_pretty(&default_config) {
+                let _ = fs::write(config_file, toml_string);
+            }
+            return default_config;
         }
     }
-
-    HajConfig::default()
+    
+    // fallback
+    AppConfig::default()
 }
