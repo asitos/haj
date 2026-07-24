@@ -276,12 +276,10 @@ where
                 break;
             }
 
-            if event::poll(Duration::from_millis(50)).unwrap_or(false) {
-                if let Ok(Event::Key(key)) = event::read() {
-                    if tx_input.send(TuiEvent::Key(key)).await.is_err() {
-                        break;
-                    }
-                }
+            if event::poll(Duration::from_millis(50)).unwrap_or(false)
+                && let Ok(Event::Key(key)) = event::read()
+                && tx_input.send(TuiEvent::Key(key)).await.is_err() {
+                break;
             }
         }
     });
@@ -305,7 +303,7 @@ where
             let obj_path_str = obj_path.to_string_lossy().to_string();
 
             let child = tokio::process::Command::new("display3d")
-                .args(&[&obj_path_str, "-t", "0,0.5,7.5"])
+                .args([&obj_path_str, "-t", "0,0.5,7.5"])
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .kill_on_drop(true)
@@ -327,14 +325,14 @@ where
                             let frame = frame_buffer[..pos].to_vec();
                             frame_buffer.drain(..=pos + 2);
 
-                            if let Ok(text) = frame.into_text() {
-                                if tx_art
+                            if let Ok(text) = frame.into_text() 
+                                && tx_art
                                     .send(TuiEvent::DashboardArtFrame(text))
                                     .await
                                     .is_err()
-                                {
-                                    break;
-                                }
+                            {
+                                break;
+                                
                             }
                         }
                     }
@@ -550,65 +548,62 @@ where
                             }
 
                             KeyCode::Char('i') => {
-                                if let Some(idx) = app.list_state.selected() {
-                                    if let Some(pkg) = app.filtered_packages.get(idx) {
-                                        app.is_installing = true;
-                                        app.current_action = format!("installing {}...", pkg.name);
-                                        app.transaction_logs.clear();
-                                        app.progress = 0;
-                                        spawn_pacman(
-                                            tx.clone(),
-                                            vec![
-                                                "pacman".into(),
-                                                "-S".into(),
-                                                "--noconfirm".into(),
-                                                pkg.name.clone(),
-                                            ],
-                                            "installing".into(),
-                                        );
-                                    }
+                                if let Some(idx) = app.list_state.selected() 
+                                    && let Some(pkg) = app.filtered_packages.get(idx) {
+                                    app.is_installing = true;
+                                    app.current_action = format!("installing {}...", pkg.name);
+                                    app.transaction_logs.clear();
+                                    app.progress = 0;
+                                    spawn_pacman(
+                                        tx.clone(),
+                                        vec![
+                                        "pacman".into(),
+                                        "-S".into(),
+                                        "--noconfirm".into(),
+                                        pkg.name.clone(),
+                                        ],
+                                        "installing".into(),
+                                    );
                                 }
                             }
 
                             KeyCode::Char('r') => {
-                                if let Some(idx) = app.list_state.selected() {
-                                    if let Some(pkg) = app.filtered_packages.get(idx) {
-                                        app.is_installing = true;
-                                        app.current_action = format!("tossing {}...", pkg.name);
-                                        app.transaction_logs.clear();
-                                        app.progress = 0;
-                                        spawn_pacman(
-                                            tx.clone(),
-                                            vec![
-                                                "pacman".into(),
-                                                "-Rs".into(),
-                                                "--noconfirm".into(),
-                                                pkg.name.clone(),
-                                            ],
-                                            "removing".into(),
-                                        );
-                                    }
+                                if let Some(idx) = app.list_state.selected()
+                                    && let Some(pkg) = app.filtered_packages.get(idx) {
+                                    app.is_installing = true;
+                                    app.current_action = format!("tossing {}...", pkg.name);
+                                    app.transaction_logs.clear();
+                                    app.progress = 0;
+                                    spawn_pacman(
+                                        tx.clone(),
+                                        vec![
+                                        "pacman".into(),
+                                        "-Rs".into(),
+                                        "--noconfirm".into(),
+                                        pkg.name.clone(),
+                                        ],
+                                        "removing".into(),
+                                    );
                                 }
                             }
 
                             KeyCode::Char('u') => {
-                                if let Some(idx) = app.list_state.selected() {
-                                    if let Some(pkg) = app.filtered_packages.get(idx) {
-                                        app.is_installing = true;
-                                        app.current_action = format!("updating {}...", pkg.name);
-                                        app.transaction_logs.clear();
-                                        app.progress = 0;
-                                        spawn_pacman(
-                                            tx.clone(),
-                                            vec![
-                                                "pacman".into(),
-                                                "-S".into(),
-                                                "--noconfirm".into(),
-                                                pkg.name.clone(),
-                                            ],
-                                            "updating".into(),
-                                        );
-                                    }
+                                if let Some(idx) = app.list_state.selected() 
+                                    && let Some(pkg) = app.filtered_packages.get(idx) {
+                                    app.is_installing = true;
+                                    app.current_action = format!("updating {}...", pkg.name);
+                                    app.transaction_logs.clear();
+                                    app.progress = 0;
+                                    spawn_pacman(
+                                        tx.clone(),
+                                        vec![
+                                        "pacman".into(),
+                                        "-S".into(),
+                                        "--noconfirm".into(),
+                                        pkg.name.clone(),
+                                        ],
+                                        "updating".into(),
+                                    );
                                 }
                             }
                             _ => {

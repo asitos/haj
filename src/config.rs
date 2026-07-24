@@ -24,10 +24,10 @@ pub fn load_config() -> AppConfig {
         let config_file = config_dir.join("config.toml");
 
         if config_file.exists() {
-            if let Ok(contents) = fs::read_to_string(&config_file) {
-                if let Ok(config) = toml::from_str(&contents) {
-                    return config;
-                }
+            if let Ok(contents) = fs::read_to_string(&config_file) 
+                && let Ok(config) = toml::from_str(&contents) {
+                return config;
+                
             }
         } else {
             let _ = fs::create_dir_all(config_dir);
