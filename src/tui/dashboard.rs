@@ -7,16 +7,16 @@ use ratatui::{
 };
 use super::App;
 
-pub fn render(f: &mut Frame, _app: &mut App) {
+pub fn render(f: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .margin(2)
+        .margin(1)
         .constraints(
             [
                 Constraint::Length(5),  // header (haj logo)
                 Constraint::Length(3),  // quick stats
                 Constraint::Length(3),  // search bar
-                Constraint::Min(20),    // spinning blahaj :3
+                Constraint::Min(0),    // spinning blahaj :3
             ]
             .as_ref(),
         )
@@ -50,8 +50,7 @@ pub fn render(f: &mut Frame, _app: &mut App) {
         .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Cyan)));
     f.render_widget(search_bar, chunks[2]);
 
-    let blahaj_box = Paragraph::new("\n\n[ async display3d stream will render here ]")
-        .style(Style::default().fg(Color::DarkGray))
+    let blahaj_box = Paragraph::new(app.dashboard_art.clone())
         .alignment(Alignment::Center)
         .block(Block::default().borders(Borders::NONE));
     f.render_widget(blahaj_box, chunks[3]);
