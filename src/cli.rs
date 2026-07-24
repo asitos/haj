@@ -4,20 +4,32 @@ use clap::{Parser, Subcommand};
 #[command(
     name = "haj",
     author = "asitos",
-    version = "0.1.0",
+    version = "0.2.0",
     about = "fast, quiet, beautiful package management for BlahArch.",
-    long_about = None
+    long_about = None,
+    disable_help_subcommand = true,
+    disable_help_flag = true,
+    disable_version_flag = true
 )]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
 
+    /// enable verbose debug logging
     #[arg(short, long, global = true)]
     pub verbose: bool,
 
     /// preview a command without modifying the system
     #[arg(short = 'd', long, global = true)]
     pub dry_run: bool,
+
+    /// display this help message
+    #[arg(short = 'h', long, action = clap::ArgAction::Help)]
+    pub help: Option<bool>,
+
+    /// show version info
+    #[arg(short = 'V', long, action = clap::ArgAction::Version)]
+    pub version: Option<bool>,
 }
 
 #[derive(Subcommand, Debug)]
