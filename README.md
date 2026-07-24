@@ -12,6 +12,19 @@ fast, quiet, beautiful package management for BlahArch.
 
 ## features
 
+### what's new in v0.2.0: the tui dashboard
+
+`haj` now features a blazing-fast, interactive tui powered by `ratatui`. run `haj tui` to access:
+
+<img alt="haj tui demo" src="assets/tui-demo.gif" width="100%" />
+
+- **real-time search:** press / or f to instantly filter all sync repository packages natively via libalpm.
+- **live commands popups:** haj streams native pacman execution logs directly into floating, minimalist UI panels with razor-thin progress bars.
+- **the orphan sweeper:** press c on the dashboard to instantly detect and vaporize unneeded dependencies (pacman -Rns) and reclaim disk space.
+- **3d rotating blahaj (best):** a fully 3D, spinning ascii art shark rendered natively via [display3d](https://github.com/renpenguin/display3d).
+
+### cli features
+
 - **the cargo/bun aesthetic:** no more jagged progress bars or walls of text. `haj` parses `pacman` output streams in real-time, displaying a single, elegant progress spinner and clean transaction summaries.
 - **native alpm engine:** `haj` uses `alpm.rs` (c bindings for `libalpm`) to query your local and sync databases directly in memory.
 - **blazing fast orphan detection:** instead of parsing text scripts, `haj orphan` traverses the true alpm directed acyclic graph (dag) to find unused dependencies in microseconds.
@@ -55,6 +68,7 @@ sudo install -Dm755 target/release/haj /usr/bin/haj
 
 | command | aliases | action |
 |---------|---------|--------|
+| `tui` | `t` | launch the tui| 
 | `install <pkg>` | `i` | install one or more packages | 
 | `remove <pkg>` | `rm`, `toss` | remove packages & unneeded dependencies | 
 | `update` | `up`, `sync` | sync mirror databases | 
@@ -70,6 +84,13 @@ sudo install -Dm755 target/release/haj /usr/bin/haj
 - `-V`, `--version` : print version information.
 
 ### examples
+
+launch the interactive dashboard:
+```bash
+haj tui 
+# or
+haj t
+```
 
 search for a package:
 ```bash
@@ -89,19 +110,17 @@ haj -d toss firefox
 
 ## configuration
 
-`haj` works perfectly out of the box, but can be customized globally by creating a config file at `/etc/haj.conf`. It uses the TOML format.
+`haj` works perfectly out of the box, but can be customized globally by creating a config file at `~/.config/haj/config.toml`. It uses the TOML format.
 
 ```toml
-# /etc/haj.conf
+# ~/.config/haj/config.toml
 
 [general]
-parallel_downloads = 10
 animations = true
 color = "auto"
 verbose = false
 ```
-
-*note: `parallel_downloads` here is currently reserved for future internal rust-native downloading features. standard installations will still respect your `/etc/pacman.conf` settings.*
+*more config options are currently under work*
 
 ##  architecture & technical details
 `haj` is built with a focus on memory safety, zero-cost abstractions, and concurrent execution.
@@ -112,4 +131,4 @@ verbose = false
 
 ## license
 
-mit license. see `LICENSE` for more information.
+MIT license. see `LICENSE` for more information.
