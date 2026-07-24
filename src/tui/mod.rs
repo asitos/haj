@@ -49,7 +49,7 @@ pub struct PackageInfo {
 }
 
 pub enum TuiEvent {
-    Tick,
+    _Tick,
     Key(crossterm::event::KeyEvent),
     PacmanLog(String),
     PacmanProgress(u16),
@@ -237,7 +237,7 @@ where
     <B as Backend>::Error: Send + Sync + 'static,
 {
     let config = crate::config::load_config();
-    let use_3d_animation = config.animations;
+    let _use_3d_animation = config.animations;
 
     let (tx, mut rx) = mpsc::channel::<TuiEvent>(100);
 
@@ -261,11 +261,24 @@ where
         let use_3d_animation = config.animations; 
 
         if use_3d_animation {
+            let temp_dir = std::env::temp_dir();
+            let obj_path = temp_dir.join("blahaj.obj");
+            let mtl_path = temp_dir.join("blahaj.mtl");
+
+            if !obj_path.exists() {
+                let _ = std::fs::write(&obj_path, include_bytes!("../../resources/blahaj.obj"));
+            }
+            if !mtl_path.exists() {
+                let _ = std::fs::write(&mtl_path, include_bytes!("../../resources/blahaj.mtl"));
+            }
+
+            let obj_path_str = obj_path.to_string_lossy().to_string();
+
             let child = tokio::process::Command::new("display3d")
-                .args(&["./resources/blahaj.obj", "-t", "0,0,5.5"])
+                .args(&[&obj_path_str, "-t", "0,0.5,7.5"])
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
-                .kill_on_drop(true) 
+                .kill_on_drop(true)
                 .spawn();
 
             match child {
@@ -290,10 +303,14 @@ where
                         }
                     }
                 }
-                Err(_) => { }
+                Err(_) => {
+                    let _ = tx_art.send(TuiEvent::DashboardArtFrame(
+                        Text::raw(" error: display3d binary not found in PATH ")
+                    )).await;
+                }
             }
         } else {
-            let art_str = std::fs::read_to_string("./resources/ascii.txt")
+            let art_str = std::fs::read_to_string("../../resources/ascii.txt")
                 .unwrap_or_else(|_| " SHARK ASCII MISSING ".to_string());
             if let Ok(text) = art_str.into_bytes().into_text() {
                 let _ = tx_art.send(TuiEvent::DashboardArtFrame(text)).await;
@@ -301,7 +318,7 @@ where
         }
     });
 
-    let spawn_pacman = |tx_channel: mpsc::Sender<TuiEvent>, args: Vec<String>, action_name: String| {
+    let spawn_pacman = |tx_channel: mpsc::Sender<TuiEvent>, args: Vec<String>, _action_name: String| {
         tokio::spawn(async move {
             let mut child = tokio::process::Command::new("sudo")
                 .args(args)

@@ -1,7 +1,7 @@
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+// use std::path::PathBuf;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct AppConfig {

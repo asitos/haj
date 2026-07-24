@@ -2,7 +2,6 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, Clear, Paragraph, List, ListItem, LineGauge}, 
-    symbols, 
     prelude::Stylize,
     Frame,
 };
@@ -39,12 +38,19 @@ pub fn render_popup(f: &mut Frame, app: &App) {
     let action_text = Paragraph::new(format!("{} {}", "✓".cyan(), app.current_action));
     f.render_widget(action_text, chunks[0]);
 
-    let progress_ratio = (app.progress as f64 / 100.0).clamp(0.0, 1.0);
+    let ratio = f64::from(app.progress).clamp(0.0, 100.0) / 100.0;
+    
     let gauge = LineGauge::default()
-        .gauge_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
-        .line_set(symbols::line::THICK)
-        .ratio(progress_ratio)
-        .label(format!("{}%", app.progress));
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Cyan))
+                .title(format!(" {} ", app.current_action))
+        )
+        .filled_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+        .filled_symbol("━")
+        .unfilled_symbol("─")
+        .ratio(ratio);
     f.render_widget(gauge, chunks[2]);
 
     let log_items: Vec<ListItem> = app.transaction_logs.iter()

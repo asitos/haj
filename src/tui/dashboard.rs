@@ -6,7 +6,7 @@ use ratatui::{
     Frame,
 };
 use std::fs;
-use std::time::SystemTime;
+// use std::time::SystemTime;
 use super::App;
 
 pub fn render(f: &mut Frame, app: &mut App) {
@@ -18,6 +18,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
                 Constraint::Length(3),  // header (haj logo)
                 Constraint::Length(3),  // quick stats
                 Constraint::Length(3),  // search bar
+                Constraint::Length(40),
                 Constraint::Min(0),    // spinning blahaj :3
             ]
             .as_ref(),
