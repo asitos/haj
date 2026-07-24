@@ -1,11 +1,11 @@
+use super::{App, InputMode, PackageFilter};
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
-    Frame,
 };
-use super::{App, InputMode, PackageFilter};
 
 pub fn render(f: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
@@ -33,7 +33,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(border_color))
                 .title_bottom(format!(" [filter: {}] (tab) ", filter_display))
-                .title_alignment(Alignment::Right)
+                .title_alignment(Alignment::Right),
         );
     f.render_widget(search_bar, chunks[0]);
 
@@ -49,11 +49,14 @@ pub fn render(f: &mut Frame, app: &mut App) {
             let (icon, color) = if pkg.is_installed {
                 ("✓", Color::Green)
             } else {
-                (" ", Color::White) 
+                (" ", Color::White)
             };
-            
+
             ListItem::new(Line::from(vec![
-                Span::styled(format!("{} ", icon), Style::default().fg(color).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    format!("{} ", icon),
+                    Style::default().fg(color).add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(pkg.name.clone(), Style::default().fg(color)),
             ]))
         })
@@ -63,7 +66,12 @@ pub fn render(f: &mut Frame, app: &mut App) {
 
     let list = List::new(items)
         .block(Block::default().borders(Borders::ALL).title(list_title))
-        .highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD))
+        .highlight_style(
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )
         .highlight_symbol(">> ");
 
     f.render_stateful_widget(list, content_chunks[0], &mut app.list_state);
@@ -72,16 +80,27 @@ pub fn render(f: &mut Frame, app: &mut App) {
         if let Some(selected_pkg) = app.filtered_packages.get(selected_idx) {
             let details_text = vec![
                 Line::from(vec![
-                    Span::styled(selected_pkg.name.clone(), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        selected_pkg.name.clone(),
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                     Span::raw(format!(" v{}", selected_pkg.version)),
                 ]),
                 Line::from(""),
                 Line::from(format!("repository: {}", selected_pkg.repo)),
                 Line::from(""),
-                Line::from(Span::styled("description:", Style::default().fg(Color::DarkGray))),
+                Line::from(Span::styled(
+                    "description:",
+                    Style::default().fg(Color::DarkGray),
+                )),
                 Line::from(selected_pkg.desc.clone()),
                 Line::from(""),
-                Line::from(Span::styled("[i] install  [r] remove  [u] update", Style::default().fg(Color::DarkGray))),
+                Line::from(Span::styled(
+                    "[i] install  [r] remove  [u] update",
+                    Style::default().fg(Color::DarkGray),
+                )),
             ];
 
             let details = Paragraph::new(details_text)
@@ -90,7 +109,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
                         .borders(Borders::ALL)
                         .title(" details ")
                         .title_bottom(" j/k:nav gg/G:jump f:search x:del esc:back q:quit ")
-                        .title_alignment(Alignment::Right)
+                        .title_alignment(Alignment::Right),
                 )
                 .wrap(Wrap { trim: true });
 

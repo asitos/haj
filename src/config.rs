@@ -38,7 +38,7 @@ pub fn load_config() -> AppConfig {
             return default_config;
         }
     }
-    
+
     // fallback
     AppConfig::default()
 }
