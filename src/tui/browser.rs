@@ -25,7 +25,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
         PackageFilter::NotInstalled => "not installed",
     };
 
-    let search_display = format!(" search: {}{} ", app.search_query, cursor);
+    let search_display = format!(" search (/): {}{} ", app.search_query, cursor);
     let search_bar = Paragraph::new(search_display)
         .style(Style::default().fg(border_color))
         .block(
@@ -39,7 +39,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
 
     let content_chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)].as_ref())
+        .constraints([Constraint::Percentage(30), Constraint::Percentage(70)].as_ref())
         .split(chunks[1]);
 
     let items: Vec<ListItem> = app
@@ -85,7 +85,13 @@ pub fn render(f: &mut Frame, app: &mut App) {
             ];
 
             let details = Paragraph::new(details_text)
-                .block(Block::default().borders(Borders::ALL).title(" details "))
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(" details ")
+                        .title_bottom(" j/k:nav gg/G:jump f:search x:del esc:back q:quit ")
+                        .title_alignment(Alignment::Right)
+                )
                 .wrap(Wrap { trim: true });
 
             f.render_widget(details, content_chunks[1]);

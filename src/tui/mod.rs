@@ -229,7 +229,7 @@ pub async fn run() -> Result<()> {
         println!("{:?}", err);
     }
 
-    Ok(())
+    std::process::exit(0);
 }
 
 async fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()> 
@@ -244,9 +244,13 @@ where
     let tx_input = tx.clone();
     tokio::spawn(async move {
         loop {
+            if tx_input.is_closed() { break; } 
+            
             if event::poll(Duration::from_millis(50)).unwrap_or(false) {
                 if let Ok(Event::Key(key)) = event::read() {
-                    let _ = tx_input.send(TuiEvent::Key(key)).await;
+                    if tx_input.send(TuiEvent::Key(key)).await.is_err() {
+                        break;
+                    }
                 }
             }
         }
@@ -254,34 +258,43 @@ where
 
     let tx_art = tx.clone();
     tokio::spawn(async move {
+        let use_3d_animation = config.animations; 
+
         if use_3d_animation {
-            let mut child = tokio::process::Command::new("display3d")
-                .args(&["./resources/blahaj.obj", "-t", "0,0,5.5"]) 
+            let child = tokio::process::Command::new("display3d")
+                .args(&["./resources/blahaj.obj", "-t", "0,0,5.5"])
                 .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::null())
+                .stderr(std::process::Stdio::piped())
+                .kill_on_drop(true) 
                 .spawn();
 
-            if let Ok(mut child_proc) = child {
-                let mut stdout = child_proc.stdout.take().unwrap();
-                let mut buf = vec![0; 8192];
-                let mut frame_buffer = Vec::new();
+            match child {
+                Ok(mut child_proc) => {
+                    let mut stdout = child_proc.stdout.take().unwrap();
+                    let mut buf = vec![0; 8192];
+                    let mut frame_buffer = Vec::new();
 
-                while let Ok(n) = stdout.read(&mut buf).await {
-                    if n == 0 { break; }
-                    frame_buffer.extend_from_slice(&buf[..n]);
+                    while let Ok(n) = stdout.read(&mut buf).await {
+                        if n == 0 { break; }
+                        frame_buffer.extend_from_slice(&buf[..n]);
 
-                    while let Some(pos) = frame_buffer.windows(3).position(|w| w == b"\x1b[H") {
-                        let frame = frame_buffer[..pos].to_vec();
-                        frame_buffer.drain(..=pos + 2); 
+                        while let Some(pos) = frame_buffer.windows(3).position(|w| w == b"\x1b[H") {
+                            let frame = frame_buffer[..pos].to_vec();
+                            frame_buffer.drain(..=pos + 2); 
 
-                        if let Ok(text) = frame.into_text() {
-                            let _ = tx_art.send(TuiEvent::DashboardArtFrame(text)).await;
+                            if let Ok(text) = frame.into_text() {
+                                if tx_art.send(TuiEvent::DashboardArtFrame(text)).await.is_err() {
+                                    break;
+                                }
+                            }
                         }
                     }
                 }
+                Err(_) => { }
             }
         } else {
-            let art_str = std::fs::read_to_string("./resources/ascii.txt").unwrap_or_else(|_| " SHARK ASCII MISSING ".to_string());
+            let art_str = std::fs::read_to_string("./resources/ascii.txt")
+                .unwrap_or_else(|_| " SHARK ASCII MISSING ".to_string());
             if let Ok(text) = art_str.into_bytes().into_text() {
                 let _ = tx_art.send(TuiEvent::DashboardArtFrame(text)).await;
             }
@@ -294,6 +307,7 @@ where
                 .args(args)
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
+                .kill_on_drop(true) 
                 .spawn()
                 .expect("failed to spawn pacman");
 
@@ -364,9 +378,17 @@ where
                 TuiEvent::CloseTransaction => {
                     app.is_installing = false;
                     app.progress = 0;
-
+                    
                     if let Ok(output) = std::process::Command::new("pacman").arg("-Qdtq").output() {
                         app.orphan_count = String::from_utf8_lossy(&output.stdout).split_whitespace().count();
+                    }
+
+                    if let Ok(alpm) = crate::core::alpm_init::init_alpm() {
+                        let local_db = alpm.localdb();
+                        for pkg in &mut app.package_list {
+                            pkg.is_installed = local_db.pkg(pkg.name.as_str()).is_ok();
+                        }
+                        app.update_search(); 
                     }
                 }
                 TuiEvent::Key(key) => {
@@ -374,7 +396,7 @@ where
                         CurrentScreen::Dashboard => {
                             match key.code {
                                 KeyCode::Char('q') => app.should_quit = true,
-                                KeyCode::Char('/') | KeyCode::Char('s') => {
+                                KeyCode::Char('/') | KeyCode::Char('f') => {
                                     app.screen = CurrentScreen::Browser;
                                     app.input_mode = InputMode::Editing;
                                 }
@@ -419,6 +441,10 @@ where
                             match app.input_mode {
                                 InputMode::Normal => {
                                     match key.code {
+                                        KeyCode::Char('x') => {
+                                            app.search_query.pop();
+                                            app.update_search();
+                                        }
                                         KeyCode::Tab => {
                                             app.filter = match app.filter {
                                                 PackageFilter::All => PackageFilter::Installed,
@@ -483,7 +509,7 @@ where
                                 InputMode::Editing => {
                                     match key.code {
                                         KeyCode::Esc | KeyCode::Enter => app.input_mode = InputMode::Normal,
-                                        KeyCode::Backspace => {
+                                        KeyCode::Backspace | KeyCode::Delete => {
                                             app.search_query.pop();
                                             app.update_search();
                                         }
