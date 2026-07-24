@@ -10,7 +10,7 @@ use ratatui::{
     text::Text, 
     Terminal,
 };
-use std::{io, time::Duration};
+use std::{io, time::Duration, collections::HashSet};
 use tokio::sync::mpsc; 
 use tokio::io::{AsyncReadExt, AsyncBufReadExt}; 
 
@@ -32,6 +32,22 @@ pub enum InputMode {
     Editing,
 }
 
+#[derive(Clone, PartialEq)]
+pub enum PackageFilter {
+    All,
+    Installed,
+    NotInstalled,
+}
+
+#[derive(Clone)]
+pub struct PackageInfo {
+    pub name: String,
+    pub version: String,
+    pub desc: String,
+    pub repo: String,
+    pub is_installed: bool, 
+}
+
 pub enum TuiEvent {
     Tick,
     Key(crossterm::event::KeyEvent),
@@ -42,18 +58,11 @@ pub enum TuiEvent {
     DashboardArtFrame(Text<'static>),
 }
 
-#[derive(Clone)]
-pub struct PackageInfo {
-    pub name: String,
-    pub version: String,
-    pub desc: String,
-    pub repo: String,
-}
-
 pub struct App {
     pub should_quit: bool,
     pub screen: CurrentScreen,
     pub input_mode: InputMode,
+    pub filter: PackageFilter,
     pub pending_g: bool,
     
     pub package_list: Vec<PackageInfo>,
@@ -74,15 +83,38 @@ impl App {
 
         if let Ok(alpm) = core::alpm_init::init_alpm() {
             let local_db = alpm.localdb();
+            let mut seen_packages = HashSet::new();
+            
+            for db in alpm.syncdbs() {
+                for pkg in db.pkgs() {
+                    let name = pkg.name().to_string();
+                    let is_installed = local_db.pkg(name.as_str()).is_ok();
+                    
+                    seen_packages.insert(name.clone());
+                    package_list.push(PackageInfo {
+                        name,
+                        version: pkg.version().to_string(),
+                        desc: pkg.desc().unwrap_or("none").to_string(),
+                        repo: db.name().to_string(),
+                        is_installed,
+                    });
+                }
+            }
+            
             for pkg in local_db.pkgs() {
-                package_list.push(PackageInfo {
-                    name: pkg.name().to_string(),
-                    version: pkg.version().to_string(),
-                    desc: pkg.desc().unwrap_or("none").to_string(),
-                    repo: "local".to_string(),
-                });
+                let name = pkg.name().to_string();
+                if !seen_packages.contains(&name) {
+                    package_list.push(PackageInfo {
+                        name,
+                        version: pkg.version().to_string(),
+                        desc: pkg.desc().unwrap_or("none").to_string(),
+                        repo: "local/aur".to_string(),
+                        is_installed: true,
+                    });
+                }
             }
         }
+        
 
         package_list.sort_by(|a, b| a.name.cmp(&b.name));
         
@@ -97,6 +129,7 @@ impl App {
             should_quit: false,
             screen: CurrentScreen::Dashboard,
             input_mode: InputMode::Normal,
+            filter: PackageFilter::All,
             pending_g: false, 
             package_list,
             filtered_packages,
@@ -111,16 +144,22 @@ impl App {
     }
     
     pub fn update_search(&mut self) {
-        if self.search_query.is_empty() {
-            self.filtered_packages = self.package_list.clone();
-        } else {
-            let query = self.search_query.to_lowercase();
-            self.filtered_packages = self.package_list
-                .iter()
-                .filter(|p| p.name.to_lowercase().contains(&query) || p.desc.to_lowercase().contains(&query))
-                .cloned()
-                .collect();
-        }
+        let query = self.search_query.to_lowercase();
+        
+        self.filtered_packages = self.package_list
+            .iter()
+            .filter(|p| {
+                let matches_query = query.is_empty() || p.name.to_lowercase().contains(&query) || p.desc.to_lowercase().contains(&query);
+                let matches_filter = match self.filter {
+                    PackageFilter::All => true,
+                    PackageFilter::Installed => p.is_installed,
+                    PackageFilter::NotInstalled => !p.is_installed,
+                };
+                matches_query && matches_filter
+            })
+            .cloned()
+            .collect();
+            
         self.list_state.select(if self.filtered_packages.is_empty() { None } else { Some(0) });
     }
 
@@ -243,7 +282,7 @@ where
 
     let spawn_pacman = |tx_channel: mpsc::Sender<TuiEvent>, args: Vec<String>, action_name: String| {
         tokio::spawn(async move {
-            let mut child = tokio::process::Command::new("sudo") 
+            let mut child = tokio::process::Command::new("sudo")
                 .args(args)
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
@@ -255,6 +294,14 @@ where
                 while let Ok(Some(line)) = reader.next_line().await {
                     let clean = line.trim();
                     if clean.is_empty() { continue; }
+
+                    if clean.contains("resolving dependencies") || 
+                       clean.contains("looking for conflicting") ||
+                       clean.contains("checking keyring") ||
+                       clean.contains("checking package integrity") ||
+                       clean.contains("loading package files") {
+                        continue;
+                    }
 
                     let _ = tx_channel.send(TuiEvent::PacmanLog(clean.to_string())).await;
 
@@ -333,6 +380,14 @@ where
                             match app.input_mode {
                                 InputMode::Normal => {
                                     match key.code {
+                                        KeyCode::Tab => {
+                                            app.filter = match app.filter {
+                                                PackageFilter::All => PackageFilter::Installed,
+                                                PackageFilter::Installed => PackageFilter::NotInstalled,
+                                                PackageFilter::NotInstalled => PackageFilter::All,
+                                            };
+                                            app.update_search();
+                                        }
                                         KeyCode::Char('q') => app.should_quit = true,
                                         KeyCode::Esc => app.screen = CurrentScreen::Dashboard,
                                         

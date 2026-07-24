@@ -5,7 +5,7 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
     Frame,
 };
-use super::{App, InputMode};
+use super::{App, InputMode, PackageFilter};
 
 pub fn render(f: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
@@ -27,16 +27,34 @@ pub fn render(f: &mut Frame, app: &mut App) {
 
     let content_chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(30), Constraint::Percentage(70)].as_ref())
+        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)].as_ref())
         .split(chunks[1]);
 
     let items: Vec<ListItem> = app
         .filtered_packages
         .iter()
-        .map(|pkg| ListItem::new(pkg.name.clone()))
+        .map(|pkg| {
+            let (icon, color) = if pkg.is_installed {
+                ("✓", Color::Green)
+            } else {
+                (" ", Color::White) 
+            };
+            
+            ListItem::new(Line::from(vec![
+                Span::styled(format!("{} ", icon), Style::default().fg(color).add_modifier(Modifier::BOLD)),
+                Span::styled(pkg.name.clone(), Style::default().fg(color)),
+            ]))
+        })
         .collect();
 
-    let list_title = format!(" packages ({}) ", app.filtered_packages.len());
+    let filter_display = match app.filter {
+        PackageFilter::All => "all",
+        PackageFilter::Installed => "installed",
+        PackageFilter::NotInstalled => "not installed",
+    };
+
+    let list_title = format!(" packages ({}) - [filter: {}] (press Tab) ", app.filtered_packages.len(), filter_display);
+
     let list = List::new(items)
         .block(Block::default().borders(Borders::ALL).title(list_title))
         .highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD))
