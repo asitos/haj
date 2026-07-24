@@ -1,5 +1,5 @@
 use ratatui::{
-    layout::{Constraint, Direction, Layout},
+    layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
@@ -19,10 +19,22 @@ pub fn render(f: &mut Frame, app: &mut App) {
         InputMode::Normal => (Color::DarkGray, ""),
     };
 
+    let filter_display = match app.filter {
+        PackageFilter::All => "all",
+        PackageFilter::Installed => "installed",
+        PackageFilter::NotInstalled => "not installed",
+    };
+
     let search_display = format!(" search: {}{} ", app.search_query, cursor);
     let search_bar = Paragraph::new(search_display)
         .style(Style::default().fg(border_color))
-        .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(border_color)));
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(border_color))
+                .title_bottom(format!(" [filter: {}] (tab) ", filter_display))
+                .title_alignment(Alignment::Right)
+        );
     f.render_widget(search_bar, chunks[0]);
 
     let content_chunks = Layout::default()
@@ -47,13 +59,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
         })
         .collect();
 
-    let filter_display = match app.filter {
-        PackageFilter::All => "all",
-        PackageFilter::Installed => "installed",
-        PackageFilter::NotInstalled => "not installed",
-    };
-
-    let list_title = format!(" packages ({}) - [filter: {}] (press Tab) ", app.filtered_packages.len(), filter_display);
+    let list_title = format!(" packages ({}) ", app.filtered_packages.len());
 
     let list = List::new(items)
         .block(Block::default().borders(Borders::ALL).title(list_title))

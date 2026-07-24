@@ -64,6 +64,7 @@ pub struct App {
     pub input_mode: InputMode,
     pub filter: PackageFilter,
     pub pending_g: bool,
+    pub orphan_count: usize,
     
     pub package_list: Vec<PackageInfo>,
     pub filtered_packages: Vec<PackageInfo>,
@@ -125,12 +126,19 @@ impl App {
             list_state.select(Some(0));
         }
 
+        let orphan_count = std::process::Command::new("pacman")
+            .arg("-Qdtq")
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).split_whitespace().count())
+            .unwrap_or(0);
+
         Self {
             should_quit: false,
             screen: CurrentScreen::Dashboard,
             input_mode: InputMode::Normal,
             filter: PackageFilter::All,
             pending_g: false, 
+            orphan_count,
             package_list,
             filtered_packages,
             search_query: String::new(),
@@ -351,11 +359,15 @@ where
                     app.progress = val.min(100);
                 }
                 TuiEvent::TransactionComplete => {
-                    app.current_action = "transaction complete ✓".to_string();
+                    app.current_action = "changes complete ✓".to_string();
                 }
                 TuiEvent::CloseTransaction => {
                     app.is_installing = false;
                     app.progress = 0;
+
+                    if let Ok(output) = std::process::Command::new("pacman").arg("-Qdtq").output() {
+                        app.orphan_count = String::from_utf8_lossy(&output.stdout).split_whitespace().count();
+                    }
                 }
                 TuiEvent::Key(key) => {
                     match app.screen {
@@ -372,6 +384,33 @@ where
                                     app.transaction_logs.clear();
                                     app.progress = 0;
                                     spawn_pacman(tx.clone(), vec!["pacman".into(), "-Syu".into(), "--noconfirm".into()], "updating system".into());
+                                }
+                                KeyCode::Char('c') => {
+                                    if let Ok(output) = std::process::Command::new("pacman").arg("-Qdtq").output() {
+                                        let stdout = String::from_utf8_lossy(&output.stdout);
+                                        let orphans: Vec<String> = stdout.split_whitespace().map(|s| s.to_string()).collect();
+                                        
+                                        app.is_installing = true;
+                                        app.transaction_logs.clear();
+                                        app.progress = 0;
+
+                                        if orphans.is_empty() {
+                                            app.current_action = "system clean ✓".to_string();
+                                            app.progress = 100;
+                                            app.transaction_logs.push("no orphaned packages to remove.".to_string());
+                                            
+                                            let tx_clone = tx.clone();
+                                            tokio::spawn(async move {
+                                                tokio::time::sleep(Duration::from_secs(2)).await;
+                                                let _ = tx_clone.send(TuiEvent::CloseTransaction).await;
+                                            });
+                                        } else {
+                                            app.current_action = format!("sweeping {} orphans...", orphans.len());
+                                            let mut args = vec!["pacman".into(), "-Rns".into(), "--noconfirm".into()];
+                                            args.extend(orphans);
+                                            spawn_pacman(tx.clone(), args, "cleaning orphans".into());
+                                        }
+                                    }
                                 }
                                 _ => {}
                             }
