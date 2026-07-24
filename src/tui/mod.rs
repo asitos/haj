@@ -278,7 +278,8 @@ where
 
             if event::poll(Duration::from_millis(50)).unwrap_or(false)
                 && let Ok(Event::Key(key)) = event::read()
-                && tx_input.send(TuiEvent::Key(key)).await.is_err() {
+                && tx_input.send(TuiEvent::Key(key)).await.is_err()
+            {
                 break;
             }
         }
@@ -325,14 +326,13 @@ where
                             let frame = frame_buffer[..pos].to_vec();
                             frame_buffer.drain(..=pos + 2);
 
-                            if let Ok(text) = frame.into_text() 
+                            if let Ok(text) = frame.into_text()
                                 && tx_art
                                     .send(TuiEvent::DashboardArtFrame(text))
                                     .await
                                     .is_err()
                             {
                                 break;
-                                
                             }
                         }
                     }
@@ -548,8 +548,9 @@ where
                             }
 
                             KeyCode::Char('i') => {
-                                if let Some(idx) = app.list_state.selected() 
-                                    && let Some(pkg) = app.filtered_packages.get(idx) {
+                                if let Some(idx) = app.list_state.selected()
+                                    && let Some(pkg) = app.filtered_packages.get(idx)
+                                {
                                     app.is_installing = true;
                                     app.current_action = format!("installing {}...", pkg.name);
                                     app.transaction_logs.clear();
@@ -557,10 +558,10 @@ where
                                     spawn_pacman(
                                         tx.clone(),
                                         vec![
-                                        "pacman".into(),
-                                        "-S".into(),
-                                        "--noconfirm".into(),
-                                        pkg.name.clone(),
+                                            "pacman".into(),
+                                            "-S".into(),
+                                            "--noconfirm".into(),
+                                            pkg.name.clone(),
                                         ],
                                         "installing".into(),
                                     );
@@ -569,7 +570,8 @@ where
 
                             KeyCode::Char('r') => {
                                 if let Some(idx) = app.list_state.selected()
-                                    && let Some(pkg) = app.filtered_packages.get(idx) {
+                                    && let Some(pkg) = app.filtered_packages.get(idx)
+                                {
                                     app.is_installing = true;
                                     app.current_action = format!("tossing {}...", pkg.name);
                                     app.transaction_logs.clear();
@@ -577,10 +579,10 @@ where
                                     spawn_pacman(
                                         tx.clone(),
                                         vec![
-                                        "pacman".into(),
-                                        "-Rs".into(),
-                                        "--noconfirm".into(),
-                                        pkg.name.clone(),
+                                            "pacman".into(),
+                                            "-Rs".into(),
+                                            "--noconfirm".into(),
+                                            pkg.name.clone(),
                                         ],
                                         "removing".into(),
                                     );
@@ -588,8 +590,9 @@ where
                             }
 
                             KeyCode::Char('u') => {
-                                if let Some(idx) = app.list_state.selected() 
-                                    && let Some(pkg) = app.filtered_packages.get(idx) {
+                                if let Some(idx) = app.list_state.selected()
+                                    && let Some(pkg) = app.filtered_packages.get(idx)
+                                {
                                     app.is_installing = true;
                                     app.current_action = format!("updating {}...", pkg.name);
                                     app.transaction_logs.clear();
@@ -597,10 +600,10 @@ where
                                     spawn_pacman(
                                         tx.clone(),
                                         vec![
-                                        "pacman".into(),
-                                        "-S".into(),
-                                        "--noconfirm".into(),
-                                        pkg.name.clone(),
+                                            "pacman".into(),
+                                            "-S".into(),
+                                            "--noconfirm".into(),
+                                            pkg.name.clone(),
                                         ],
                                         "updating".into(),
                                     );
