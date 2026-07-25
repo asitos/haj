@@ -42,12 +42,19 @@ fast, quiet, beautiful package management for BlahArch.
 
 ### aur 
 
-you can install `haj` using your favorite aur helper:
+you can install [haj](https://aur.archlinux.org/packages/haj) using your favorite aur helper:
 
 ```bash
 yay -S haj
 # or
 paru -S haj
+```
+### cargo
+
+requires [rust + cargo](https://www.rust-lang.org/tools/install) to be installed:
+
+```bash
+cargo install haj
 ```
 
 ### from source
