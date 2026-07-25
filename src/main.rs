@@ -212,22 +212,82 @@ async fn main() -> anyhow::Result<()> {
                 }
 
                 Commands::Search { query } => {
-                    println!("{} searching for '{}'...\n", "✓".green(), query.cyan());
+                    let search_repo = cli.repo || !cli.aur;
+                    let search_aur = cli.aur || !cli.repo;
+
+                    let target_msg = if cli.aur && !cli.repo {
+                        "aur"
+                    } else if cli.repo && !cli.aur {
+                        "standard repos"
+                    } else {
+                        "standard repos and aur"
+                    };
+
+                    println!(
+                        "{} searching {} for '{}'...\n",
+                        "✓".green(),
+                        target_msg.white().bold(),
+                        query.cyan()
+                    );
                     let mut found = false;
-                    for db in alpm_handle.syncdbs() {
-                        if let Ok(results) = db.search([query.as_str()].into_iter()) {
-                            for pkg in results {
-                                found = true;
-                                let is_installed = local_db.pkg(pkg.name()).is_ok();
-                                ui::formatter::print_search_result(pkg, db.name(), is_installed);
+
+                    if search_repo {
+                        for db in alpm_handle.syncdbs() {
+                            if let Ok(results) = db.search([query.as_str()].into_iter()) {
+                                for pkg in results {
+                                    found = true;
+                                    let is_installed = local_db.pkg(pkg.name()).is_ok();
+                                    ui::formatter::print_search_result(
+                                        pkg,
+                                        db.name(),
+                                        is_installed,
+                                    );
+                                }
                             }
                         }
                     }
+
+                   if search_aur {
+                        let aur_url = format!("https://aur.archlinux.org/rpc/v5/search/{}", query);
+                        
+                        if let Ok(response) = reqwest::get(&aur_url).await 
+                            && let Ok(json) = response.json::<serde_json::Value>().await
+                            && let Some(results) = json.get("results").and_then(|r| r.as_array())
+                            && !results.is_empty() 
+                        {
+                            if found { println!(); }
+                            found = true;
+                            
+                            for pkg in results {
+                                let name = pkg.get("Name").and_then(|n| n.as_str()).unwrap_or("unknown");
+                                let version = pkg.get("Version").and_then(|v| v.as_str()).unwrap_or("");
+                                let desc = pkg.get("Description").and_then(|d| d.as_str()).unwrap_or("no description provided.");
+                                let votes = pkg.get("NumVotes").and_then(|v| v.as_u64()).unwrap_or(0);
+                                
+                                let is_installed = local_db.pkg(name).is_ok();
+                                let install_marker = if is_installed { 
+                                    format!(" {}", "[installed]".cyan().bold()) 
+                                } else { 
+                                    "".to_string() 
+                                };
+                                
+                                println!("{}/{} {} {}{}", 
+                                    "aur".magenta().bold(), 
+                                    name.bold(), 
+                                    version.green(), 
+                                    format!("(+{})", votes).yellow(),
+                                    install_marker
+                                );
+                                println!("    {}", desc.dimmed());
+                            }
+                        }
+                    } 
                     if !found {
                         println!(
-                            "{} no packages found matching '{}'.",
+                            "\n{} no packages found matching '{}' in {}.",
                             "✗".red(),
-                            query.bold()
+                            query.bold(),
+                            target_msg
                         );
                     }
                 }
@@ -271,6 +331,115 @@ async fn main() -> anyhow::Result<()> {
                         }
                         println!("\n{:<15} {:.2} MB", "wasted space:", total_size);
                         println!("\nrun {} to remove them.", "haj toss <packages>".cyan());
+                    }
+                }
+
+                Commands::Owns { file_path } => {
+                    core::alpm_init::owns(&alpm_handle, file_path);
+                }
+
+                Commands::Files { package } => {
+                    core::alpm_init::files(&alpm_handle, package);
+                }
+
+                Commands::Load { archive_path } => {
+                    drop(alpm_handle);
+
+                    run_pacman(
+                        &["-U", archive_path, "--noconfirm"],
+                        "loading package archive...",
+                        "package loaded successfully.",
+                        cli.dry_run,
+                    )
+                    .await;
+                }
+
+                Commands::Fetch { packages } => {
+                    drop(alpm_handle);
+
+                    let mut args = vec!["-Sw", "--noconfirm"];
+                    args.extend(packages.iter().map(|s| s.as_str()));
+
+                    run_pacman(
+                        &args,
+                        "fetching packages to cache...",
+                        "packages downloaded successfully.",
+                        cli.dry_run,
+                    )
+                    .await;
+                }
+
+                Commands::Mark {
+                    package,
+                    as_explicit,
+                } => {
+                    drop(alpm_handle);
+
+                    let reason_flag = if *as_explicit {
+                        "--asexplicit"
+                    } else {
+                        "--asdeps"
+                    };
+                    let state = if *as_explicit {
+                        "explicit"
+                    } else {
+                        "dependency"
+                    };
+
+                    run_pacman(
+                        &["-D", reason_flag, package],
+                        "updating database records...",
+                        &format!("marked {} as {}.", package, state),
+                        cli.dry_run,
+                    )
+                    .await;
+                }
+
+                Commands::Diff => {
+                    drop(alpm_handle);
+                    core::pacnew::manage_pacnew_files();
+                }
+
+                Commands::List { explicit, deps } => {
+                    let mut count = 0;
+
+                    for pkg in local_db.pkgs() {
+                        let is_explicit = pkg.reason() == alpm::PackageReason::Explicit;
+
+                        if *explicit && !is_explicit {
+                            continue;
+                        }
+                        if *deps && is_explicit {
+                            continue;
+                        }
+
+                        println!("{} {}", pkg.name().cyan(), pkg.version().dimmed());
+                        count += 1;
+                    }
+
+                    println!("\n{} {} packages listed.", "✓".green(), count.bold());
+                }
+
+                Commands::Locate { query } => {
+                    drop(alpm_handle);
+
+                    println!(
+                        "{} searching remote file databases for '{}'...\n",
+                        "✓".green(),
+                        query.cyan()
+                    );
+
+                    let status = std::process::Command::new("pacman")
+                        .arg("-F")
+                        .arg(query)
+                        .status()
+                        .expect("failed to execute pacman -F");
+
+                    if !status.success() {
+                        println!(
+                            "\n{} no results found. (you may need to sync file databases with 'sudo pacman -Fy')",
+                            "✗".red()
+                        );
                     }
                 }
             }
