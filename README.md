@@ -56,6 +56,7 @@ install `haj` from the official blahArch repo for self-updating release via `pac
 add this to the bottom of your `/etc/pacman.conf`:
 
 ```bash
+[blaharch]
 SigLevel = Optional TrustAll
 Server = https://asitos.github.io/blaharch-repo/$arch
 ```
