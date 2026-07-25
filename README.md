@@ -52,7 +52,7 @@ paru -S haj
 
 ### pacman (blaharch-repo)
 
-install `haj` from the official blahArch repo for self-updating release via `pacman`,
+install `haj` from the [official blahArch repo](https://asitos.github.io/blaharch-repo/) for self-updating release via `pacman`,
 add this to the bottom of your `/etc/pacman.conf`:
 
 ```bash
