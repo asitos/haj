@@ -13,7 +13,7 @@ fast, quiet, beautiful package management for BlahArch.
 
 ## features
 
-### what's new in v0.2.0: the tui dashboard
+### the tui dashboard
 
 `haj` now features a blazing-fast, interactive tui powered by `ratatui`. run `haj tui` to access:
 
@@ -24,7 +24,7 @@ fast, quiet, beautiful package management for BlahArch.
 - **the orphan sweeper:** press c on the dashboard to instantly detect and vaporize unneeded dependencies (pacman -Rns) and reclaim disk space.
 - **3d rotating blahaj (best):** a fully 3D, spinning ascii art shark rendered natively via [display3d](https://github.com/renpenguin/display3d).
 
-### cli features
+### cli 
 
 - **the cargo/bun aesthetic:** no more jagged progress bars or walls of text. `haj` parses `pacman` output streams in real-time, displaying a single, elegant progress spinner and clean transaction summaries.
 - **native alpm engine:** `haj` uses `alpm.rs` (c bindings for `libalpm`) to query your local and sync databases directly in memory.
@@ -94,20 +94,36 @@ sudo install -Dm755 target/release/haj /usr/bin/haj
 
 | command | aliases | action |
 |---------|---------|--------|
-| `tui` | `t` | launch the tui| 
+| `tui` | `t` | launch the interactive tui dashboard | 
 | `install <pkg>` | `i` | install one or more packages | 
 | `remove <pkg>` | `rm`, `toss` | remove packages & unneeded dependencies | 
 | `update` | `up`, `sync` | sync mirror databases | 
-| `search <query>` | `s` | search all remote sync databases | 
+| `search <query>` | `s` | search all remote sync databases (and aur) | 
 | `show <pkg>` | `info` | show local package details | 
+| `list` | `ls` | list explicitly installed packages | 
 | `clean` | `c` | scrub the package cache | 
 | `orphan` | `o` | detect orphaned dependencies |
+| `owns <file>` | `ow` | find which local package owns a file |
+| `locate <file>` | `loc` | search remote repos for a file name (pacman -F) |
+| `files <pkg>` | `lf` | list all files installed by a package |
+| `load <file>` | `l` | install a local package archive (.pkg.tar.zst) |
+| `fetch <pkg>` | `f` | download a package to cache without installing |
+| `mark <pkg>` | `m` | change the install reason of a package |
+| `diff` | `pn` | interactively manage and merge .pacnew config files |
 
-### global flags
+### options
+
+- `-a`, `--aur` : restrict operations to the aur.
+- `-r`, `--repo` : restrict operations to arch repositories.
+- `-y`, `--noconfirm` : bypass all confirmation prompts.
+- `-n`, `--needed` : do not reinstall up-to-date packages.
+- `-i`, `--ignore <pkg>` : ignore a package upgrade (comma-separated: pkg1,pkg2).
+- `-c`, `--config <path>` : specify an alternate pacman config file.
+- `--root <path>` : specify an alternate installation root.
+- `-v`, `--verbose` : enable verbose debug logging.
 - `-d`, `--dry-run` : preview a command without modifying the system.
-- `-v`, `--verbose` : enable debug logging.
-- `-h`, `--help` : print help information.
-- `-V`, `--version` : print version information.
+- `-h`, `--help` : display help information.
+- `-V`, `--version` : show version info.
 
 ### examples
 
