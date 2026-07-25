@@ -29,11 +29,10 @@ jobs:
           mkdir -p build-workspace
           cd build-workspace
           
-          # Extract version from the git tag (e.g., v0.2.1 -> 0.2.1)
           TAG_VERSION="${{ github.ref_name }}"
           CLEAN_VERSION="${TAG_VERSION#v}"
           
-          # Dynamically create a pristine PKGBUILD on the fly
+          # Dynamically create the PKGBUILD
           cat << EOF > PKGBUILD
           pkgname=haj
           pkgver=${CLEAN_VERSION}
@@ -42,7 +41,7 @@ jobs:
           arch=('x86_64')
           url="https://github.com/asitos/haj"
           license=('MIT')
-          depends=('curl' 'pacman')
+          depends=('curl' 'pacman') 
           makedepends=('cargo')
           source=("https://github.com/asitos/haj/archive/refs/tags/v\${pkgver}.tar.gz")
           sha256sums=('SKIP')
@@ -58,6 +57,10 @@ jobs:
             install -Dm644 LICENSE "\$pkgdir/usr/share/licenses/\$pkgname/LICENSE"
           }
           EOF
+          
+          echo "--- GENERATED PKGBUILD ---"
+          cat PKGBUILD
+          echo "--------------------------"
           
           chown -R builder:builder .
           sudo -u builder makepkg -s --noconfirm
