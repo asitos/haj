@@ -12,7 +12,7 @@ use clap::Parser;
 use cli::{Cli, Commands};
 use owo_colors::OwoColorize;
 use std::io::{self, Write};
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, AsyncBufReadExt, BufReader};
 
 async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_run: bool) {
     if is_dry_run {
@@ -22,12 +22,28 @@ async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_
         );
         let arrow = "→".cyan();
         let cmd = args.join(" ");
-        println!("{arrow} would execute: pacman {cmd}");
+        println!("{arrow} would execute: sudo pacman {cmd}");
+        return;
+    }
+
+    // escalate to rooooooooot 
+    if let Err(e) = core::escalate::ensure_sudo().await {
+        println!("{} {}", "✗".red(), e);
         return;
     }
 
     let spinner = ui::progress::spinner(spinner_msg);
-    let mut child = tokio::process::Command::new("pacman")
+
+    let is_root = unsafe { libc::geteuid() == 0 };
+    let mut child_cmd = if is_root {
+        tokio::process::Command::new("pacman")
+    } else {
+        let mut c = tokio::process::Command::new("sudo");
+        c.arg("pacman");
+        c
+    };
+
+    let mut child = child_cmd
         .args(args)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -129,47 +145,99 @@ async fn main() -> anyhow::Result<()> {
                 Commands::Tui => unreachable!(),
                 Commands::Update => unreachable!(),
                 Commands::Install { packages } => {
-                    println!("{} resolving dependencies...\n", "✓".green());
+                    let mut native_pkgs = Vec::new();
+                    let mut aur_pkgs = Vec::new();
 
-                    match core::resolver::get_install_summaries(&alpm_handle, packages) {
-                        Ok(summaries) => {
-                            let mut total_dl = 0.0;
-                            let mut total_inst = 0.0;
-
-                            println!("{}", "installing".bold().white());
-                            for sum in &summaries {
-                                println!("  {} {}", sum.name.cyan().bold(), sum.version.dimmed());
-                                total_dl += sum.download_size_mb;
-                                total_inst += sum.install_size_mb;
+                    for pkg in packages {
+                        let mut found_in_repo = false;
+                        
+                        if !cli.aur {
+                            for db in alpm_handle.syncdbs() {
+                                if db.pkg(pkg.as_str()).is_ok() {
+                                    found_in_repo = true;
+                                    break;
+                                }
                             }
+                        }
 
-                            println!("\n{:<15} {:.2} MB", "download:", total_dl);
-                            println!("{:<15} {:.2} MB", "disk usage:", total_inst);
+                        if found_in_repo || cli.repo {
+                            native_pkgs.push(pkg.clone());
+                        } else {
+                            aur_pkgs.push(pkg.clone());
+                        }
+                    }
 
-                            print!("\ncontinue? [Y/n] ");
-                            io::stdout().flush()?;
+                    let mut do_native_install = false;
 
-                            let mut input = String::new();
-                            io::stdin().read_line(&mut input)?;
+                    if !native_pkgs.is_empty() {
+                        println!("{} resolving native dependencies...\n", "✓".green());
 
-                            if input.trim().eq_ignore_ascii_case("y") || input.trim().is_empty() {
-                                let mut args = vec!["-S", "--noconfirm"];
-                                args.extend(packages.iter().map(|s| s.as_str()));
+                        match core::resolver::get_install_summaries(&alpm_handle, &native_pkgs) {
+                            Ok(summaries) => {
+                                let mut total_dl = 0.0;
+                                let mut total_inst = 0.0;
 
-                                drop(alpm_handle);
+                                println!("{}", "installing (native)".bold().white());
+                                for sum in &summaries {
+                                    println!("  {} {}", sum.name.cyan().bold(), sum.version.dimmed());
+                                    total_dl += sum.download_size_mb;
+                                    total_inst += sum.install_size_mb;
+                                }
 
+                                println!("\n{:<15} {:.2} MB", "download:", total_dl);
+                                println!("{:<15} {:.2} MB", "disk usage:", total_inst);
+
+                                print!("\ncontinue with native packages? [Y/n] ");
+                                io::stdout().flush()?;
+
+                                let mut input = String::new();
+                                io::stdin().read_line(&mut input)?;
+
+                                if input.trim().eq_ignore_ascii_case("y") || input.trim().is_empty() {
+                                    do_native_install = true;
+                                } else {
+                                    println!("{} skipped native packages.", "✗".red());
+                                }
+                            }
+                            Err(e) => println!("{} {}", "✗".red(), e),
+                        }
+                    }
+
+                    // release var/lib/pacman/db.lck
+
+                    drop(alpm_handle);
+
+                    if do_native_install {
+                        let mut args = vec!["-S", "--noconfirm"];
+                        args.extend(native_pkgs.iter().map(|s| s.as_str()));
+
+                        run_pacman(
+                            &args,
+                            "installing native packages...",
+                            "native packages installed successfully.",
+                            cli.dry_run,
+                        )
+                        .await;
+                    }
+
+                    for pkg in aur_pkgs {
+                        if cli.dry_run {
+                            println!("{} would build and install aur package: {}", "[dry run]".bold().yellow(), pkg.magenta());
+                            continue;
+                        }
+
+                        match core::aur::build(&pkg).await {
+                            Ok(pkg_path) => {
                                 run_pacman(
-                                    &args,
-                                    "initializing transaction...",
-                                    "packages installed successfully.",
+                                    &["-U", pkg_path.to_str().unwrap(), "--noconfirm"],
+                                    &format!("installing built package {}...", pkg.magenta().bold()),
+                                    &format!("{} installed successfully from aur.", pkg.magenta().bold()),
                                     cli.dry_run,
                                 )
                                 .await;
-                            } else {
-                                println!("{} aborted.", "✗".red());
                             }
+                            Err(e) => eprintln!("{} {}", "error:".red().bold(), e),
                         }
-                        Err(e) => println!("{} {}", "✗".red(), e),
                     }
                 }
 

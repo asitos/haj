@@ -778,6 +778,7 @@ dependencies = [
  "directories",
  "fs2",
  "indicatif",
+ "libc",
  "owo-colors",
  "ratatui",
  "reqwest",
