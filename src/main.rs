@@ -5,6 +5,9 @@ mod network;
 mod tui;
 mod ui;
 
+use std::fs::OpenOptions;
+use std::os::unix::fs::OpenOptionsExt;
+use fs2::FileExt;
 use clap::Parser;
 use cli::{Cli, Commands};
 use owo_colors::OwoColorize;
@@ -86,8 +89,23 @@ async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let cli = Cli::parse();
+    // lock file logic using fs4
+    let lock_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .mode(0o666)
+        .open("/tmp/haj.lock")
+        .expect("failed to open lock file");
 
+    if lock_file.try_lock_exclusive().is_err() {
+        println!("{} haj is currently running in another terminal. (waiting for lock...)", "✗".red());
+        lock_file.lock_exclusive().expect("failed to acquire lock");
+    }
+
+    let _haj_lock = lock_file;
+
+    let cli = Cli::parse();
     let _config = config::load_config();
 
     match &cli.command {
