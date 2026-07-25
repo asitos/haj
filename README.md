@@ -5,7 +5,7 @@
 [![Rust](https://img.shields.io/badge/built_with-Rust-dca282.svg?logo=rust)](https://www.rust-lang.org/)
 
 fast, quiet, beautiful package management for BlahArch. 
-(and yes, it is named after the ikea shark. all hail blahaj. 🦈)
+*(and yes, it is named after the ikea shark. all hail blahaj. 🦈)*
 
 `haj` is a modern, memory-safe wrapper for `pacman` written in rust. It replaces arch's notoriously loud and verbose terminal output with the clean, minimalistic aesthetic of modern package managers like `cargo` and `bun`, without compromising on speed or safety. also comes with love from the supreme plushie shark.
 
@@ -103,12 +103,19 @@ haj t
 search for a package:
 ```bash
 haj search neofetch
+# or
+haj s neofetch
 ```
 
 sync repositories and install a package:
 ```bash
 sudo haj sync
+# or 
+sudo haj up
+
 sudo haj install htop cmatrix
+or 
+sudo haj i htop cmatrix
 ```
 
 safely preview removing a package without actually removing it:
@@ -130,13 +137,13 @@ verbose = false
 ```
 *more config options are currently under work*
 
-##  architecture & technical details
+##  for nerds
 `haj` is built with a focus on memory safety, zero-cost abstractions, and concurrent execution.
 
 * **asynchronous pty parsing:** uses `tokio` to spawn non-blocking pseudo-terminals, capturing and formatting `pacman`'s c-level standard streams in real-time without deadlocking background workers.
 * **ffi & memory safety:** utilizes `alpm.rs` to interface with arch linux's `libalpm`. database locks are explicitly managed and safely dropped from memory before handing state mutation over to external processes.
 * **dag traversal:** the `orphan` detection engine completely avoids bash scripting, instead traversing the system's directed acyclic graph (dag) directly in memory via c-bindings to calculate unneeded dependencies in microseconds.
 
-## license
+## license (BORING)
 
 MIT license. see `LICENSE` for more information.
