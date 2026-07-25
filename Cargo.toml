@@ -9,6 +9,12 @@ repository = "https://github.com/asitos/haj"
 readme = "README.md"
 keywords = ["archlinux", "pacman", "tui", "ratatui", "wrapper"]
 categories = ["command-line-utilities"]
+exclude = [
+  "assets/*",
+  "resources/*",
+  "target/*",
+  ".git/*",
+]
 
 [dependencies]
 clap = { version = "4.4", features = ["derive"] }
