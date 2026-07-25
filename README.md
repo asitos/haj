@@ -4,7 +4,7 @@
 [![Crates.io](https://img.shields.io/crates/v/haj?logo=rust)](https://crates.io/crates/haj)
 [![Rust](https://img.shields.io/badge/built_with-Rust-dca282.svg?logo=rust)](https://www.rust-lang.org/)
 
-fast, quiet, beautiful package management for BlahArch. 
+fast, quiet, beautiful package management for blahArch. 
 *(and yes, it is named after the ikea shark. all hail blahaj. 🦈)*
 
 `haj` is a modern, memory-safe wrapper for `pacman` written in rust. It replaces arch's notoriously loud and verbose terminal output with the clean, minimalistic aesthetic of modern package managers like `cargo` and `bun`, without compromising on speed or safety. also comes with love from the supreme plushie shark.
