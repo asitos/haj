@@ -128,7 +128,7 @@ async fn main() -> anyhow::Result<()> {
                             println!("\n{:<15} {:.2} MB", "download:", total_dl);
                             println!("{:<15} {:.2} MB", "disk usage:", total_inst);
 
-                            print!("\ncontinue? [y/n] ");
+                            print!("\ncontinue? [Y/n] ");
                             io::stdout().flush()?;
 
                             let mut input = String::new();
@@ -176,12 +176,12 @@ async fn main() -> anyhow::Result<()> {
                         println!("  {}", pkg.magenta().bold());
                     }
 
-                    print!("\ncontinue? [y/n] ");
+                    print!("\ncontinue? [Y/n] ");
                     io::stdout().flush()?;
                     let mut input = String::new();
                     io::stdin().read_line(&mut input)?;
 
-                    if input.trim().eq_ignore_ascii_case("y") {
+                    if input.trim().eq_ignore_ascii_case("y") || input.trim().is_empty() {
                         let mut args = vec!["-Rs", "--noconfirm"];
                         args.extend(packages.iter().map(|s| s.as_str()));
 
