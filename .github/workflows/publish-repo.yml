@@ -14,11 +14,6 @@ jobs:
       - name: install dependencies
         run: pacman -Syu --noconfirm git sudo
 
-      - name: checkout haj
-        uses: actions/checkout@v4
-        with:
-          path: haj
-
       - name: checkout blaharch-repo
         uses: actions/checkout@v4
         with:
@@ -26,23 +21,55 @@ jobs:
           path: blaharch-repo
           token: ${{ secrets.BLAHARCH_REPO_TOKEN }}
 
-      - name: build the Arch package
+      - name: generate PKGBUILD and build package
         run: |
           useradd -m builder
           echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
-          chown -R builder:builder haj
           
-          cd haj
+          mkdir -p build-workspace
+          cd build-workspace
+          
+          # Extract version from the git tag (e.g., v0.2.1 -> 0.2.1)
+          TAG_VERSION="${{ github.ref_name }}"
+          CLEAN_VERSION="${TAG_VERSION#v}"
+          
+          # Dynamically create a pristine PKGBUILD on the fly
+          cat << EOF > PKGBUILD
+          pkgname=haj
+          pkgver=${CLEAN_VERSION}
+          pkgrel=1
+          pkgdesc="fast, quiet, beautiful package management for BlahArch"
+          arch=('x86_64')
+          url="https://github.com/asitos/haj"
+          license=('MIT')
+          depends=('alpm' 'curl' 'pacman')
+          makedepends=('cargo')
+          source=("https://github.com/asitos/haj/archive/refs/tags/v\${pkgver}.tar.gz")
+          sha256sums=('SKIP')
+
+          build() {
+            cd "\$pkgname-\$pkgver"
+            cargo build --release --locked
+          }
+
+          package() {
+            cd "\$pkgname-\$pkgver"
+            install -Dm755 target/release/haj "\$pkgdir/usr/bin/haj"
+            install -Dm644 LICENSE "\$pkgdir/usr/share/licenses/\$pkgname/LICENSE"
+          }
+          EOF
+          
+          chown -R builder:builder .
           sudo -u builder makepkg -s --noconfirm
 
       - name: update repository database
         run: |
-          cp haj/*.pkg.tar.zst blaharch-repo/x86_64/
+          cp build-workspace/*.pkg.tar.zst blaharch-repo/x86_64/
           
           cd blaharch-repo/x86_64
           repo-add blaharch.db.tar.gz *.pkg.tar.zst
 
-      - name: commit push to blaharch-repo
+      - name: commit and push to blaharch-repo
         run: |
           cd blaharch-repo
           git config user.name "github-actions[bot]"
