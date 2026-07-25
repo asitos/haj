@@ -11,7 +11,7 @@ keywords = ["archlinux", "pacman", "tui", "ratatui", "wrapper"]
 categories = ["command-line-utilities"]
 exclude = [
   "assets/*",
-  "resources/*",
+  # "resources/*",
   "target/*",
   ".git/*",
 ]
