@@ -1,8 +1,8 @@
 # haj
 
 [![AUR](https://img.shields.io/aur/version/haj?logo=archlinux)](https://aur.archlinux.org/packages/haj)
-[![Rust](https://img.shields.io/badge/built_with-Rust-dca282.svg?logo=rust)](https://www.rust-lang.org/)
 [![Crates.io](https://img.shields.io/crates/v/haj?logo=rust)](https://crates.io/crates/haj)
+[![Rust](https://img.shields.io/badge/built_with-Rust-dca282.svg?logo=rust)](https://www.rust-lang.org/)
 
 fast, quiet, beautiful package management for BlahArch. 
 (and yes, it is named after the ikea shark. all hail blahaj. 🦈)
