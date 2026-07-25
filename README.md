@@ -49,6 +49,23 @@ yay -S haj
 # or
 paru -S haj
 ```
+
+### pacman (blaharch-repo)
+
+install `haj` from the official blahArch repo for self-updating release via `pacman`,
+add this to the bottom of your `/etc/pacman.conf`:
+
+```bash
+SigLevel = Optional TrustAll
+Server = https://asitos.github.io/blaharch-repo/$arch
+```
+
+then just sync and install normally (or update `haj` if it is already installed):
+
+```bash
+sudo pacman -Sy haj
+```
+
 ### cargo
 
 requires [rust + cargo](https://www.rust-lang.org/tools/install) to be installed:
