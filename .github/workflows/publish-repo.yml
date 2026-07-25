@@ -42,7 +42,7 @@ jobs:
           arch=('x86_64')
           url="https://github.com/asitos/haj"
           license=('MIT')
-          depends=('alpm' 'curl' 'pacman')
+          depends=('curl' 'pacman')
           makedepends=('cargo')
           source=("https://github.com/asitos/haj/archive/refs/tags/v\${pkgver}.tar.gz")
           sha256sums=('SKIP')
