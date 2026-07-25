@@ -247,41 +247,52 @@ async fn main() -> anyhow::Result<()> {
                         }
                     }
 
-                   if search_aur {
+                    if search_aur {
                         let aur_url = format!("https://aur.archlinux.org/rpc/v5/search/{}", query);
-                        
-                        if let Ok(response) = reqwest::get(&aur_url).await 
+
+                        if let Ok(response) = reqwest::get(&aur_url).await
                             && let Ok(json) = response.json::<serde_json::Value>().await
                             && let Some(results) = json.get("results").and_then(|r| r.as_array())
-                            && !results.is_empty() 
+                            && !results.is_empty()
                         {
-                            if found { println!(); }
+                            if found {
+                                println!();
+                            }
                             found = true;
-                            
+
                             for pkg in results {
-                                let name = pkg.get("Name").and_then(|n| n.as_str()).unwrap_or("unknown");
-                                let version = pkg.get("Version").and_then(|v| v.as_str()).unwrap_or("");
-                                let desc = pkg.get("Description").and_then(|d| d.as_str()).unwrap_or("no description provided.");
-                                let votes = pkg.get("NumVotes").and_then(|v| v.as_u64()).unwrap_or(0);
-                                
+                                let name = pkg
+                                    .get("Name")
+                                    .and_then(|n| n.as_str())
+                                    .unwrap_or("unknown");
+                                let version =
+                                    pkg.get("Version").and_then(|v| v.as_str()).unwrap_or("");
+                                let desc = pkg
+                                    .get("Description")
+                                    .and_then(|d| d.as_str())
+                                    .unwrap_or("no description provided.");
+                                let votes =
+                                    pkg.get("NumVotes").and_then(|v| v.as_u64()).unwrap_or(0);
+
                                 let is_installed = local_db.pkg(name).is_ok();
-                                let install_marker = if is_installed { 
-                                    format!(" {}", "[installed]".cyan().bold()) 
-                                } else { 
-                                    "".to_string() 
+                                let install_marker = if is_installed {
+                                    format!(" {}", "[installed]".cyan().bold())
+                                } else {
+                                    "".to_string()
                                 };
-                                
-                                println!("{}/{} {} {}{}", 
-                                    "aur".magenta().bold(), 
-                                    name.bold(), 
-                                    version.green(), 
+
+                                println!(
+                                    "{}/{} {} {}{}",
+                                    "aur".magenta().bold(),
+                                    name.bold(),
+                                    version.green(),
                                     format!("(+{})", votes).yellow(),
                                     install_marker
                                 );
                                 println!("    {}", desc.dimmed());
                             }
                         }
-                    } 
+                    }
                     if !found {
                         println!(
                             "\n{} no packages found matching '{}' in {}.",
