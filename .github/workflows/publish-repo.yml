@@ -1,0 +1,53 @@
+name: publish to blahArch repo
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    
+    steps:
+      - name: install dependencies
+        run: pacman -Syu --noconfirm git sudo
+
+      - name: checkout haj
+        uses: actions/checkout@v4
+        with:
+          path: haj
+
+      - name: checkout blaharch-repo
+        uses: actions/checkout@v4
+        with:
+          repository: asitos/blaharch-repo
+          path: blaharch-repo
+          token: ${{ secrets.BLAHARCH_REPO_TOKEN }}
+
+      - name: build the Arch package
+        run: |
+          useradd -m builder
+          echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+          chown -R builder:builder haj
+          
+          cd haj
+          sudo -u builder makepkg -s --noconfirm
+
+      - name: update repository database
+        run: |
+          cp haj/*.pkg.tar.zst blaharch-repo/x86_64/
+          
+          cd blaharch-repo/x86_64
+          repo-add blaharch.db.tar.gz *.pkg.tar.zst
+
+      - name: commit push to blaharch-repo
+        run: |
+          cd blaharch-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          git add .
+          git commit -m "Update haj to ${{ github.ref_name }}"
+          git push
