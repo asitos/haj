@@ -44,7 +44,7 @@ pub fn show_history(limit: usize) {
         let parts: Vec<&str> = entry.splitn(2, " [ALPM] ").collect();
 
         if parts.len() == 2 {
-            let timestamp = parts[0].replace('[', "").replace(']', "");
+            let timestamp = parts[0].replace(['[', ']'], "");
             let action_string = parts[1];
 
             let colored_action = if action_string.starts_with("installed") {

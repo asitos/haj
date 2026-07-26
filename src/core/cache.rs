@@ -16,7 +16,7 @@ pub fn scrub(keep: usize) {
         .stderr(std::process::Stdio::inherit())
         .status();
 
-    if native_status.as_ref().map_or(false, |s| !s.success()) {
+    if native_status.as_ref().is_ok_and(|s| !s.success()) {
         println!("{} 'paccache' failed or was not found.", "✗".red());
         println!(
             "  ensure {} is installed (run {}).",
@@ -28,14 +28,14 @@ pub fn scrub(keep: usize) {
 
     if let Some(home) = dirs::home_dir() {
         let aur_cache = home.join(".cache/haj/aur");
-        if aur_cache.exists() {
-            if let Ok(entries) = std::fs::read_dir(&aur_cache) {
-                for entry in entries.filter_map(Result::ok) {
-                    if entry.path().is_dir() {
-                        let _ = Command::new("paccache")
-                            .args(["-r", "-k", &keep_str, "-c", entry.path().to_str().unwrap()])
-                            .output();
-                    }
+        if aur_cache.exists()
+            && let Ok(entries) = std::fs::read_dir(&aur_cache)
+        {
+            for entry in entries.filter_map(Result::ok) {
+                if entry.path().is_dir() {
+                    let _ = Command::new("paccache")
+                        .args(["-r", "-k", &keep_str, "-c", entry.path().to_str().unwrap()])
+                        .output();
                 }
             }
         }

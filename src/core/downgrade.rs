@@ -40,10 +40,10 @@ pub fn select_downgrade_target(package: &str) -> Option<PathBuf> {
     if let Ok(entries) = std::fs::read_dir(native_cache) {
         for entry in entries.filter_map(Result::ok) {
             let file_name = entry.file_name().to_string_lossy().to_string();
-            if let Some((parsed_name, version)) = parse_package_filename(&file_name) {
-                if parsed_name == package {
-                    candidate_entries.push((entry.path(), version.to_string()));
-                }
+            if let Some((parsed_name, version)) = parse_package_filename(&file_name)
+                && parsed_name == package
+            {
+                candidate_entries.push((entry.path(), version.to_string()));
             }
         }
     }
@@ -53,10 +53,10 @@ pub fn select_downgrade_target(package: &str) -> Option<PathBuf> {
         if let Ok(entries) = std::fs::read_dir(&aur_cache) {
             for entry in entries.filter_map(Result::ok) {
                 let file_name = entry.file_name().to_string_lossy().to_string();
-                if let Some((parsed_name, version)) = parse_package_filename(&file_name) {
-                    if parsed_name == package {
-                        candidate_entries.push((entry.path(), version.to_string()));
-                    }
+                if let Some((parsed_name, version)) = parse_package_filename(&file_name)
+                    && parsed_name == package
+                {
+                    candidate_entries.push((entry.path(), version.to_string()));
                 }
             }
         }
@@ -102,10 +102,11 @@ pub fn select_downgrade_target(package: &str) -> Option<PathBuf> {
     let mut input = String::new();
     let _ = std::io::stdin().read_line(&mut input);
 
-    if let Ok(idx) = input.trim().parse::<usize>() {
-        if idx > 0 && idx <= candidate_entries.len() {
-            return Some(candidate_entries[idx - 1].0.clone());
-        }
+    if let Ok(idx) = input.trim().parse::<usize>()
+        && idx > 0
+        && idx <= candidate_entries.len()
+    {
+        return Some(candidate_entries[idx - 1].0.clone());
     }
 
     println!("{} invalid selection or aborted.", "✗".red());
