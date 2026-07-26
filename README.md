@@ -24,13 +24,14 @@ fast, quiet, beautiful package management for blahArch.
 - **the orphan sweeper:** press c on the dashboard to instantly detect and vaporize unneeded dependencies (pacman -Rns) and reclaim disk space.
 - **3d rotating blahaj (best):** a fully 3D, spinning ascii art shark rendered natively via [display3d](https://github.com/renpenguin/display3d).
 
-### cli 
+### cli & v0.2.4 highlights
 
+- **interactive search-install:** type a naked query (e.g., `haj discord`) to display a numbered table of matching native and AUR packages. Select numbers (e.g., `1 3`) to queue them instantly.
+- **AUR PKGBUILD auditing:** press `v` during the AUR pre-transaction prompt to inspect the live `PKGBUILD` via a fast shallow clone, piped directly into `bat` or `less` right in your terminal.
+- **Arch News safety guard:** before running `haj jump`, the system pings the official Arch RSS feed. If a post from the last 7 days requires manual intervention, `haj` displays an unmissable red warning banner with the headline.
+- **system overview (`stats`):** a pristine status dashboard tracking package counts, explicit vs. dependency splits, cache sizes, update counts, and system health at a glance.
 - **the cargo/bun aesthetic:** no more jagged progress bars or walls of text. `haj` parses `pacman` output streams in real-time, displaying a single, elegant progress spinner and clean transaction summaries.
-- **native alpm engine:** `haj` uses `alpm.rs` (c bindings for `libalpm`) to query your local and sync databases directly in memory.
-- **blazing fast orphan detection:** instead of parsing text scripts, `haj orphan` traverses the true alpm directed acyclic graph (dag) to find unused dependencies in microseconds.
-- **deadlock-free concurrency:** built on `tokio`, `haj` safely drops database locks before handing state-mutation over to `pacman`, guaranteeing zero lockfile collisions.
-- **safe dry run:** Includes a built-in `--dry-run` flag to preview commands without touching your system.
+- **native alpm engine:** `haj` uses `alpm.rs` (C bindings for `libalpm`) to query your local and sync databases directly in memory.
 
 ## working   
 
@@ -92,26 +93,31 @@ sudo install -Dm755 target/release/haj /usr/bin/haj
 
 `haj` provides highly aliased commands for a faster typing experience.
 
+### options
+
 | command | aliases | action |
 |---------|---------|--------|
-| `tui` | `t` | launch the interactive tui dashboard | 
-| `install <pkg>` | `i` | install one or more packages | 
-| `remove <pkg>` | `rm`, `toss` | remove packages & unneeded dependencies | 
-| `update` | `up`, `sync` | sync mirror databases | 
-| `search <query>` | `s` | search all remote sync databases (and aur) | 
-| `show <pkg>` | `info` | show local package details | 
-| `list` | `ls` | list explicitly installed packages | 
-| `clean` | `c` | scrub the package cache | 
-| `orphan` | `o` | detect orphaned dependencies |
-| `owns <file>` | `ow` | find which local package owns a file |
-| `locate <file>` | `loc` | search remote repos for a file name (pacman -F) |
-| `files <pkg>` | `lf` | list all files installed by a package |
+| `tui` | `t` | launch the interactive package manager dashboard |
+| `update` | `up`, `sync` | synchronize remote repositories |
+| `jump` | `upgrade` | full system upgrade |
+| `install <pkg>` | `i` | install one or more packages |
+| `remove <pkg>` | `rm`, `toss` | remove packages & unneeded dependencies |
+| `search <query>` | `s` | search remote repositories |
+| `show <pkg>` | `info` | show detailed package information |
+| `group <name>` | `g` | browse and install package groups |
+| `list` | `ls` | list installed packages |
+| `stats` | `st` | show system health and package statistics |
 | `load <file>` | `l` | install a local package archive (.pkg.tar.zst) |
-| `fetch <pkg>` | `f` | download a package to cache without installing |
-| `mark <pkg>` | `m` | change the install reason of a package |
+| `fetch <pkg>` | `f` | download a package without installing |
+| `downgrade <pkg>` | `sink` | downgrade an installed package |
+| `owns <file>` | `ow` | find which installed package owns a file |
+| `files <pkg>` | `lf` | list files installed by a package |
+| `locate <query>` | `loc` | search repositories for a file (pacman -F) |
+| `history` | `h` | show recent package changes |
+| `orphan` | `o` | detect orphaned dependencies |
+| `clean` | `c` | clean the package cache |
+| `mark <pkg>` | `m` | change a package's install reason |
 | `diff` | `pn` | interactively manage and merge .pacnew config files |
-
-### options
 
 - `-a`, `--aur` : restrict operations to the aur.
 - `-r`, `--repo` : restrict operations to arch repositories.
@@ -136,23 +142,31 @@ haj t
 
 search for a package:
 ```bash
-haj search neofetch
+# for interactive search and install
+haj discord
+
+# show all searches
+haj search discord
 # or
-haj s neofetch
+haj s discord
 ```
 
-sync repositories and install a package:
+keeping up to date:
 ```bash
-sudo haj sync
-# or 
-sudo haj up
+# full system upgrade
+haj jump
 
-sudo haj install htop cmatrix
+# sync repos
+haj sync
+# or 
+haj up
+
+haj install htop cmatrix
 or 
-sudo haj i htop cmatrix
+haj i htop cmatrix
 ```
 
-safely preview removing a package without actually removing it:
+safely preview removing a package:
 ```bash
 haj -d toss firefox
 ```
@@ -163,10 +177,15 @@ haj -d toss firefox
 
 ```toml
 # ~/.config/haj/config.toml
+# default options
 
 [general]
 animations = true
-color = "auto"
+theme = "catppuccin"
+aur_only = false
+repo_only = false
+build_dir = "~/.cache/haj/aur"
+diff_prog = "vimdiff"
 verbose = false
 ```
 *more config options are currently under work*
