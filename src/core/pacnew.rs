@@ -29,9 +29,11 @@ pub fn manage_pacnew_files() {
         pacnew_files.len().to_string().cyan()
     );
 
+    let config = crate::config::load_config();
+
     let editor = std::env::var("MERGEPROG")
         .or_else(|_| std::env::var("DIFFPROG"))
-        .unwrap_or_else(|_| "vimdiff".to_string());
+        .unwrap_or(config.diff_prog);
 
     for pacnew in pacnew_files {
         let original = pacnew.trim_end_matches(".pacnew");
