@@ -1,9 +1,9 @@
 [package]
 name = "haj"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2024"
 authors = ["asitos 4shut0shparashar@gmail.com"]
-description = "fast, quiet, beautiful package manager and tui for Arch Linux"
+description = "fast, quiet, beautiful package manager and tui for blahArch Linux"
 license = "MIT"
 repository = "https://github.com/asitos/haj"
 readme = "README.md"
@@ -40,6 +40,7 @@ directories = "6.0.0"
 fs2 = "0.4.3"
 libc = "0.2.189"
 pacmanconf = "3.1.0"
+dirs = "6.0.0"
 
 [profile.release]
 opt-level = 3

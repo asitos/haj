@@ -4,8 +4,8 @@ use clap::{Parser, Subcommand};
 #[command(
     name = "haj",
     author = "asitos",
-    version = "0.2.1",
-    about = "fast, quiet, beautiful package management for blahArch Linux.",
+    version = "0.2.3",
+    about = "fast, quiet, beautiful package manager and tui for blahArch Linux.",
     long_about = None,
     disable_help_subcommand = true,
     disable_help_flag = true,
@@ -13,25 +13,33 @@ use clap::{Parser, Subcommand};
     help_template = "\
 {about}
 
-Usage: haj [OPTIONS] <COMMAND>
+Usage: \x1b[36;1mhaj\x1b[0m [OPTIONS] <COMMAND>
 
 Commands (alias):
-  \x1b[1mtui (t)\x1b[0m           launch the interactive tui dashboard
-  \x1b[1minstall (i)\x1b[0m       install one or more packages
-  \x1b[1mremove (rm/toss)\x1b[0m  remove packages & unneeded dependencies
-  \x1b[1mupdate (up/sync)\x1b[0m  sync mirror databases
-  \x1b[1msearch (s)\x1b[0m        search all remote sync databases
-  \x1b[1mshow (info)\x1b[0m       show local package details
-  \x1b[1mlist (ls)\x1b[0m         list explicitly installed packages
-  \x1b[1mclean (c)\x1b[0m         scrub the package cache
-  \x1b[1morphan (o)\x1b[0m        detect orphaned dependencies
-  \x1b[1mowns (ow)\x1b[0m         find which local package owns a file
-  \x1b[1mlocate (loc)\x1b[0m      search remote repos for a file name (pacman -F)
-  \x1b[1mfiles (lf)\x1b[0m        list all files installed by a package
-  \x1b[1mload (l)\x1b[0m          install a local package archive (.pkg.tar.zst)
-  \x1b[1mfetch (f)\x1b[0m         download a package to cache without installing
-  \x1b[1mmark (m)\x1b[0m          change the install reason of a package
-  \x1b[1mdiff (pn)\x1b[0m         interactively manage and merge .pacnew config files
+  \x1b[36;1mtui (t)\x1b[0m                         launch the interactive package manager dashboard
+
+  \x1b[36;1mupdate (up/sync)\x1b[0m                synchronize remote repositories 
+  \x1b[36;1mjump (upgrade)\x1b[0m [-u]             full system upgrade
+  \x1b[36;1minstall (i)\x1b[0m <pkg>               install one or more packages
+  \x1b[36;1mremove (rm/toss)\x1b[0m <pkg>          remove packages & unneeded dependencies
+  \x1b[36;1msearch (s)\x1b[0m <query>              search remote repositories
+  \x1b[36;1mshow (info)\x1b[0m <pkg>               show detailed package information
+  \x1b[36;1mgroup (g)\x1b[0m <name>                browse and install package groups
+  \x1b[36;1mlist (ls)\x1b[0m [-e, -p, -f]          list installed packages
+  \x1b[36;1mstats (st)\x1b[0m                      show system health and package statistics
+  \x1b[36;1mload (l)\x1b[0m <path>                 install a local package archive (.pkg.tar.zst)
+  \x1b[36;1mfetch (f)\x1b[0m <pkg>                 download a package without installing
+  \x1b[36;1mdowngrade (sink)\x1b[0m <pkg>          downgrade an installed package
+
+  \x1b[36;1mowns (ow)\x1b[0m <path>                find which installed package owns a file
+  \x1b[36;1mfiles (lf)\x1b[0m <pkg>                list files installed by a package
+  \x1b[36;1mlocate (loc)\x1b[0m <query>            search repositories for a file (pacman -F)
+
+  \x1b[36;1mhistory (h)\x1b[0m [-l <n>]            show recent package changes
+  \x1b[36;1morphan (o)\x1b[0m                      detect orphaned dependencies
+  \x1b[36;1mclean (c)\x1b[0m [-k <n>]              clean the package cache
+  \x1b[36;1mmark (m)\x1b[0m <pkg> [--as-explicit]  change a package's install reason
+  \x1b[36;1mdiff (pn)\x1b[0m                       interactively manage and merge .pacnew files
 
 Options:
 {options}"
@@ -105,11 +113,20 @@ pub enum Commands {
     #[command(alias = "up", alias = "sync")]
     Update,
 
+    #[command(alias = "jump")]
+    Upgrade {
+        #[arg(short = 'u', long)]
+        sysupgrade: bool,
+    },
+
     #[command(alias = "s")]
     Search { query: String },
 
     #[command(alias = "info")]
     Show { package: String },
+
+    #[command(alias = "g")]
+    Group { name: String },
 
     #[command(alias = "ls")]
     List {
@@ -117,12 +134,35 @@ pub enum Commands {
         #[arg(short, long)]
         explicit: bool,
         /// show only packages installed as dependencies
-        #[arg(short, long)]
+        #[arg(short = 'p', long)]
         deps: bool,
+        /// show only foreign/aur packages
+        #[arg(short = 'f', long)]
+        foreign: bool,
+    },
+
+    #[command(alias = "st")]
+    Stats,
+
+    #[command(alias = "h")]
+    History {
+        /// number of recent changes to show
+        #[arg(short = 'l', long, default_value_t = 50)]
+        limit: usize,
+    },
+
+    #[command(alias = "sink")]
+    Downgrade {
+        /// package to downgrade
+        package: String,
     },
 
     #[command(alias = "c")]
-    Clean,
+    Clean {
+        /// number of package versions to keep in cache
+        #[arg(short = 'k', long, default_value_t = 3)]
+        keep: usize,
+    },
 
     #[command(alias = "o")]
     Orphan,
