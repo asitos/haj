@@ -44,9 +44,11 @@ Commands (alias):
 Options:
 {options}"
 )]
+
+#[command(name = "haj", version, about = "fast, quiet, beautiful package manager for blahArch.")]
 pub struct Cli {
     #[command(subcommand)]
-    pub command: Commands,
+    pub command: Option<Commands>,
 
     /// restrict operations to the aur
     #[arg(short = 'a', long, global = true)]
@@ -93,7 +95,7 @@ pub struct Cli {
     pub version: Option<bool>,
 }
 
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, Clone)]
 pub enum Commands {
     #[command(alias = "t")]
     Tui,
@@ -197,4 +199,7 @@ pub enum Commands {
         #[arg(value_enum)]
         shell: clap_complete::Shell,
     },
+
+    #[command(external_subcommand)]
+    Interactive(Vec<String>),
 }

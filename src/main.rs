@@ -56,6 +56,120 @@ fn prompt_confirm(msg: &str) -> bool {
     }
 }
 
+pub enum InstallChoice {
+    Yes,
+    No,
+    View,
+}
+
+fn prompt_install(msg: &str) -> InstallChoice {
+    print!("{} {} ", "?".magenta().bold(), msg.bold());
+    let _ = std::io::stdout().flush();
+
+    if crossterm::terminal::enable_raw_mode().is_ok() {
+        let result;
+        loop {
+            if let Ok(crossterm::event::Event::Key(key)) = crossterm::event::read() {
+                if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL)
+                    && key.code == crossterm::event::KeyCode::Char('c')
+                {
+                    result = InstallChoice::No;
+                    break;
+                }
+                match key.code {
+                    crossterm::event::KeyCode::Char('y')
+                    | crossterm::event::KeyCode::Char('Y')
+                    | crossterm::event::KeyCode::Enter => {
+                        result = InstallChoice::Yes;
+                        break;
+                    }
+                    crossterm::event::KeyCode::Char('n')
+                    | crossterm::event::KeyCode::Char('N') => {
+                        result = InstallChoice::No;
+                        break;
+                    }
+                    crossterm::event::KeyCode::Char('v')
+                    | crossterm::event::KeyCode::Char('V') => {
+                        result = InstallChoice::View;
+                        break;
+                    }
+                    _ => continue,
+                }
+            }
+        }
+        let _ = crossterm::terminal::disable_raw_mode();
+        let display_str = match result {
+            InstallChoice::Yes => "Y",
+            InstallChoice::No => "n",
+            InstallChoice::View => "v",
+        };
+        println!("{}", display_str);
+        result
+    } else {
+        let mut input = String::new();
+        let _ = std::io::stdin().read_line(&mut input);
+        let input = input.trim().to_lowercase();
+        if input == "v" {
+            InstallChoice::View
+        } else if input.is_empty() || input == "y" {
+            InstallChoice::Yes
+        } else {
+            InstallChoice::No
+        }
+    }
+}
+
+async fn view_pkgbuilds(pkgs: &[String]) {
+    let pager = std::env::var("PAGER").unwrap_or_else(|_| {
+        if std::process::Command::new("bat").arg("--version").output().is_ok() {
+            "bat".to_string()
+        } else {
+            "less".to_string()
+        }
+    });
+
+    for pkg in pkgs {
+        let spinner = ui::progress::spinner(&format!("fetching PKGBUILD for {}...", pkg.magenta()));
+        let tmp_dir = format!("/tmp/haj_view_{}", pkg);
+
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+
+        let clone_status = std::process::Command::new("git")
+            .args([
+                "clone",
+                "--depth=1",
+                "--quiet",
+                &format!("https://aur.archlinux.org/{}.git", pkg),
+                &tmp_dir,
+            ])
+            .status();
+
+        spinner.finish_and_clear();
+
+        if clone_status.is_ok_and(|s| s.success()) {
+            let pkgbuild_path = format!("{}/PKGBUILD", tmp_dir);
+            
+            if std::path::Path::new(&pkgbuild_path).exists() {
+                let mut cmd = std::process::Command::new(&pager);
+                if pager.contains("bat") {
+                    cmd.args(["--style=plain", "--paging=always", "--language=bash", &pkgbuild_path]);
+                } else {
+                    cmd.arg(&pkgbuild_path);
+                }
+
+                let _ = cmd.status();
+            } else {
+                println!("{} PKGBUILD not found in repository for {}.", "✗".red(), pkg.bold());
+            }
+        } else {
+            println!("{} failed to fetch repository for {}.", "✗".red(), pkg.bold());
+        }
+
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+}
+
+
 async fn run_pacman(
     args: &[&str],
     spinner_msg: &str,
@@ -381,6 +495,247 @@ async fn run_pacman(
     spinner.finish_with_message(format!("{} {}", "✓".green(), success_msg));
 }
 
+async fn process_installation(
+    packages: Vec<String>,
+    alpm_handle: alpm::Alpm,
+    cli: &Cli,
+) {
+    let mut native_pkgs = Vec::new();
+    let mut aur_pkgs = Vec::new();
+
+    for pkg in packages {
+        let mut found_in_repo = false;
+
+        if !cli.aur {
+            for db in alpm_handle.syncdbs() {
+                if db.pkg(pkg.as_str()).is_ok() {
+                    found_in_repo = true;
+                    break;
+                }
+            }
+        }
+
+        if found_in_repo || cli.repo {
+            native_pkgs.push(pkg.clone());
+        } else {
+            let local_ver = alpm_handle
+                .localdb()
+                .pkg(pkg.as_str())
+                .map(|p| p.version().to_string())
+                .ok();
+            aur_pkgs.push((pkg.clone(), local_ver));
+        }
+    }
+
+    let mut native_summaries = Vec::new();
+    let mut total_dl = 0.0;
+    let mut total_inst = 0.0;
+
+    if !native_pkgs.is_empty() {
+        println!("{} resolving native dependencies...", "::".blue());
+        match core::resolver::get_install_summaries(&alpm_handle, &native_pkgs) {
+            Ok(summaries) => {
+                for sum in &summaries {
+                    total_dl += sum.download_size_mb;
+                    total_inst += sum.install_size_mb;
+                }
+                native_summaries = summaries;
+            }
+            Err(e) => {
+                println!("{} {}", "✗".red(), e);
+                native_pkgs.clear(); 
+            }
+        }
+    }
+
+    let mut resolved_aur_pkgs = Vec::new();
+    if !aur_pkgs.is_empty() {
+        let check_spinner = ui::progress::spinner("querying aur...");
+
+        let mut url = String::from("https://aur.archlinux.org/rpc/v5/info?");
+        for (pkg, _) in &aur_pkgs {
+            url.push_str(&format!("arg[]={}&", pkg));
+        }
+
+        if let Ok(response) = reqwest::get(&url).await
+            && let Ok(json) = response.json::<serde_json::Value>().await
+            && let Some(results) = json.get("results").and_then(|r| r.as_array())
+        {
+            check_spinner.finish_and_clear();
+
+            for (pkg, local_ver) in aur_pkgs {
+                if let Some(result) = results.iter().find(|r| r.get("Name").and_then(|n| n.as_str()) == Some(&pkg)) {
+                    if let Some(aur_ver) = result.get("Version").and_then(|v| v.as_str()) {
+                        let mut is_update = false;
+                        let mut skip = false;
+
+                        if let Some(lv) = &local_ver {
+                            if lv == aur_ver {
+                                println!("{} {} is up to date ({}).", "✓".green(), pkg.magenta().bold(), aur_ver.dimmed());
+                                skip = true;
+                            } else {
+                                is_update = true;
+                            }
+                        }
+
+                        if !skip {
+                            resolved_aur_pkgs.push((pkg.clone(), aur_ver.to_string(), is_update, local_ver.clone()));
+                        }
+                    }
+                } else {
+                    println!("{} package '{}' not found on the aur.", "✗".red(), pkg.bold());
+                }
+            }
+        } else {
+            check_spinner.finish_and_clear();
+            println!("{} failed to query the aur.", "✗".red());
+        }
+    }
+
+    drop(alpm_handle);
+
+    if native_summaries.is_empty() && resolved_aur_pkgs.is_empty() {
+        println!("{} nothing to do.", "✓".green());
+        return;
+    }
+
+    println!("\n{}", "targets:".bold().white());
+
+    if !native_summaries.is_empty() {
+        println!("  {}", "native repositories:".dimmed());
+        for sum in &native_summaries {
+            println!("    {:<25} {}", sum.name.cyan().bold(), sum.version.dimmed());
+        }
+    }
+
+    if !resolved_aur_pkgs.is_empty() {
+        println!("  {}", "arch user repository:".dimmed());
+        for (pkg, aur_ver, is_update, local_ver) in &resolved_aur_pkgs {
+            if *is_update {
+                println!(
+                    "    {:<25} {} -> {}",
+                    pkg.magenta().bold(),
+                    local_ver.as_ref().unwrap().red(),
+                    aur_ver.green()
+                );
+            } else {
+                println!("    {:<25} {}", pkg.magenta().bold(), aur_ver.green());
+            }
+        }
+    }
+
+    if total_dl > 0.0 || total_inst > 0.0 {
+        println!("\n{:<15} {:.2} MB", "download:", total_dl);
+        println!("{:<15} {:.2} MB", "disk usage:", total_inst);
+    } else {
+        println!(); 
+    }
+
+    if !cli.noconfirm {
+        let has_aur = !resolved_aur_pkgs.is_empty();
+        let mut prompt_msg = if has_aur {
+            "Proceed with installation? [Y/n/v] (v = view PKGBUILDs)".to_string()
+        } else {
+            "Proceed with installation? [Y/n]".to_string()
+        };
+
+        loop {
+            let choice = if has_aur {
+                prompt_install(&prompt_msg)
+            } else {
+                if prompt_confirm(&prompt_msg) { InstallChoice::Yes } else { InstallChoice::No }
+            };
+
+            match choice {
+                InstallChoice::Yes => break, 
+                InstallChoice::No => {
+                    println!("{} aborted.", "✗".red());
+                    return;
+                }
+                InstallChoice::View => {
+                    let aur_names: Vec<String> = resolved_aur_pkgs.iter().map(|(pkg, _, _, _)| pkg.clone()).collect();
+                    view_pkgbuilds(&aur_names).await;
+                    
+                    prompt_msg = "Proceed with installation? [Y/n]".to_string(); 
+                }
+            }
+        }
+    }
+
+    if !native_pkgs.is_empty() {
+        let mut args = vec!["-S", "--noconfirm"];
+        args.extend(native_pkgs.iter().map(|s| s.as_str()));
+
+        run_pacman(
+            &args,
+            "installing native packages...",
+            "native packages installed successfully.",
+            cli.dry_run,
+            cli.verbose,
+            &cli.root,
+        )
+        .await;
+    }
+
+    if !resolved_aur_pkgs.is_empty() {
+        for (pkg, aur_ver, is_update, _) in resolved_aur_pkgs {
+            if cli.dry_run {
+                println!(
+                    "{} would build and install aur package: {}",
+                    "[dry run]".bold().yellow(),
+                    pkg.magenta()
+                );
+                continue;
+            }
+
+            println!(
+                "\n{} preparing {} ({})...",
+                "::".blue(),
+                pkg.magenta().bold(),
+                aur_ver.green()
+            );
+
+            match core::aur::build(&pkg, cli.verbose).await {
+                Ok(pkg_path) => {
+                    let spinner_msg = if is_update {
+                        format!("updating built package {}...", pkg.magenta().bold())
+                    } else {
+                        format!("installing built package {}...", pkg.magenta().bold())
+                    };
+
+                    let success_msg = if is_update {
+                        format!(
+                            "{} updated successfully ({}).",
+                            pkg.magenta().bold(),
+                            aur_ver.dimmed()
+                        )
+                    } else {
+                        format!(
+                            "{} installed successfully ({}).",
+                            pkg.magenta().bold(),
+                            aur_ver.dimmed()
+                        )
+                    };
+
+                    let pacman_args =
+                        vec!["-U", pkg_path.to_str().unwrap(), "--noconfirm"];
+
+                    run_pacman(
+                        &pacman_args,
+                        &spinner_msg,
+                        &success_msg,
+                        cli.dry_run,
+                        cli.verbose,
+                        &cli.root,
+                    )
+                    .await;
+                }
+                Err(e) => eprintln!("{} {}", "error:".red().bold(), e),
+            }
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tokio::spawn(async move {
@@ -395,10 +750,10 @@ async fn main() -> anyhow::Result<()> {
                 .status();
 
             let _ = std::fs::remove_file("/tmp/haj.lock");
-
             std::process::exit(130);
         }
     });
+
     let lock_file = OpenOptions::new()
         .read(true)
         .write(true)
@@ -424,8 +779,14 @@ async fn main() -> anyhow::Result<()> {
     cli.repo = cli.repo || config.repo_only;
     cli.verbose = cli.verbose || config.verbose;
 
+   
+    let active_command = cli.command.clone().unwrap_or_else(|| {
+        use clap::CommandFactory;
+        let _ = Cli::command().print_help();
+        std::process::exit(0);
+    });
 
-    match &cli.command {
+    match active_command {
         Commands::Tui => {
             tui::run().await?;
         }
@@ -433,8 +794,7 @@ async fn main() -> anyhow::Result<()> {
             use clap::CommandFactory;
             let mut cmd = Cli::command();
             let bin_name = cmd.get_name().to_string();
-            clap_complete::generate(*shell, &mut cmd, bin_name, &mut std::io::stdout());
-            return Ok(());
+            clap_complete::generate(shell, &mut cmd, bin_name, &mut std::io::stdout());
         }
         Commands::Update => {
             run_pacman(
@@ -452,225 +812,135 @@ async fn main() -> anyhow::Result<()> {
             let local_db = alpm_handle.localdb();
 
             match cmd {
-                Commands::Tui => unreachable!(),
-                Commands::Update => unreachable!(),
-                Commands::Completions { .. } => unreachable!(),
+                Commands::Tui | Commands::Completions { .. } | Commands::Update => unreachable!(),
+
                 Commands::Install { packages } => {
-                    let mut native_pkgs = Vec::new();
-                    let mut aur_pkgs = Vec::new();
+                    process_installation(packages, alpm_handle, &cli).await;
+                }
 
-                    for pkg in packages {
-                        let mut found_in_repo = false;
+                Commands::Interactive(queries) => {
+                    let query_str = queries.join(" ");
+                    println!("{} searching for '{}'...\n", "::".blue(), query_str.bold());
 
-                        if !cli.aur {
-                            for db in alpm_handle.syncdbs() {
-                                if db.pkg(pkg.as_str()).is_ok() {
-                                    found_in_repo = true;
-                                    break;
+                    let mut results = Vec::new();
+
+                    if !cli.aur {
+                        for db in alpm_handle.syncdbs() {
+                            for pkg in db.pkgs() {
+                                if pkg.name().to_lowercase().contains(&query_str.to_lowercase()) {
+                                    let is_installed = local_db.pkg(pkg.name()).is_ok();
+                                    let status = if is_installed {
+                                        format!("{} {}", db.name().blue(), "[installed]".cyan().bold())
+                                    } else {
+                                        db.name().blue().to_string()
+                                    };
+                                    results.push((
+                                        pkg.name().to_string(),
+                                        pkg.version().to_string(),
+                                        status,
+                                        pkg.desc().unwrap_or("no description provided.").to_string(),
+                                    ));
                                 }
-                            }
-                        }
-
-                        if found_in_repo || cli.repo {
-                            native_pkgs.push(pkg.clone());
-                        } else {
-                            let local_ver = alpm_handle
-                                .localdb()
-                                .pkg(pkg.as_str())
-                                .map(|p| p.version().to_string())
-                                .ok();
-                            aur_pkgs.push((pkg.clone(), local_ver));
-                        }
-                    }
-
-                    let mut native_summaries = Vec::new();
-                    let mut total_dl = 0.0;
-                    let mut total_inst = 0.0;
-
-                    if !native_pkgs.is_empty() {
-                        println!("{} resolving native dependencies...", "::".blue());
-                        match core::resolver::get_install_summaries(&alpm_handle, &native_pkgs) {
-                            Ok(summaries) => {
-                                for sum in &summaries {
-                                    total_dl += sum.download_size_mb;
-                                    total_inst += sum.install_size_mb;
-                                }
-                                native_summaries = summaries;
-                            }
-                            Err(e) => {
-                                println!("{} {}", "✗".red(), e);
-                                native_pkgs.clear(); 
                             }
                         }
                     }
 
-                    let mut resolved_aur_pkgs = Vec::new();
-                    if !aur_pkgs.is_empty() {
+                    if !cli.repo {
+                        let aur_url = format!("https://aur.archlinux.org/rpc/v5/search/{}?by=name", query_str);
                         let check_spinner = ui::progress::spinner("querying aur...");
-
-                        let mut url = String::from("https://aur.archlinux.org/rpc/v5/info?");
-                        for (pkg, _) in &aur_pkgs {
-                            url.push_str(&format!("arg[]={}&", pkg));
-                        }
-
-                        if let Ok(response) = reqwest::get(&url).await
+                        
+                        if let Ok(response) = reqwest::get(&aur_url).await
                             && let Ok(json) = response.json::<serde_json::Value>().await
-                            && let Some(results) = json.get("results").and_then(|r| r.as_array())
+                            && let Some(aur_results) = json.get("results").and_then(|r| r.as_array())
                         {
                             check_spinner.finish_and_clear();
+                            for pkg in aur_results {
+                                let name = pkg.get("Name").and_then(|n| n.as_str()).unwrap_or("unknown");
+                                let version = pkg.get("Version").and_then(|v| v.as_str()).unwrap_or("");
+                                let desc = pkg.get("Description").and_then(|d| d.as_str()).unwrap_or("no description provided.");
+                                let votes = pkg.get("NumVotes").and_then(|v| v.as_u64()).unwrap_or(0);
 
-                            for (pkg, local_ver) in aur_pkgs {
-                                if let Some(result) = results.iter().find(|r| r.get("Name").and_then(|n| n.as_str()) == Some(&pkg)) {
-                                    if let Some(aur_ver) = result.get("Version").and_then(|v| v.as_str()) {
-                                        let mut is_update = false;
-                                        let mut skip = false;
-
-                                        if let Some(lv) = &local_ver {
-                                            if lv == aur_ver {
-                                                println!("{} {} is up to date ({}).", "✓".green(), pkg.magenta().bold(), aur_ver.dimmed());
-                                                skip = true;
-                                            } else {
-                                                is_update = true;
-                                            }
-                                        }
-
-                                        if !skip {
-                                            resolved_aur_pkgs.push((pkg.clone(), aur_ver.to_string(), is_update, local_ver.clone()));
-                                        }
-                                    }
+                                let is_installed = local_db.pkg(name).is_ok();
+                                let status = if is_installed {
+                                    format!("{} (+{}) {}", "aur".magenta(), votes, "[installed]".cyan().bold())
                                 } else {
-                                    println!("{} package '{}' not found on the aur.", "✗".red(), pkg.bold());
-                                }
+                                    format!("{} (+{})", "aur".magenta(), votes)
+                                };
+
+                                results.push((
+                                    name.to_string(),
+                                    version.to_string(),
+                                    status,
+                                    desc.to_string(),
+                                ));
                             }
                         } else {
                             check_spinner.finish_and_clear();
-                            println!("{} failed to query the aur.", "✗".red());
                         }
                     }
 
-                    drop(alpm_handle);
-
-                    if native_summaries.is_empty() && resolved_aur_pkgs.is_empty() {
-                        println!("{} nothing to do.", "✓".green());
+                    if results.is_empty() {
+                        println!("{} no packages found matching '{}'.", "✗".red(), query_str.bold());
                         return Ok(());
                     }
 
-                    println!("\n{}", "targets:".bold().white());
+                    println!(
+                        "  {:<4} {:<35} {:<20} {}",
+                        "#".white().bold(),
+                        "package".white().bold(),
+                        "version".white().bold(),
+                        "origin/status".white().bold()
+                    );
+                    println!("  {}", "-".repeat(78).dimmed());
 
-                    if !native_summaries.is_empty() {
-                        println!("  {}", "native repositories:".dimmed());
-                        for sum in &native_summaries {
-                            println!("    {:<25} {}", sum.name.cyan().bold(), sum.version.dimmed());
-                        }
+                    for (i, (name, ver, status, desc)) in results.iter().enumerate() {
+                        let name_colored = if status.contains("aur") {
+                            name.magenta().bold().to_string()
+                        } else {
+                            name.cyan().bold().to_string()
+                        };
+
+                        println!(
+                            "  {:<4} {:<35} {:<20} {}",
+                            format!("[{}]", i + 1).green().bold(),
+                            name_colored,
+                            ver.dimmed(),
+                            status
+                        );
+                        println!("       {}\n", desc.dimmed());
                     }
 
-                    if !resolved_aur_pkgs.is_empty() {
-                        println!("  {}", "arch user repository:".dimmed());
-                        for (pkg, aur_ver, is_update, local_ver) in &resolved_aur_pkgs {
-                            if *is_update {
-                                println!(
-                                    "    {:<25} {} -> {}",
-                                    pkg.magenta().bold(),
-                                    local_ver.as_ref().unwrap().red(),
-                                    aur_ver.green()
-                                );
-                            } else {
-                                println!("    {:<25} {}", pkg.magenta().bold(), aur_ver.green());
-                            }
-                        }
-                    }
+                    print!("{} enter packages to install (e.g., 1 2 3) [leave blank to abort]: ", "?".magenta().bold());
+                    let _ = std::io::stdout().flush();
+                    let mut input = String::new();
+                    std::io::stdin().read_line(&mut input).unwrap();
 
-                    if total_dl > 0.0 || total_inst > 0.0 {
-                        println!("\n{:<15} {:.2} MB", "download:", total_dl);
-                        println!("{:<15} {:.2} MB", "disk usage:", total_inst);
-                    } else {
-                        println!(); 
-                    }
+                    let selections: Vec<usize> = input
+                        .split_whitespace()
+                        .filter_map(|s| s.parse::<usize>().ok())
+                        .filter(|&n| n > 0 && n <= results.len())
+                        .collect();
 
-                    if !cli.noconfirm && !prompt_confirm("Proceed with installation? [Y/n]") {
+                    if selections.is_empty() {
                         println!("{} aborted.", "✗".red());
                         return Ok(());
                     }
 
-                    if !native_pkgs.is_empty() {
-                        let mut args = vec!["-S", "--noconfirm"];
-                        args.extend(native_pkgs.iter().map(|s| s.as_str()));
-
-                        run_pacman(
-                            &args,
-                            "installing native packages...",
-                            "native packages installed successfully.",
-                            cli.dry_run,
-                            cli.verbose,
-                            &cli.root,
-                        )
-                        .await;
+                    let mut pkgs_to_install = Vec::new();
+                    for idx in selections {
+                        pkgs_to_install.push(results[idx - 1].0.clone());
                     }
 
-                    if !resolved_aur_pkgs.is_empty() {
-                        for (pkg, aur_ver, is_update, _) in resolved_aur_pkgs {
-                            if cli.dry_run {
-                                println!(
-                                    "{} would build and install aur package: {}",
-                                    "[dry run]".bold().yellow(),
-                                    pkg.magenta()
-                                );
-                                continue;
-                            }
-
-                            println!(
-                                "\n{} preparing {} ({})...",
-                                "::".blue(),
-                                pkg.magenta().bold(),
-                                aur_ver.green()
-                            );
-
-                            match core::aur::build(&pkg, cli.verbose).await {
-                                Ok(pkg_path) => {
-                                    let spinner_msg = if is_update {
-                                        format!("updating built package {}...", pkg.magenta().bold())
-                                    } else {
-                                        format!("installing built package {}...", pkg.magenta().bold())
-                                    };
-
-                                    let success_msg = if is_update {
-                                        format!(
-                                            "{} updated successfully ({}).",
-                                            pkg.magenta().bold(),
-                                            aur_ver.dimmed()
-                                        )
-                                    } else {
-                                        format!(
-                                            "{} installed successfully ({}).",
-                                            pkg.magenta().bold(),
-                                            aur_ver.dimmed()
-                                        )
-                                    };
-
-                                    let pacman_args =
-                                        vec!["-U", pkg_path.to_str().unwrap(), "--noconfirm"];
-
-                                    run_pacman(
-                                        &pacman_args,
-                                        &spinner_msg,
-                                        &success_msg,
-                                        cli.dry_run,
-                                        cli.verbose,
-                                        &cli.root,
-                                    )
-                                    .await;
-                                }
-                                Err(e) => eprintln!("{} {}", "error:".red().bold(), e),
-                            }
-                        }
-                    }
+                    println!("{} queueing {} for installation...\n", "✓".green(), pkgs_to_install.join(", ").cyan());
+                    
+                    process_installation(pkgs_to_install, alpm_handle, &cli).await;
                 }
 
                 Commands::Remove { packages } => {
                     println!("{} resolving targets...\n", "✓".green());
 
                     let mut found = true;
-                    for pkg in packages {
+                    for pkg in &packages {
                         if local_db.pkg(pkg.as_str()).is_err() {
                             println!("{} package '{}' is not installed.", "✗".red(), pkg.bold());
                             found = false;
@@ -684,7 +954,7 @@ async fn main() -> anyhow::Result<()> {
 
                     let print_cmd = std::process::Command::new("pacman")
                         .arg("-Rsp")
-                        .args(packages)
+                        .args(&packages)
                         .output()
                         .expect("failed to execute pacman");
 
@@ -754,7 +1024,7 @@ async fn main() -> anyhow::Result<()> {
 
                     drop(alpm_handle);
 
-                    if *sysupgrade {
+                    if sysupgrade {
                         println!("{} syncing package databases...\n", "::".blue().bold());
                         let status = std::process::Command::new("sudo")
                             .args(["pacman", "-Sy"])
@@ -918,13 +1188,13 @@ async fn main() -> anyhow::Result<()> {
 
                 Commands::History { limit } => {
                     drop(alpm_handle);
-                    core::history::show_history(*limit);
+                    core::history::show_history(limit);
                 }
 
                 Commands::Downgrade { package } => {
                     drop(alpm_handle);
 
-                    if let Some(archive_path) = core::downgrade::select_downgrade_target(package) {
+                    if let Some(archive_path) = core::downgrade::select_downgrade_target(&package) {
                         let mut args = vec!["-U", archive_path.to_str().unwrap()];
                         if cli.noconfirm {
                             args.push("--noconfirm");
@@ -947,7 +1217,7 @@ async fn main() -> anyhow::Result<()> {
 
                 Commands::Clean { keep } => {
                     drop(alpm_handle);
-                    core::cache::scrub(*keep);
+                    core::cache::scrub(keep);
                 }
 
                 Commands::Search { query } => {
@@ -1062,14 +1332,60 @@ async fn main() -> anyhow::Result<()> {
 
                 Commands::Show { package } => match local_db.pkg(package.as_str()) {
                     Ok(pkg) => {
-                        println!("found locally: {} v{}", pkg.name(), pkg.version());
-                        println!("description: {}", pkg.desc().unwrap_or("none"));
+                        println!(
+                            "{} {} {}",
+                            "::".blue(),
+                            pkg.name().cyan().bold(),
+                            pkg.version().dimmed()
+                        );
+                        if let Some(desc) = pkg.desc() {
+                            println!("   {}", desc.italic());
+                        }
+
+                        let format_mb = |bytes: i64| -> String {
+                            format!("{:.2} MB", bytes as f64 / 1_048_576.0)
+                        };
+                        println!("\n   {:<15} {}", "size:", format_mb(pkg.isize()).green());
+                        
+                        let reason = match pkg.reason() {
+                            alpm::PackageReason::Explicit => "explicitly installed",
+                            alpm::PackageReason::Depend => "installed as a dependency",
+                        };
+                        println!("   {:<15} {}", "reason:", reason.yellow());
+
+                        let depends = pkg.depends();
+                        println!("\n{}", "depends on:".bold().white());
+                        if depends.is_empty() {
+                            println!("  {}", "none".dimmed());
+                        } else {
+                            let deps_list: Vec<_> = depends.iter().collect();
+                            for (i, dep) in deps_list.iter().enumerate() {
+                                let is_last = i == deps_list.len() - 1;
+                                let prefix = if is_last { "└─" } else { "├─" };
+                                println!("  {} {}", prefix.dimmed(), dep.name().magenta());
+                            }
+                        }
+
+                        let required_by = pkg.required_by();
+                        println!("\n{}", "required by:".bold().white());
+                        if required_by.is_empty() {
+                            println!("  {}", "none".dimmed());
+                        } else {
+                            for (i, req) in required_by.iter().enumerate() {
+                                let is_last = i == required_by.len() - 1;
+                                let prefix = if is_last { "└─" } else { "├─" };
+                                println!("  {} {}", prefix.dimmed(), req.cyan());
+                            }
+                        }
+                        println!(); 
                     }
-                    Err(_) => println!(
-                        "{} package '{}' not found in local database.",
-                        "✗".red(),
-                        package
-                    ),
+                    Err(_) => {
+                        println!(
+                            "{} package '{}' not found in local database.",
+                            "✗".red(),
+                            package.bold()
+                        );
+                    }
                 },
 
                 Commands::Orphan => {
@@ -1103,18 +1419,18 @@ async fn main() -> anyhow::Result<()> {
                 }
 
                 Commands::Owns { file_path } => {
-                    core::alpm_init::owns(&alpm_handle, file_path);
+                    core::alpm_init::owns(&alpm_handle, &file_path);
                 }
 
                 Commands::Files { package } => {
-                    core::alpm_init::files(&alpm_handle, package);
+                    core::alpm_init::files(&alpm_handle, &package);
                 }
 
                 Commands::Load { archive_path } => {
                     drop(alpm_handle);
 
                     run_pacman(
-                        &["-U", archive_path, "--noconfirm"],
+                        &["-U", &archive_path, "--noconfirm"],
                         "loading package archive...",
                         "package loaded successfully.",
                         cli.dry_run,
@@ -1147,19 +1463,19 @@ async fn main() -> anyhow::Result<()> {
                 } => {
                     drop(alpm_handle);
 
-                    let reason_flag = if *as_explicit {
+                    let reason_flag = if as_explicit {
                         "--asexplicit"
                     } else {
                         "--asdeps"
                     };
-                    let state = if *as_explicit {
+                    let state = if as_explicit {
                         "explicit"
                     } else {
                         "dependency"
                     };
 
                     run_pacman(
-                        &["-D", reason_flag, package],
+                        &["-D", reason_flag, &package],
                         "updating database records...",
                         &format!("marked {} as {}.", package, state),
                         cli.dry_run,
@@ -1192,8 +1508,8 @@ async fn main() -> anyhow::Result<()> {
                     for pkg in local_db.pkgs() {
                         let is_explicit = pkg.reason() == alpm::PackageReason::Explicit;
 
-                        if *explicit && !is_explicit { continue; }
-                        if *deps && is_explicit { continue; }
+                        if explicit && !is_explicit { continue; }
+                        if deps && is_explicit { continue; }
 
                         let mut found_in_repo = false;
                         for db in alpm_handle.syncdbs() {
@@ -1203,7 +1519,7 @@ async fn main() -> anyhow::Result<()> {
                             }
                         }
 
-                        if *foreign && found_in_repo { continue; }
+                        if foreign && found_in_repo { continue; }
 
                         if found_in_repo {
                             println!(
