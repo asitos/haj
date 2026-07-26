@@ -66,6 +66,7 @@ async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_
     }
 
     let is_root = unsafe { libc::geteuid() == 0 };
+
     let mut child_cmd = if is_root {
         tokio::process::Command::new("pacman")
     } else {
@@ -90,12 +91,15 @@ async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_
         } else {
             println!("{} operation failed.", "✗".red());
         }
-        return; 
+        return;
     }
 
     child_cmd.arg("--color=never");
 
-    let spinner = ui::progress::spinner(spinner_msg);
+    let mut spinner = ui::progress::spinner(spinner_msg);
+    let mut last_spinner_msg = spinner_msg.to_string();
+    let mut context_buffer: Vec<String> = Vec::new(); 
+    let mut in_hook_phase = false;
 
     let mut child = child_cmd
         .args(args)
@@ -112,7 +116,7 @@ async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_
     let err_handle = tokio::spawn(async move {
         let mut err_str = String::new();
         let mut buf = [0u8; 1024];
-        while let Ok(n) = stderr.read(&mut buf).await {
+        while let Ok(n) = tokio::io::AsyncReadExt::read(&mut stderr, &mut buf).await {
             if n == 0 { break; }
             err_str.push_str(&String::from_utf8_lossy(&buf[..n]));
         }
@@ -123,7 +127,7 @@ async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_
     let mut current_line = String::new();
     let mut hook_alerts = Vec::new();
 
-    while let Ok(n) = stdout.read(&mut buf).await {
+    while let Ok(n) = tokio::io::AsyncReadExt::read(&mut stdout, &mut buf).await {
         if n == 0 { break; }
         let chunk = String::from_utf8_lossy(&buf[..n]);
 
@@ -132,28 +136,152 @@ async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_
                 let clean = current_line.trim();
                 if clean.is_empty() { continue; }
 
-                if clean.contains("ERROR:") || clean.contains("error:") || clean.contains("WARNING:") || clean.contains("warning:") {
-                    hook_alerts.push(clean.to_string());
+                let mut matched_spinner = true;
+                let lower_clean = clean.to_lowercase();
+
+                if lower_clean.contains("error") || lower_clean.contains("warning") || lower_clean.contains("failed") {
+                    if !hook_alerts.contains(&clean.to_string()) {
+                        hook_alerts.push(clean.to_string());
+                    }
                 }
 
-                if clean.starts_with("::") {
-                    spinner.set_message(format!("{}", clean.replace("::", "→").cyan().bold()));
+                if clean.contains("Running pre-transaction hooks") || clean.contains("Running post-transaction hooks") {
+                    in_hook_phase = true;
+                    last_spinner_msg = format!("{} {}", "⚡".yellow(), clean.bold());
+                    spinner.set_message(last_spinner_msg.clone());
+                    
+                } else if in_hook_phase {
+                    if clean.starts_with('(') {
+                        last_spinner_msg = format!("{} {}", "⚡".yellow(), clean.bold());
+                        spinner.set_message(last_spinner_msg.clone());
+                    } else if clean.starts_with("::") {
+                        last_spinner_msg = clean.replace("::", "→").cyan().bold().to_string();
+                        spinner.set_message(last_spinner_msg.clone());
+                    } else {
+                        spinner.set_message(format!("{}   {}", "⚡".yellow(), clean.dimmed()));
+                        
+                        if lower_clean.contains("missing") || lower_clean.contains("not found") {
+                             if !hook_alerts.contains(&clean.to_string()) {
+                                 hook_alerts.push(clean.to_string());
+                             }
+                        }
+                    }
+                } 
+                
+                else if clean.starts_with("::") {
+                    last_spinner_msg = clean.replace("::", "→").cyan().bold().to_string();
+                    spinner.set_message(last_spinner_msg.clone());
+                    context_buffer.push(current_line.clone()); 
                 } else if clean.starts_with('(') {
-                    spinner.set_message(format!("{} {}", ":3".yellow(), clean.bold()));
-                } else if clean.contains("downloading") || clean.contains("installing") || clean.contains("removing") || clean.contains("upgrading") {
-                    spinner.set_message(format!("  {}", clean.dimmed()));
+                    last_spinner_msg = format!("{} {}", "⚡".yellow(), clean.bold());
+                    spinner.set_message(last_spinner_msg.clone());
+                } else if lower_clean.contains("downloading") || lower_clean.contains("installing") || lower_clean.contains("removing") || lower_clean.contains("upgrading") {
+                    last_spinner_msg = format!("  {}", clean.dimmed());
+                    spinner.set_message(last_spinner_msg.clone());
+                } else {
+                    matched_spinner = false;
+                }
+
+                if !matched_spinner && !in_hook_phase {
+                    context_buffer.push(current_line.clone());
+                    if context_buffer.len() > 15 {
+                        context_buffer.remove(0);
+                    }
                 }
                 
                 current_line.clear();
-            } else {
+            } else { 
                 current_line.push(c);
+                let lower = current_line.to_lowercase();
+                
+                let is_yn = lower.ends_with("[y/n]") || lower.ends_with("[y/n] ");
+                let is_choice = lower.ends_with("):") || lower.ends_with("): "); // Catches "Enter a number:"
+
+                if is_yn || is_choice {
+                    
+                    // 1. ANNIHILATE THE SPINNER
+                    // We must drop the background thread so it doesn't overwrite your typing
+                    spinner.finish_and_clear();
+                    
+                    // 2. Dump the Context Buffer
+                    if !context_buffer.is_empty() {
+                        for line in &context_buffer {
+                            println!("  {}", line.dimmed());
+                        }
+                        context_buffer.clear();
+                    }
+                    
+                    // 3. Print the Prompt
+                    use std::io::Write;
+                    print!("{} {} ", "❓".magenta().bold(), current_line.trim().bold());
+                    let _ = std::io::stdout().flush();
+                    
+                    // 4. Adaptive Input Capture
+                    let is_yn_prompt = is_yn;
+                    let user_input = tokio::task::spawn_blocking(move || {
+                        if crossterm::terminal::enable_raw_mode().is_ok() {
+                            let mut result = String::new();
+                            loop {
+                                if let Ok(crossterm::event::Event::Key(key)) = crossterm::event::read() {
+                                    if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) && key.code == crossterm::event::KeyCode::Char('c') {
+                                        result = "n\n".to_string(); 
+                                        println!("^C");
+                                        break;
+                                    }
+                                    match key.code {
+                                        crossterm::event::KeyCode::Enter => {
+                                            result.push('\n');
+                                            println!();
+                                            break;
+                                        }
+                                        crossterm::event::KeyCode::Backspace => {
+                                            // Only allow backspace for multi-char prompts
+                                            if !is_yn_prompt && !result.is_empty() {
+                                                result.pop();
+                                                print!("\x08 \x08"); // Visually erase char from terminal
+                                                let _ = std::io::stdout().flush();
+                                            }
+                                        }
+                                        crossterm::event::KeyCode::Char(c) => {
+                                            result.push(c);
+                                            print!("{}", c);
+                                            let _ = std::io::stdout().flush();
+                                            
+                                            // Instant exit ONLY for Y/n prompts
+                                            if is_yn_prompt {
+                                                result.push('\n');
+                                                println!();
+                                                break;
+                                            }
+                                        }
+                                        _ => continue,
+                                    }
+                                }
+                            }
+                            let _ = crossterm::terminal::disable_raw_mode();
+                            result
+                        } else {
+                            let mut input = String::new();
+                            let _ = std::io::stdin().read_line(&mut input);
+                            input
+                        }
+                    }).await.unwrap_or_else(|_| "\n".to_string());
+
+                    // Send the keystrokes to pacman
+                    let _ = tokio::io::AsyncWriteExt::write_all(&mut stdin, user_input.as_bytes()).await;
+                    let _ = tokio::io::AsyncWriteExt::flush(&mut stdin).await;
+                    
+                    current_line.clear();
+                    
+                    // 5. RESURRECT THE SPINNER
+                    spinner = ui::progress::spinner(&last_spinner_msg);
+                }
             }
         }
     }
 
     let status = child.wait().await;
     let err_output = err_handle.await.unwrap_or_default();
-
     let is_success = status.as_ref().map_or(false, |s| s.success());
 
     if !is_success {
