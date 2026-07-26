@@ -384,6 +384,7 @@ async fn main() -> anyhow::Result<()> {
 
             match cmd {
                 Commands::Tui => unreachable!(),
+                Commands::Update => unreachable!(),
                 Commands::Install { packages } => {
                     let mut native_pkgs = Vec::new();
                     let mut aur_pkgs = Vec::new();
@@ -639,7 +640,7 @@ async fn main() -> anyhow::Result<()> {
                 Commands::Upgrade { sysupgrade } => {
                     // lock release baby
                     drop(alpm_handle);
-                    
+
                     println!("{} initiating system upgrade...\n", "::".blue().bold());
                     let mut args = vec!["-S"];
                     if *sysupgrade {
@@ -657,7 +658,8 @@ async fn main() -> anyhow::Result<()> {
                         "system upgraded successfully.",
                         cli.dry_run,
                         cli.verbose,
-                    ).await;
+                    )
+                    .await;
                 }
 
                 Commands::History { limit } => {
@@ -666,8 +668,8 @@ async fn main() -> anyhow::Result<()> {
                 }
 
                 Commands::Downgrade { package } => {
-                    drop(alpm_handle); 
-                    
+                    drop(alpm_handle);
+
                     if let Some(archive_path) = core::downgrade::select_downgrade_target(package) {
                         let mut args = vec!["-U", archive_path.to_str().unwrap()];
                         if cli.noconfirm {
@@ -676,11 +678,15 @@ async fn main() -> anyhow::Result<()> {
 
                         run_pacman(
                             &args,
-                            &format!("downgrading to {}...", archive_path.file_name().unwrap().to_string_lossy()),
+                            &format!(
+                                "downgrading to {}...",
+                                archive_path.file_name().unwrap().to_string_lossy()
+                            ),
                             "package downgraded successfully.",
                             cli.dry_run,
                             cli.verbose,
-                        ).await;
+                        )
+                        .await;
                     }
                 }
 

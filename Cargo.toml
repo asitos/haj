@@ -40,6 +40,7 @@ directories = "6.0.0"
 fs2 = "0.4.3"
 libc = "0.2.189"
 pacmanconf = "3.1.0"
+dirs = "6.0.0"
 
 [profile.release]
 opt-level = 3

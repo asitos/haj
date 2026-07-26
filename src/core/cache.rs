@@ -2,31 +2,44 @@ use owo_colors::OwoColorize;
 use std::process::Command;
 
 pub fn scrub(keep: usize) {
-    println!("{} scrubbing package cache (keeping last {} versions)...", "::".blue(), keep);
+    println!(
+        "{} scrubbing package cache (keeping last {} versions)...",
+        "::".blue(),
+        keep
+    );
 
-    let status = Command::new("paccache")
-        .args(["-r", "-k", &keep.to_string()])
+    let keep_str = keep.to_string();
+
+    let native_status = Command::new("paccache")
+        .args(["-r", "-k", &keep_str])
         .stdout(std::process::Stdio::inherit())
         .stderr(std::process::Stdio::inherit())
         .status();
 
-    match status {
-        Ok(s) if s.success() => {
-            // old aur cache cleanup
-            if let Some(home) = dirs::home_dir() {
-                let aur_cache = home.join(".cache/haj/aur");
-                if aur_cache.exists() {
-                    let _ = std::fs::remove_dir_all(&aur_cache);
-                    let _ = std::fs::create_dir_all(&aur_cache);
+    if native_status.as_ref().map_or(false, |s| !s.success()) {
+        println!("{} 'paccache' failed or was not found.", "✗".red());
+        println!(
+            "  ensure {} is installed (run {}).",
+            "pacman-contrib".bold(),
+            "haj i pacman-contrib".cyan()
+        );
+        return;
+    }
+
+    if let Some(home) = dirs::home_dir() {
+        let aur_cache = home.join(".cache/haj/aur");
+        if aur_cache.exists() {
+            if let Ok(entries) = std::fs::read_dir(&aur_cache) {
+                for entry in entries.filter_map(Result::ok) {
+                    if entry.path().is_dir() {
+                        let _ = Command::new("paccache")
+                            .args(["-r", "-k", &keep_str, "-c", entry.path().to_str().unwrap()])
+                            .output();
+                    }
                 }
             }
-            println!("\n{} cache scrubbed successfully.", "✓".green())
-        },
-        Ok(_) => println!("\n{} cache scrubber executed with warnings.", "!!!".yellow()),
-        Err(_) => {
-            println!("{} 'paccache' executable not found.", "✗".red());
-            println!("  the {} package is required for native cache management.", "pacman-contrib".bold());
-            println!("  run {} to install it.", "haj i pacman-contrib".cyan());
         }
     }
+
+    println!("\n{} cache scrubbed successfully.", "✓".green());
 }

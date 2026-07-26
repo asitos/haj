@@ -11,6 +11,7 @@ use clap::{Parser, Subcommand};
     disable_help_flag = true,
     disable_version_flag = true,
     help_template = "\
+{about}
 
 Usage: haj [OPTIONS] <COMMAND>
 
@@ -139,7 +140,7 @@ pub enum Commands {
         #[arg(short = 'n', long, default_value_t = 50)]
         limit: usize,
     },
-    
+
     #[command(alias = "sink")]
     Downgrade {
         /// package to downgrade

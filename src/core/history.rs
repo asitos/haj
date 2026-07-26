@@ -29,8 +29,16 @@ pub fn show_history(limit: usize) {
         return;
     }
 
-    let start = if entries.len() > limit { entries.len() - limit } else { 0 };
-    println!("{} showing last {} transactions:\n", "::".blue().bold(), limit.to_string().cyan());
+    let start = if entries.len() > limit {
+        entries.len() - limit
+    } else {
+        0
+    };
+    println!(
+        "{} showing last {} transactions:\n",
+        "::".blue().bold(),
+        limit.to_string().cyan()
+    );
 
     for entry in &entries[start..] {
         let parts: Vec<&str> = entry.splitn(2, " [ALPM] ").collect();

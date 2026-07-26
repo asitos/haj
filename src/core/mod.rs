@@ -4,6 +4,6 @@ pub mod escalate;
 pub mod pacnew;
 pub mod resolver;
 
-pub mod history;
-pub mod downgrade;
 pub mod cache;
+pub mod downgrade;
+pub mod history;
