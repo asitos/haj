@@ -4,7 +4,7 @@ use std::process::Stdio;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
-pub async fn build(pkg_name: &str) -> anyhow::Result<PathBuf> {
+pub async fn build(pkg_name: &str, is_verbose: bool) -> anyhow::Result<PathBuf> {
     // roooooot user check ahhhhh
     let is_root = unsafe { libc::geteuid() == 0 };
     if is_root {
@@ -128,77 +128,94 @@ pub async fn build(pkg_name: &str) -> anyhow::Result<PathBuf> {
         }
     }
 
-    let build_spinner =
-        crate::ui::progress::spinner(&format!("preparing to build {}...", pkg_name.bold()));
+    if is_verbose {
+        println!("{} [verbose] building {} with native output...", "::".blue(), pkg_name.bold());
+        let mut child = Command::new("makepkg")
+            .current_dir(&pkg_dir)
+            .args(&["-cf", "--noconfirm", "--nocheck"])
+            .stdin(Stdio::inherit())  // Give terminal control to makepkg
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .spawn()?;
 
-    let mut child = Command::new("makepkg")
-        .current_dir(&pkg_dir)
-        .args(&["-cf", "--noconfirm", "--nocheck"])
-        .stdin(Stdio::null()) // keyboard disconnect
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
+        let status = child.wait().await?;
+        if !status.success() {
+            anyhow::bail!("makepkg failed with code {}", status.code().unwrap_or(1));
+        }
+    } else {
 
-    let mut stdout = child.stdout.take().unwrap();
-    let mut stderr = child.stderr.take().unwrap();
+        let build_spinner =
+            crate::ui::progress::spinner(&format!("preparing to build {}...", pkg_name.bold()));
 
-    let err_handle = tokio::spawn(async move {
-        let mut err_str = String::new();
-        let mut buf = [0u8; 1024];
-        while let Ok(n) = stderr.read(&mut buf).await {
+        let mut child = Command::new("makepkg")
+            .current_dir(&pkg_dir)
+            .args(&["-cf", "--noconfirm", "--nocheck"])
+            .stdin(Stdio::null()) // keyboard disconnect
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+
+        let mut stdout = child.stdout.take().unwrap();
+        let mut stderr = child.stderr.take().unwrap();
+
+        let err_handle = tokio::spawn(async move {
+            let mut err_str = String::new();
+            let mut buf = [0u8; 1024];
+            while let Ok(n) = stderr.read(&mut buf).await {
+                if n == 0 {
+                    break;
+                }
+                err_str.push_str(&String::from_utf8_lossy(&buf[..n]));
+            }
+            err_str
+        });
+
+        let mut buf = [0u8; 128];
+        let mut current_line = String::new();
+
+        while let Ok(n) = stdout.read(&mut buf).await {
             if n == 0 {
                 break;
             }
-            err_str.push_str(&String::from_utf8_lossy(&buf[..n]));
-        }
-        err_str
-    });
+            let chunk = String::from_utf8_lossy(&buf[..n]);
 
-    let mut buf = [0u8; 128];
-    let mut current_line = String::new();
-
-    while let Ok(n) = stdout.read(&mut buf).await {
-        if n == 0 {
-            break;
-        }
-        let chunk = String::from_utf8_lossy(&buf[..n]);
-
-        for c in chunk.chars() {
-            if c == '\n' || c == '\r' {
-                let clean = current_line.trim();
-                if clean.starts_with("==> Making package:") {
-                    build_spinner
-                        .set_message(format!("{} initializing build environment...", "::".blue()));
-                } else if clean.starts_with("==> Retrieving sources") {
-                    build_spinner
-                        .set_message(format!("{} downloading source code...", "::".blue()));
-                } else if clean.starts_with("==> Starting build()") {
-                    build_spinner.set_message(format!(
-                        "{} compiling {} (this may take a while)...",
-                        "::".blue(),
-                        pkg_name.bold()
-                    ));
-                } else if clean.starts_with("==> Starting package()") {
-                    build_spinner.set_message(format!("{} packaging binary...", "::".blue()));
+            for c in chunk.chars() {
+                if c == '\n' || c == '\r' {
+                    let clean = current_line.trim();
+                    if clean.starts_with("==> Making package:") {
+                        build_spinner
+                            .set_message(format!("{} initializing build environment...", "::".blue()));
+                        } else if clean.starts_with("==> Retrieving sources") {
+                            build_spinner
+                                .set_message(format!("{} downloading source code...", "::".blue()));
+                            } else if clean.starts_with("==> Starting build()") {
+                                build_spinner.set_message(format!(
+                                        "{} compiling {} (this may take a while)...",
+                                        "::".blue(),
+                                        pkg_name.bold()
+                                ));
+                            } else if clean.starts_with("==> Starting package()") {
+                                build_spinner.set_message(format!("{} packaging binary...", "::".blue()));
+                            }
+                    current_line.clear();
+                } else {
+                    current_line.push(c);
                 }
-                current_line.clear();
-            } else {
-                current_line.push(c);
             }
         }
-    }
 
-    let status = child.wait().await?;
-    build_spinner.finish_and_clear();
+        let status = child.wait().await?;
+        build_spinner.finish_and_clear();
 
-    let err_output = err_handle.await.unwrap_or_default();
+        let err_output = err_handle.await.unwrap_or_default();
 
-    if !status.success() {
-        anyhow::bail!(
-            "makepkg failed (code {}):\n{}",
-            status.code().unwrap_or(1),
-            err_output.trim().red()
-        );
+        if !status.success() {
+            anyhow::bail!(
+                "makepkg failed (code {}):\n{}",
+                status.code().unwrap_or(1),
+                err_output.trim().red()
+            );
+        }
     }
 
     let mut built_pkg = None;

@@ -14,7 +14,45 @@ use owo_colors::OwoColorize;
 use std::io::{self, Write};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_run: bool) {
+// helper function for Y/n prompt
+fn prompt_confirm(msg: &str) -> bool {
+    print!("{} {} ", "?".magenta().bold(), msg.bold());
+    let _ = std::io::stdout().flush();
+
+    if crossterm::terminal::enable_raw_mode().is_ok() {
+        let mut result = true;
+        loop {
+            if let Ok(crossterm::event::Event::Key(key)) = crossterm::event::read() {
+                if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) && key.code == crossterm::event::KeyCode::Char('c') {
+                    result = false;
+                    break;
+                }
+                match key.code {
+                    crossterm::event::KeyCode::Char('y') | crossterm::event::KeyCode::Char('Y') | crossterm::event::KeyCode::Enter => {
+                        result = true;
+                        break;
+                    }
+                    crossterm::event::KeyCode::Char('n') | crossterm::event::KeyCode::Char('N') => {
+                        result = false;
+                        break;
+                    }
+                    _ => continue,
+                }
+            }
+        }
+        let _ = crossterm::terminal::disable_raw_mode();
+        println!("{}", if result { "Y" } else { "n" }); 
+        result
+    } else {
+        // Failsafe fallback
+        let mut input = String::new();
+        let _ = std::io::stdin().read_line(&mut input);
+        let input = input.trim().to_lowercase();
+        input.is_empty() || input == "y"
+    }
+}
+
+async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_run: bool, is_verbose: bool) {
     if is_dry_run {
         println!("{} no system changes will be made.", "[dry run]".bold().yellow());
         let arrow = "→".cyan();
@@ -28,8 +66,6 @@ async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_
         return;
     }
 
-    let spinner = ui::progress::spinner(spinner_msg);
-
     let is_root = unsafe { libc::geteuid() == 0 };
     let mut child_cmd = if is_root {
         tokio::process::Command::new("pacman")
@@ -39,8 +75,31 @@ async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_
         c
     };
 
-    // Strip ANSI codes so they don't break our string matching
+    // --- THE VERBOSE BYPASS ---
+    if is_verbose {
+        println!("{} [verbose] executing: pacman {}", "::".blue(), args.join(" "));
+        let mut child = child_cmd
+            .args(args)
+            .stdin(std::process::Stdio::inherit())
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::inherit())
+            .spawn()
+            .expect("failed to spawn pacman");
+
+        let status = child.wait().await;
+        if status.map_or(false, |s| s.success()) {
+            println!("{} {}", "✓".green(), success_msg);
+        } else {
+            println!("{} operation failed.", "✗".red());
+        }
+        return; // We return BEFORE the spinner is ever created!
+    }
+
+    // --- NON-VERBOSE PTY ENGINE ---
     child_cmd.arg("--color=never");
+
+    // WE ONLY START THE SPINNER HERE!
+    let spinner = ui::progress::spinner(spinner_msg);
 
     let mut child = child_cmd
         .args(args)
@@ -68,21 +127,9 @@ async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_
     let mut current_line = String::new();
     let mut hook_alerts = Vec::new();
 
-// --- ADD THIS BEFORE THE LOOP ---
-    let mut debug_file = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true) // Clears the file on every fresh run
-        .open("/tmp/haj_raw_stream.log")
-        .unwrap_or_else(|_| std::fs::File::create("/tmp/haj_raw_stream.log").unwrap());
-    // --------------------------------
-
     while let Ok(n) = stdout.read(&mut buf).await {
         if n == 0 { break; }
         let chunk = String::from_utf8_lossy(&buf[..n]);
-
-        use std::io::Write;
-        let _ = writeln!(debug_file, "CHUNK: {:?}", chunk);
 
         for c in chunk.chars() {
             if c == '\n' || c == '\r' {
@@ -96,7 +143,7 @@ async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_
                 if clean.starts_with("::") {
                     spinner.set_message(format!("{}", clean.replace("::", "→").cyan().bold()));
                 } else if clean.starts_with('(') {
-                    spinner.set_message(format!("{} {}", "⚡".yellow(), clean.bold()));
+                    spinner.set_message(format!("{} {}", ":3".yellow(), clean.bold()));
                 } else if clean.contains("downloading") || clean.contains("installing") || clean.contains("removing") || clean.contains("upgrading") {
                     spinner.set_message(format!("  {}", clean.dimmed()));
                 }
@@ -104,53 +151,6 @@ async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_
                 current_line.clear();
             } else {
                 current_line.push(c);
-                
-                let lower = current_line.to_lowercase();
-                
-                // Bulletproof Matching: explicitly looks for the trailing space pacman emits!
-                if lower.ends_with("[y/n] ") || lower.ends_with("): ") {
-                    
-                    spinner.set_message(format!("{} {}", "❓".magenta().bold(), current_line.trim().bold()));
-                    
-                    // Safely isolate terminal state manipulation to a separate thread
-                    let user_input = tokio::task::spawn_blocking(|| {
-                        if crossterm::terminal::enable_raw_mode().is_ok() {
-                            let mut result = "\n".to_string();
-                            loop {
-                                if let Ok(crossterm::event::Event::Key(key)) = crossterm::event::read() {
-                                    if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) && key.code == crossterm::event::KeyCode::Char('c') {
-                                        result = "n\n".to_string(); 
-                                        break;
-                                    }
-                                    match key.code {
-                                        crossterm::event::KeyCode::Char(c) => {
-                                            result = format!("{}\n", c);
-                                            break;
-                                        }
-                                        crossterm::event::KeyCode::Enter => {
-                                            result = "\n".to_string();
-                                            break;
-                                        }
-                                        _ => continue, // Ignore stray mouse/focus events
-                                    }
-                                }
-                            }
-                            let _ = crossterm::terminal::disable_raw_mode();
-                            result
-                        } else {
-                            // Failsafe: If raw mode panics, drop back to standard line reading
-                            let mut input = String::new();
-                            let _ = std::io::stdin().read_line(&mut input);
-                            input
-                        }
-                    }).await.unwrap_or_else(|_| "\n".to_string());
-
-                    // Send the keystroke to pacman and flush the pipe
-                    let _ = stdin.write_all(user_input.as_bytes()).await;
-                    let _ = stdin.flush().await;
-                    
-                    current_line.clear();
-                }
             }
         }
     }
@@ -160,7 +160,6 @@ async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_
 
     let is_success = status.as_ref().map_or(false, |s| s.success());
 
-    // 1. If the user hit 'n' or pacman aborted, stop here and show the red X.
     if !is_success {
         spinner.finish_with_message(format!(
             "{} operation aborted or failed (code {}):\n{}",
@@ -171,7 +170,6 @@ async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_
         return;
     }
 
-    // 2. If it succeeded but hooks (like mkinitcpio) threw errors, show them!
     if !hook_alerts.is_empty() {
         spinner.finish_with_message(format!("{} {}", "✓".green(), success_msg));
         println!("\n{}", "⚠️ transaction completed, but warnings/errors occurred during hooks:".yellow().bold());
@@ -182,7 +180,6 @@ async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_
         return;
     }
 
-    // 3. Perfect execution
     spinner.finish_with_message(format!("{} {}", "✓".green(), success_msg));
 }
 
@@ -216,6 +213,7 @@ async fn main() -> anyhow::Result<()> {
                 "syncing package databases from mirrors...",
                 "repositories synced successfully.",
                 cli.dry_run,
+                cli.verbose,
             )
             .await;
         }
@@ -270,16 +268,11 @@ async fn main() -> anyhow::Result<()> {
                                 println!("\n{:<15} {:.2} MB", "download:", total_dl);
                                 println!("{:<15} {:.2} MB", "disk usage:", total_inst);
 
-                                print!("\ncontinue with native packages? [Y/n] ");
-                                io::stdout().flush()?;
-
-                                let mut input = String::new();
-                                io::stdin().read_line(&mut input)?;
-
-                                if input.trim().eq_ignore_ascii_case("y") || input.trim().is_empty() {
-                                    do_native_install = true;
-                                } else {
-                                    println!("{} skipped native packages.", "✗".red());
+                                if !cli.noconfirm {
+                                    if !prompt_confirm("\nContinue with native packages? [Y/n]") {
+                                        do_native_install = false;
+                                        println!("{} skipped native packages.", "✗".red());
+                                    }
                                 }
                             }
                             Err(e) => println!("{} {}", "✗".red(), e),
@@ -301,6 +294,7 @@ async fn main() -> anyhow::Result<()> {
                             "installing native packages...",
                             "native packages installed successfully.",
                             cli.dry_run,
+                            cli.verbose,
                         )
                         .await;
                     }
@@ -345,7 +339,7 @@ async fn main() -> anyhow::Result<()> {
                             println!("\n{} preparing to install {} ({})...", "::".blue(), pkg.magenta().bold(), aur_ver.green());
                         }
 
-                        match core::aur::build(&pkg).await {
+                        match core::aur::build(&pkg, cli.verbose).await {
                             Ok(pkg_path) => {
                                 let spinner_msg = if is_update {
                                     format!("updating built package {}...", pkg.magenta().bold())
@@ -359,16 +353,14 @@ async fn main() -> anyhow::Result<()> {
                                     format!("{} installed successfully ({}).", pkg.magenta().bold(), aur_ver.dimmed())
                                 };
 
-                                let mut pacman_args = vec!["-U", pkg_path.to_str().unwrap()];
-                                if cli.noconfirm {
-                                    pacman_args.push("--noconfirm");
-                                }
+                                let mut pacman_args = vec!["-U", pkg_path.to_str().unwrap(), "--noconfirm"];
 
                                 run_pacman(
                                     &pacman_args,
                                     &spinner_msg,
                                     &success_msg,
                                     cli.dry_run,
+                                    cli.verbose,
                                 )
                                 .await;
                             }
@@ -393,32 +385,49 @@ async fn main() -> anyhow::Result<()> {
                         return Ok(());
                     }
 
-                    println!("{}", "tossing".bold().white());
-                    for pkg in packages {
-                        println!("  {}", pkg.magenta().bold());
+                    // Query pacman safely for the full cascading removal list
+                    let print_cmd = std::process::Command::new("pacman")
+                        .arg("-Rsp")
+                        .args(packages)
+                        .output()
+                        .expect("failed to execute pacman");
+
+                    if !print_cmd.status.success() {
+                        println!("{} failed to resolve dependencies. (do these packages conflict?)", "✗".red());
+                        return Ok(());
                     }
 
-                    print!("\ncontinue? [Y/n] ");
-                    io::stdout().flush()?;
-                    let mut input = String::new();
-                    io::stdin().read_line(&mut input)?;
+                    let stdout_str = String::from_utf8_lossy(&print_cmd.stdout);
+                    let targets: Vec<&str> = stdout_str.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
 
-                    if input.trim().eq_ignore_ascii_case("y") || input.trim().is_empty() {
-                        let mut args = vec!["-Rs", "--noconfirm"];
-                        args.extend(packages.iter().map(|s| s.as_str()));
-
-                        drop(alpm_handle);
-
-                        run_pacman(
-                            &args,
-                            "tossing packages back into the ocean...",
-                            "packages removed successfully.",
-                            cli.dry_run,
-                        )
-                        .await;
-                    } else {
-                        println!("{} aborted.", "✗".red());
+                    println!("{}", "tossing the following packages:".bold().white());
+                    for target in &targets {
+                        println!("  {}", target.magenta().bold());
                     }
+                    println!("\n{:<15} {}", "total:", targets.len().to_string().cyan());
+
+                    // Fire the blazing-fast UX prompt!
+                    if !cli.noconfirm {
+                        if !prompt_confirm("Proceed with removal? [Y/n]") {
+                            println!("{} aborted.", "✗".red());
+                            return Ok(());
+                        }
+                    }
+
+                    drop(alpm_handle);
+
+                    // We now safely force noconfirm because the user already approved it!
+                    let mut args = vec!["-Rs", "--noconfirm"];
+                    args.extend(packages.iter().map(|s| s.as_str()));
+
+                    run_pacman(
+                        &args,
+                        "tossing packages back into the ocean...",
+                        "packages removed successfully.",
+                        cli.dry_run,
+                        cli.verbose,
+                    )
+                    .await;
                 }
 
                 Commands::Clean => {
@@ -429,6 +438,7 @@ async fn main() -> anyhow::Result<()> {
                         "scrubbing the package cache...",
                         "cache cleared successfully.",
                         cli.dry_run,
+                        cli.verbose,
                     )
                     .await;
                 }
@@ -583,6 +593,7 @@ async fn main() -> anyhow::Result<()> {
                         "loading package archive...",
                         "package loaded successfully.",
                         cli.dry_run,
+                        cli.verbose,
                     )
                     .await;
                 }
@@ -598,6 +609,7 @@ async fn main() -> anyhow::Result<()> {
                         "fetching packages to cache...",
                         "packages downloaded successfully.",
                         cli.dry_run,
+                        cli.verbose,
                     )
                     .await;
                 }
@@ -624,6 +636,7 @@ async fn main() -> anyhow::Result<()> {
                         "updating database records...",
                         &format!("marked {} as {}.", package, state),
                         cli.dry_run,
+                        cli.verbose,
                     )
                     .await;
                 }
