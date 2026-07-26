@@ -62,6 +62,7 @@ async fn run_pacman(
     success_msg: &str,
     is_dry_run: bool,
     is_verbose: bool,
+    root: &Option<String>,
 ) {
     if is_dry_run {
         println!(
@@ -70,7 +71,8 @@ async fn run_pacman(
         );
         let arrow = "→".cyan();
         let cmd = args.join(" ");
-        println!("{arrow} would execute: sudo pacman {cmd}");
+        let root_arg = root.as_ref().map_or(String::new(), |r| format!("--root {} ", r));
+        println!("{arrow} would execute: sudo pacman {root_arg}{cmd}");
         return;
     }
 
@@ -88,6 +90,13 @@ async fn run_pacman(
         c.arg("pacman");
         c
     };
+
+    let mut final_args = Vec::new();
+    if let Some(r) = root {
+        final_args.push("--root");
+        final_args.push(r.as_str());
+    }
+    final_args.extend_from_slice(args);
 
     if is_verbose {
         println!(
@@ -342,15 +351,16 @@ async fn run_pacman(
     let status = child.wait().await;
     let err_output = err_handle.await.unwrap_or_default();
     let is_success = status.as_ref().is_ok_and(|s| s.success());
+    let exit_code = status.as_ref().map_or(1, |s| s.code().unwrap_or(1));
 
     if !is_success {
         spinner.finish_with_message(format!(
             "{} operation aborted or failed (code {}):\n{}",
             "✗".red(),
-            status.as_ref().map_or(1, |s| s.code().unwrap_or(1)),
+            exit_code,
             err_output.trim().red()
         ));
-        return;
+        std::process::exit(exit_code);
     }
 
     if !hook_alerts.is_empty() {
@@ -406,6 +416,7 @@ async fn main() -> anyhow::Result<()> {
                 "repositories synced successfully.",
                 cli.dry_run,
                 cli.verbose,
+                &cli.root,
             )
             .await;
         }
@@ -443,50 +454,117 @@ async fn main() -> anyhow::Result<()> {
                             aur_pkgs.push((pkg.clone(), local_ver));
                         }
                     }
-                    let mut do_native_install = false;
+
+                    let mut native_summaries = Vec::new();
+                    let mut total_dl = 0.0;
+                    let mut total_inst = 0.0;
 
                     if !native_pkgs.is_empty() {
-                        println!("{} resolving native dependencies...\n", "✓".green());
-
+                        println!("{} resolving native dependencies...", "::".blue());
                         match core::resolver::get_install_summaries(&alpm_handle, &native_pkgs) {
                             Ok(summaries) => {
-                                let mut total_dl = 0.0;
-                                let mut total_inst = 0.0;
-
-                                println!("{}", "installing (native)".bold().white());
                                 for sum in &summaries {
-                                    println!(
-                                        "  {} {}",
-                                        sum.name.cyan().bold(),
-                                        sum.version.dimmed()
-                                    );
                                     total_dl += sum.download_size_mb;
                                     total_inst += sum.install_size_mb;
                                 }
-
-                                println!("\n{:<15} {:.2} MB", "download:", total_dl);
-                                println!("{:<15} {:.2} MB", "disk usage:", total_inst);
-
-                                if !cli.noconfirm {
-                                    println!();
-                                    if !prompt_confirm("Continue with native packages? [Y/n]") {
-                                        do_native_install = false;
-                                        println!("{} skipped native packages.", "✗".red());
-                                    } else {
-                                        do_native_install = true;
-                                    }
-                                } else {
-                                    do_native_install = true;
-                                }
+                                native_summaries = summaries;
                             }
-                            Err(e) => println!("{} {}", "✗".red(), e),
+                            Err(e) => {
+                                println!("{} {}", "✗".red(), e);
+                                native_pkgs.clear(); 
+                            }
                         }
                     }
 
-                    // release var/lib/pacman/db.lck
+                    let mut resolved_aur_pkgs = Vec::new();
+                    if !aur_pkgs.is_empty() {
+                        let check_spinner = ui::progress::spinner("querying aur...");
+
+                        let mut url = String::from("https://aur.archlinux.org/rpc/v5/info?");
+                        for (pkg, _) in &aur_pkgs {
+                            url.push_str(&format!("arg[]={}&", pkg));
+                        }
+
+                        if let Ok(response) = reqwest::get(&url).await
+                            && let Ok(json) = response.json::<serde_json::Value>().await
+                            && let Some(results) = json.get("results").and_then(|r| r.as_array())
+                        {
+                            check_spinner.finish_and_clear();
+
+                            for (pkg, local_ver) in aur_pkgs {
+                                if let Some(result) = results.iter().find(|r| r.get("Name").and_then(|n| n.as_str()) == Some(&pkg)) {
+                                    if let Some(aur_ver) = result.get("Version").and_then(|v| v.as_str()) {
+                                        let mut is_update = false;
+                                        let mut skip = false;
+
+                                        if let Some(lv) = &local_ver {
+                                            if lv == aur_ver {
+                                                println!("{} {} is up to date ({}).", "✓".green(), pkg.magenta().bold(), aur_ver.dimmed());
+                                                skip = true;
+                                            } else {
+                                                is_update = true;
+                                            }
+                                        }
+
+                                        if !skip {
+                                            resolved_aur_pkgs.push((pkg.clone(), aur_ver.to_string(), is_update, local_ver.clone()));
+                                        }
+                                    }
+                                } else {
+                                    println!("{} package '{}' not found on the aur.", "✗".red(), pkg.bold());
+                                }
+                            }
+                        } else {
+                            check_spinner.finish_and_clear();
+                            println!("{} failed to query the aur.", "✗".red());
+                        }
+                    }
+
                     drop(alpm_handle);
 
-                    if do_native_install {
+                    if native_summaries.is_empty() && resolved_aur_pkgs.is_empty() {
+                        println!("{} nothing to do.", "✓".green());
+                        return Ok(());
+                    }
+
+                    println!("\n{}", "targets:".bold().white());
+
+                    if !native_summaries.is_empty() {
+                        println!("  {}", "native repositories:".dimmed());
+                        for sum in &native_summaries {
+                            println!("    {:<25} {}", sum.name.cyan().bold(), sum.version.dimmed());
+                        }
+                    }
+
+                    if !resolved_aur_pkgs.is_empty() {
+                        println!("  {}", "arch user repository:".dimmed());
+                        for (pkg, aur_ver, is_update, local_ver) in &resolved_aur_pkgs {
+                            if *is_update {
+                                println!(
+                                    "    {:<25} {} -> {}",
+                                    pkg.magenta().bold(),
+                                    local_ver.as_ref().unwrap().red(),
+                                    aur_ver.green()
+                                );
+                            } else {
+                                println!("    {:<25} {}", pkg.magenta().bold(), aur_ver.green());
+                            }
+                        }
+                    }
+
+                    if total_dl > 0.0 || total_inst > 0.0 {
+                        println!("\n{:<15} {:.2} MB", "download:", total_dl);
+                        println!("{:<15} {:.2} MB", "disk usage:", total_inst);
+                    } else {
+                        println!(); 
+                    }
+
+                    if !cli.noconfirm && !prompt_confirm("Proceed with installation? [Y/n]") {
+                        println!("{} aborted.", "✗".red());
+                        return Ok(());
+                    }
+
+                    if !native_pkgs.is_empty() {
                         let mut args = vec!["-S", "--noconfirm"];
                         args.extend(native_pkgs.iter().map(|s| s.as_str()));
 
@@ -496,112 +574,66 @@ async fn main() -> anyhow::Result<()> {
                             "native packages installed successfully.",
                             cli.dry_run,
                             cli.verbose,
+                            &cli.root,
                         )
                         .await;
                     }
 
-                    for (pkg, local_ver) in aur_pkgs {
-                        if cli.dry_run {
-                            println!(
-                                "{} would build and install aur package: {}",
-                                "[dry run]".bold().yellow(),
-                                pkg.magenta()
-                            );
-                            continue;
-                        }
-
-                        let check_spinner = ui::progress::spinner(&format!(
-                            "{} querying aur for {}...",
-                            "::".blue(),
-                            pkg.magenta().bold()
-                        ));
-                        let aur_url =
-                            format!("https://aur.archlinux.org/rpc/v5/info?arg[]={}", pkg);
-                        let mut aur_ver = String::new();
-
-                        if let Ok(response) = reqwest::get(&aur_url).await
-                            && let Ok(json) = response.json::<serde_json::Value>().await
-                            && let Some(results) = json.get("results").and_then(|r| r.as_array())
-                            && let Some(first) = results.first()
-                            && let Some(v) = first.get("Version").and_then(|v| v.as_str())
-                        {
-                            aur_ver = v.to_string();
-                        }
-
-                        check_spinner.finish_and_clear();
-
-                        if aur_ver.is_empty() {
-                            println!(
-                                "{} package '{}' not found on the aur.",
-                                "✗".red(),
-                                pkg.bold()
-                            );
-                            continue;
-                        }
-
-                        let mut is_update = false;
-                        if let Some(lv) = &local_ver {
-                            if lv == &aur_ver {
+                    if !resolved_aur_pkgs.is_empty() {
+                        for (pkg, aur_ver, is_update, _) in resolved_aur_pkgs {
+                            if cli.dry_run {
                                 println!(
-                                    "{} {} is up to date ({}). nothing to do.",
-                                    "✓".green(),
-                                    pkg.magenta().bold(),
-                                    aur_ver.dimmed()
+                                    "{} would build and install aur package: {}",
+                                    "[dry run]".bold().yellow(),
+                                    pkg.magenta()
                                 );
                                 continue;
                             }
-                            is_update = true;
+
                             println!(
-                                "\n{} preparing to update {} ({} -> {})...",
-                                "::".blue(),
-                                pkg.magenta().bold(),
-                                lv.red(),
-                                aur_ver.green()
-                            );
-                        } else {
-                            println!(
-                                "\n{} preparing to install {} ({})...",
+                                "\n{} preparing {} ({})...",
                                 "::".blue(),
                                 pkg.magenta().bold(),
                                 aur_ver.green()
                             );
-                        }
 
-                        match core::aur::build(&pkg, cli.verbose).await {
-                            Ok(pkg_path) => {
-                                let spinner_msg = if is_update {
-                                    format!("updating built package {}...", pkg.magenta().bold())
-                                } else {
-                                    format!("installing built package {}...", pkg.magenta().bold())
-                                };
+                            match core::aur::build(&pkg, cli.verbose).await {
+                                Ok(pkg_path) => {
+                                    let spinner_msg = if is_update {
+                                        format!("updating built package {}...", pkg.magenta().bold())
+                                    } else {
+                                        format!("installing built package {}...", pkg.magenta().bold())
+                                    };
 
-                                let success_msg = if is_update {
-                                    format!(
-                                        "{} updated successfully ({}).",
-                                        pkg.magenta().bold(),
-                                        aur_ver.dimmed()
+                                    let success_msg = if is_update {
+                                        format!(
+                                            "{} updated successfully ({}).",
+                                            pkg.magenta().bold(),
+                                            aur_ver.dimmed()
+                                        )
+                                    } else {
+                                        format!(
+                                            "{} installed successfully ({}).",
+                                            pkg.magenta().bold(),
+                                            aur_ver.dimmed()
+                                        )
+                                    };
+
+                                    let pacman_args =
+                                        vec!["-U", pkg_path.to_str().unwrap(), "--noconfirm"];
+
+                                    run_pacman(
+                                        &pacman_args,
+                                        &spinner_msg,
+                                        &success_msg,
+                                        cli.dry_run,
+                                        cli.verbose,
+                                        &cli.root,
                                     )
-                                } else {
-                                    format!(
-                                        "{} installed successfully ({}).",
-                                        pkg.magenta().bold(),
-                                        aur_ver.dimmed()
-                                    )
-                                };
-
-                                let pacman_args =
-                                    vec!["-U", pkg_path.to_str().unwrap(), "--noconfirm"];
-
-                                run_pacman(
-                                    &pacman_args,
-                                    &spinner_msg,
-                                    &success_msg,
-                                    cli.dry_run,
-                                    cli.verbose,
-                                )
-                                .await;
+                                    .await;
+                                }
+                                Err(e) => eprintln!("{} {}", "error:".red().bold(), e),
                             }
-                            Err(e) => eprintln!("{} {}", "error:".red().bold(), e),
                         }
                     }
                 }
@@ -668,6 +700,7 @@ async fn main() -> anyhow::Result<()> {
                         "packages removed successfully.",
                         cli.dry_run,
                         cli.verbose,
+                        &cli.root,
                     )
                     .await;
                 }
@@ -802,6 +835,7 @@ async fn main() -> anyhow::Result<()> {
                             "system upgraded successfully.",
                             cli.dry_run,
                             cli.verbose,
+                            &cli.root,
                         )
                         .await;
                     }
@@ -844,6 +878,7 @@ async fn main() -> anyhow::Result<()> {
                                         &success_msg,
                                         cli.dry_run,
                                         cli.verbose,
+                                        &cli.root,
                                     )
                                     .await;
                                 }
@@ -876,6 +911,7 @@ async fn main() -> anyhow::Result<()> {
                             "package downgraded successfully.",
                             cli.dry_run,
                             cli.verbose,
+                            &cli.root,
                         )
                         .await;
                     }
@@ -1037,6 +1073,7 @@ async fn main() -> anyhow::Result<()> {
                         "package loaded successfully.",
                         cli.dry_run,
                         cli.verbose,
+                        &cli.root,
                     )
                     .await;
                 }
@@ -1053,6 +1090,7 @@ async fn main() -> anyhow::Result<()> {
                         "packages downloaded successfully.",
                         cli.dry_run,
                         cli.verbose,
+                        &cli.root,
                     )
                     .await;
                 }
@@ -1080,6 +1118,7 @@ async fn main() -> anyhow::Result<()> {
                         &format!("marked {} as {}.", package, state),
                         cli.dry_run,
                         cli.verbose,
+                        &cli.root,
                     )
                     .await;
                 }
@@ -1348,6 +1387,7 @@ async fn main() -> anyhow::Result<()> {
                         &format!("group {} installed successfully.", name.cyan()),
                         cli.dry_run,
                         cli.verbose,
+                        &cli.root,
                     )
                     .await;
                 }
