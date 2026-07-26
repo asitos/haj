@@ -4,7 +4,6 @@ use pacmanconf::Config;
 use std::path::Path;
 
 pub fn init_alpm() -> Result<Alpm> {
-    // 1. Parse /etc/pacman.conf directly
     let config = Config::new()
         .map_err(|e| anyhow::anyhow!("failed to parse pacman.conf: {}", e))?;
 

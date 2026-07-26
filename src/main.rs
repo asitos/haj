@@ -195,15 +195,12 @@ async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_
                 let lower = current_line.to_lowercase();
                 
                 let is_yn = lower.ends_with("[y/n]") || lower.ends_with("[y/n] ");
-                let is_choice = lower.ends_with("):") || lower.ends_with("): "); // Catches "Enter a number:"
+                let is_choice = lower.ends_with("):") || lower.ends_with("): "); 
 
                 if is_yn || is_choice {
                     
-                    // 1. ANNIHILATE THE SPINNER
-                    // We must drop the background thread so it doesn't overwrite your typing
                     spinner.finish_and_clear();
                     
-                    // 2. Dump the Context Buffer
                     if !context_buffer.is_empty() {
                         for line in &context_buffer {
                             println!("  {}", line.dimmed());
@@ -211,12 +208,10 @@ async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_
                         context_buffer.clear();
                     }
                     
-                    // 3. Print the Prompt
                     use std::io::Write;
                     print!("{} {} ", "❓".magenta().bold(), current_line.trim().bold());
                     let _ = std::io::stdout().flush();
                     
-                    // 4. Adaptive Input Capture
                     let is_yn_prompt = is_yn;
                     let user_input = tokio::task::spawn_blocking(move || {
                         if crossterm::terminal::enable_raw_mode().is_ok() {
@@ -235,10 +230,9 @@ async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_
                                             break;
                                         }
                                         crossterm::event::KeyCode::Backspace => {
-                                            // Only allow backspace for multi-char prompts
                                             if !is_yn_prompt && !result.is_empty() {
                                                 result.pop();
-                                                print!("\x08 \x08"); // Visually erase char from terminal
+                                                print!("\x08 \x08"); 
                                                 let _ = std::io::stdout().flush();
                                             }
                                         }
@@ -247,7 +241,6 @@ async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_
                                             print!("{}", c);
                                             let _ = std::io::stdout().flush();
                                             
-                                            // Instant exit ONLY for Y/n prompts
                                             if is_yn_prompt {
                                                 result.push('\n');
                                                 println!();
@@ -267,13 +260,11 @@ async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_
                         }
                     }).await.unwrap_or_else(|_| "\n".to_string());
 
-                    // Send the keystrokes to pacman
                     let _ = tokio::io::AsyncWriteExt::write_all(&mut stdin, user_input.as_bytes()).await;
                     let _ = tokio::io::AsyncWriteExt::flush(&mut stdin).await;
                     
                     current_line.clear();
                     
-                    // 5. RESURRECT THE SPINNER
                     spinner = ui::progress::spinner(&last_spinner_msg);
                 }
             }
