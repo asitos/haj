@@ -5,14 +5,13 @@ mod network;
 mod tui;
 mod ui;
 
-use std::fs::OpenOptions;
-use std::os::unix::fs::OpenOptionsExt;
-use fs2::FileExt;
 use clap::Parser;
 use cli::{Cli, Commands};
+use fs2::FileExt;
 use owo_colors::OwoColorize;
-use std::io::{self, Write};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::os::unix::fs::OpenOptionsExt;
 
 // helper function for Y/n prompt
 fn prompt_confirm(msg: &str) -> bool {
@@ -20,15 +19,21 @@ fn prompt_confirm(msg: &str) -> bool {
     let _ = std::io::stdout().flush();
 
     if crossterm::terminal::enable_raw_mode().is_ok() {
-        let mut result = true;
+        let result;
         loop {
             if let Ok(crossterm::event::Event::Key(key)) = crossterm::event::read() {
-                if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) && key.code == crossterm::event::KeyCode::Char('c') {
+                if key
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::CONTROL)
+                    && key.code == crossterm::event::KeyCode::Char('c')
+                {
                     result = false;
                     break;
                 }
                 match key.code {
-                    crossterm::event::KeyCode::Char('y') | crossterm::event::KeyCode::Char('Y') | crossterm::event::KeyCode::Enter => {
+                    crossterm::event::KeyCode::Char('y')
+                    | crossterm::event::KeyCode::Char('Y')
+                    | crossterm::event::KeyCode::Enter => {
                         result = true;
                         break;
                     }
@@ -41,7 +46,7 @@ fn prompt_confirm(msg: &str) -> bool {
             }
         }
         let _ = crossterm::terminal::disable_raw_mode();
-        println!("{}", if result { "Y" } else { "n" }); 
+        println!("{}", if result { "Y" } else { "n" });
         result
     } else {
         let mut input = String::new();
@@ -51,9 +56,18 @@ fn prompt_confirm(msg: &str) -> bool {
     }
 }
 
-async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_run: bool, is_verbose: bool) {
+async fn run_pacman(
+    args: &[&str],
+    spinner_msg: &str,
+    success_msg: &str,
+    is_dry_run: bool,
+    is_verbose: bool,
+) {
     if is_dry_run {
-        println!("{} no system changes will be made.", "[dry run]".bold().yellow());
+        println!(
+            "{} no system changes will be made.",
+            "[dry run]".bold().yellow()
+        );
         let arrow = "→".cyan();
         let cmd = args.join(" ");
         println!("{arrow} would execute: sudo pacman {cmd}");
@@ -76,7 +90,11 @@ async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_
     };
 
     if is_verbose {
-        println!("{} [verbose] executing: pacman {}", "::".blue(), args.join(" "));
+        println!(
+            "{} [verbose] executing: pacman {}",
+            "::".blue(),
+            args.join(" ")
+        );
         let mut child = child_cmd
             .args(args)
             .stdin(std::process::Stdio::inherit())
@@ -86,7 +104,7 @@ async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_
             .expect("failed to spawn pacman");
 
         let status = child.wait().await;
-        if status.map_or(false, |s| s.success()) {
+        if status.is_ok_and(|s| s.success()) {
             println!("{} {}", "✓".green(), success_msg);
         } else {
             println!("{} operation failed.", "✗".red());
@@ -98,7 +116,7 @@ async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_
 
     let mut spinner = ui::progress::spinner(spinner_msg);
     let mut last_spinner_msg = spinner_msg.to_string();
-    let mut context_buffer: Vec<String> = Vec::new(); 
+    let mut context_buffer: Vec<String> = Vec::new();
     let mut in_hook_phase = false;
 
     let mut child = child_cmd
@@ -117,7 +135,9 @@ async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_
         let mut err_str = String::new();
         let mut buf = [0u8; 1024];
         while let Ok(n) = tokio::io::AsyncReadExt::read(&mut stderr, &mut buf).await {
-            if n == 0 { break; }
+            if n == 0 {
+                break;
+            }
             err_str.push_str(&String::from_utf8_lossy(&buf[..n]));
         }
         err_str
@@ -128,28 +148,35 @@ async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_
     let mut hook_alerts = Vec::new();
 
     while let Ok(n) = tokio::io::AsyncReadExt::read(&mut stdout, &mut buf).await {
-        if n == 0 { break; }
+        if n == 0 {
+            break;
+        }
         let chunk = String::from_utf8_lossy(&buf[..n]);
 
         for c in chunk.chars() {
             if c == '\n' || c == '\r' {
                 let clean = current_line.trim();
-                if clean.is_empty() { continue; }
+                if clean.is_empty() {
+                    continue;
+                }
 
                 let mut matched_spinner = true;
                 let lower_clean = clean.to_lowercase();
 
-                if lower_clean.contains("error") || lower_clean.contains("warning") || lower_clean.contains("failed") {
-                    if !hook_alerts.contains(&clean.to_string()) {
-                        hook_alerts.push(clean.to_string());
-                    }
+                if (lower_clean.contains("error")
+                    || lower_clean.contains("warning")
+                    || lower_clean.contains("failed"))
+                    && !hook_alerts.contains(&clean.to_string())
+                {
+                    hook_alerts.push(clean.to_string());
                 }
 
-                if clean.contains("Running pre-transaction hooks") || clean.contains("Running post-transaction hooks") {
+                if clean.contains("Running pre-transaction hooks")
+                    || clean.contains("Running post-transaction hooks")
+                {
                     in_hook_phase = true;
                     last_spinner_msg = format!("{} {}", "⚡".yellow(), clean.bold());
                     spinner.set_message(last_spinner_msg.clone());
-                    
                 } else if in_hook_phase {
                     if clean.starts_with('(') {
                         last_spinner_msg = format!("{} {}", "⚡".yellow(), clean.bold());
@@ -159,23 +186,25 @@ async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_
                         spinner.set_message(last_spinner_msg.clone());
                     } else {
                         spinner.set_message(format!("{}   {}", "⚡".yellow(), clean.dimmed()));
-                        
-                        if lower_clean.contains("missing") || lower_clean.contains("not found") {
-                             if !hook_alerts.contains(&clean.to_string()) {
-                                 hook_alerts.push(clean.to_string());
-                             }
+
+                        if (lower_clean.contains("missing") || lower_clean.contains("not found"))
+                            && !hook_alerts.contains(&clean.to_string())
+                        {
+                            hook_alerts.push(clean.to_string());
                         }
                     }
-                } 
-                
-                else if clean.starts_with("::") {
+                } else if clean.starts_with("::") {
                     last_spinner_msg = clean.replace("::", "→").cyan().bold().to_string();
                     spinner.set_message(last_spinner_msg.clone());
-                    context_buffer.push(current_line.clone()); 
+                    context_buffer.push(current_line.clone());
                 } else if clean.starts_with('(') {
                     last_spinner_msg = format!("{} {}", "⚡".yellow(), clean.bold());
                     spinner.set_message(last_spinner_msg.clone());
-                } else if lower_clean.contains("downloading") || lower_clean.contains("installing") || lower_clean.contains("removing") || lower_clean.contains("upgrading") {
+                } else if lower_clean.contains("downloading")
+                    || lower_clean.contains("installing")
+                    || lower_clean.contains("removing")
+                    || lower_clean.contains("upgrading")
+                {
                     last_spinner_msg = format!("  {}", clean.dimmed());
                     spinner.set_message(last_spinner_msg.clone());
                 } else {
@@ -188,38 +217,43 @@ async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_
                         context_buffer.remove(0);
                     }
                 }
-                
+
                 current_line.clear();
-            } else { 
+            } else {
                 current_line.push(c);
                 let lower = current_line.to_lowercase();
-                
+
                 let is_yn = lower.ends_with("[y/n]") || lower.ends_with("[y/n] ");
-                let is_choice = lower.ends_with("):") || lower.ends_with("): "); 
+                let is_choice = lower.ends_with("):") || lower.ends_with("): ");
 
                 if is_yn || is_choice {
-                    
                     spinner.finish_and_clear();
-                    
+
                     if !context_buffer.is_empty() {
                         for line in &context_buffer {
                             println!("  {}", line.dimmed());
                         }
                         context_buffer.clear();
                     }
-                    
+
                     use std::io::Write;
                     print!("{} {} ", "❓".magenta().bold(), current_line.trim().bold());
                     let _ = std::io::stdout().flush();
-                    
+
                     let is_yn_prompt = is_yn;
                     let user_input = tokio::task::spawn_blocking(move || {
                         if crossterm::terminal::enable_raw_mode().is_ok() {
                             let mut result = String::new();
                             loop {
-                                if let Ok(crossterm::event::Event::Key(key)) = crossterm::event::read() {
-                                    if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) && key.code == crossterm::event::KeyCode::Char('c') {
-                                        result = "n\n".to_string(); 
+                                if let Ok(crossterm::event::Event::Key(key)) =
+                                    crossterm::event::read()
+                                {
+                                    if key
+                                        .modifiers
+                                        .contains(crossterm::event::KeyModifiers::CONTROL)
+                                        && key.code == crossterm::event::KeyCode::Char('c')
+                                    {
+                                        result = "n\n".to_string();
                                         println!("^C");
                                         break;
                                     }
@@ -232,7 +266,7 @@ async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_
                                         crossterm::event::KeyCode::Backspace => {
                                             if !is_yn_prompt && !result.is_empty() {
                                                 result.pop();
-                                                print!("\x08 \x08"); 
+                                                print!("\x08 \x08");
                                                 let _ = std::io::stdout().flush();
                                             }
                                         }
@@ -240,7 +274,7 @@ async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_
                                             result.push(c);
                                             print!("{}", c);
                                             let _ = std::io::stdout().flush();
-                                            
+
                                             if is_yn_prompt {
                                                 result.push('\n');
                                                 println!();
@@ -258,13 +292,16 @@ async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_
                             let _ = std::io::stdin().read_line(&mut input);
                             input
                         }
-                    }).await.unwrap_or_else(|_| "\n".to_string());
+                    })
+                    .await
+                    .unwrap_or_else(|_| "\n".to_string());
 
-                    let _ = tokio::io::AsyncWriteExt::write_all(&mut stdin, user_input.as_bytes()).await;
+                    let _ = tokio::io::AsyncWriteExt::write_all(&mut stdin, user_input.as_bytes())
+                        .await;
                     let _ = tokio::io::AsyncWriteExt::flush(&mut stdin).await;
-                    
+
                     current_line.clear();
-                    
+
                     spinner = ui::progress::spinner(&last_spinner_msg);
                 }
             }
@@ -273,7 +310,7 @@ async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_
 
     let status = child.wait().await;
     let err_output = err_handle.await.unwrap_or_default();
-    let is_success = status.as_ref().map_or(false, |s| s.success());
+    let is_success = status.as_ref().is_ok_and(|s| s.success());
 
     if !is_success {
         spinner.finish_with_message(format!(
@@ -287,11 +324,16 @@ async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_
 
     if !hook_alerts.is_empty() {
         spinner.finish_with_message(format!("{} {}", "✓".green(), success_msg));
-        println!("\n{}", "⚠️ transaction completed, but warnings/errors occurred during hooks:".yellow().bold());
+        println!(
+            "\n{}",
+            "⚠️ transaction completed, but warnings/errors occurred during hooks:"
+                .yellow()
+                .bold()
+        );
         for alert in hook_alerts {
             println!("  {}", alert.yellow());
         }
-        println!(); 
+        println!();
         return;
     }
 
@@ -304,12 +346,16 @@ async fn main() -> anyhow::Result<()> {
         .read(true)
         .write(true)
         .create(true)
+        .truncate(true)
         .mode(0o666)
         .open("/tmp/haj.lock")
         .expect("failed to open lock file");
 
     if lock_file.try_lock_exclusive().is_err() {
-        println!("{} haj is currently running in another terminal. (waiting for lock...)", "✗".red());
+        println!(
+            "{} haj is currently running in another terminal. (waiting for lock...)",
+            "✗".red()
+        );
         lock_file.lock_exclusive().expect("failed to acquire lock");
     }
 
@@ -345,7 +391,7 @@ async fn main() -> anyhow::Result<()> {
 
                     for pkg in packages {
                         let mut found_in_repo = false;
-                        
+
                         if !cli.aur {
                             for db in alpm_handle.syncdbs() {
                                 if db.pkg(pkg.as_str()).is_ok() {
@@ -358,7 +404,11 @@ async fn main() -> anyhow::Result<()> {
                         if found_in_repo || cli.repo {
                             native_pkgs.push(pkg.clone());
                         } else {
-                            let local_ver = alpm_handle.localdb().pkg(pkg.as_str()).map(|p| p.version().to_string()).ok();
+                            let local_ver = alpm_handle
+                                .localdb()
+                                .pkg(pkg.as_str())
+                                .map(|p| p.version().to_string())
+                                .ok();
                             aur_pkgs.push((pkg.clone(), local_ver));
                         }
                     }
@@ -375,7 +425,11 @@ async fn main() -> anyhow::Result<()> {
 
                                 println!("{}", "installing (native)".bold().white());
                                 for sum in &summaries {
-                                    println!("  {} {}", sum.name.cyan().bold(), sum.version.dimmed());
+                                    println!(
+                                        "  {} {}",
+                                        sum.name.cyan().bold(),
+                                        sum.version.dimmed()
+                                    );
                                     total_dl += sum.download_size_mb;
                                     total_inst += sum.install_size_mb;
                                 }
@@ -383,18 +437,18 @@ async fn main() -> anyhow::Result<()> {
                                 println!("\n{:<15} {:.2} MB", "download:", total_dl);
                                 println!("{:<15} {:.2} MB", "disk usage:", total_inst);
 
-                                if !cli.noconfirm {
-                                    if !prompt_confirm("\nContinue with native packages? [Y/n]") {
-                                        do_native_install = false;
-                                        println!("{} skipped native packages.", "✗".red());
-                                    }
+                                if !cli.noconfirm
+                                    && !prompt_confirm("\nContinue with native packages? [Y/n]")
+                                {
+                                    do_native_install = false;
+                                    println!("{} skipped native packages.", "✗".red());
                                 }
                             }
                             Err(e) => println!("{} {}", "✗".red(), e),
                         }
                     }
 
-                    // release var/lib/pacman/db.lck 
+                    // release var/lib/pacman/db.lck
                     drop(alpm_handle);
 
                     if do_native_install {
@@ -414,44 +468,71 @@ async fn main() -> anyhow::Result<()> {
                         .await;
                     }
 
-                   for (pkg, local_ver) in aur_pkgs {
+                    for (pkg, local_ver) in aur_pkgs {
                         if cli.dry_run {
-                            println!("{} would build and install aur package: {}", "[dry run]".bold().yellow(), pkg.magenta());
+                            println!(
+                                "{} would build and install aur package: {}",
+                                "[dry run]".bold().yellow(),
+                                pkg.magenta()
+                            );
                             continue;
                         }
 
-                        let check_spinner = ui::progress::spinner(&format!("{} querying aur for {}...", "::".blue(), pkg.magenta().bold()));
-                        let aur_url = format!("https://aur.archlinux.org/rpc/v5/info?arg[]={}", pkg);
+                        let check_spinner = ui::progress::spinner(&format!(
+                            "{} querying aur for {}...",
+                            "::".blue(),
+                            pkg.magenta().bold()
+                        ));
+                        let aur_url =
+                            format!("https://aur.archlinux.org/rpc/v5/info?arg[]={}", pkg);
                         let mut aur_ver = String::new();
-                        
-                        if let Ok(response) = reqwest::get(&aur_url).await {
-                            if let Ok(json) = response.json::<serde_json::Value>().await {
-                                if let Some(results) = json.get("results").and_then(|r| r.as_array()) {
-                                    if let Some(first) = results.first() {
-                                        if let Some(v) = first.get("Version").and_then(|v| v.as_str()) {
-                                            aur_ver = v.to_string();
-                                        }
-                                    }
-                                }
-                            }
+
+                        if let Ok(response) = reqwest::get(&aur_url).await
+                            && let Ok(json) = response.json::<serde_json::Value>().await
+                            && let Some(results) = json.get("results").and_then(|r| r.as_array())
+                            && let Some(first) = results.first()
+                            && let Some(v) = first.get("Version").and_then(|v| v.as_str())
+                        {
+                            aur_ver = v.to_string();
                         }
+
                         check_spinner.finish_and_clear();
 
                         if aur_ver.is_empty() {
-                            println!("{} package '{}' not found on the aur.", "✗".red(), pkg.bold());
+                            println!(
+                                "{} package '{}' not found on the aur.",
+                                "✗".red(),
+                                pkg.bold()
+                            );
                             continue;
                         }
 
                         let mut is_update = false;
                         if let Some(lv) = &local_ver {
                             if lv == &aur_ver {
-                                println!("{} {} is up to date ({}). nothing to do.", "✓".green(), pkg.magenta().bold(), aur_ver.dimmed());
-                                continue; 
+                                println!(
+                                    "{} {} is up to date ({}). nothing to do.",
+                                    "✓".green(),
+                                    pkg.magenta().bold(),
+                                    aur_ver.dimmed()
+                                );
+                                continue;
                             }
                             is_update = true;
-                            println!("\n{} preparing to update {} ({} -> {})...", "::".blue(), pkg.magenta().bold(), lv.red(), aur_ver.green());
+                            println!(
+                                "\n{} preparing to update {} ({} -> {})...",
+                                "::".blue(),
+                                pkg.magenta().bold(),
+                                lv.red(),
+                                aur_ver.green()
+                            );
                         } else {
-                            println!("\n{} preparing to install {} ({})...", "::".blue(), pkg.magenta().bold(), aur_ver.green());
+                            println!(
+                                "\n{} preparing to install {} ({})...",
+                                "::".blue(),
+                                pkg.magenta().bold(),
+                                aur_ver.green()
+                            );
                         }
 
                         match core::aur::build(&pkg, cli.verbose).await {
@@ -463,12 +544,21 @@ async fn main() -> anyhow::Result<()> {
                                 };
 
                                 let success_msg = if is_update {
-                                    format!("{} updated successfully ({}).", pkg.magenta().bold(), aur_ver.dimmed())
+                                    format!(
+                                        "{} updated successfully ({}).",
+                                        pkg.magenta().bold(),
+                                        aur_ver.dimmed()
+                                    )
                                 } else {
-                                    format!("{} installed successfully ({}).", pkg.magenta().bold(), aur_ver.dimmed())
+                                    format!(
+                                        "{} installed successfully ({}).",
+                                        pkg.magenta().bold(),
+                                        aur_ver.dimmed()
+                                    )
                                 };
 
-                                let mut pacman_args = vec!["-U", pkg_path.to_str().unwrap(), "--noconfirm"];
+                                let pacman_args =
+                                    vec!["-U", pkg_path.to_str().unwrap(), "--noconfirm"];
 
                                 run_pacman(
                                     &pacman_args,
@@ -481,7 +571,7 @@ async fn main() -> anyhow::Result<()> {
                             }
                             Err(e) => eprintln!("{} {}", "error:".red().bold(), e),
                         }
-                    } 
+                    }
                 }
 
                 Commands::Remove { packages } => {
@@ -507,12 +597,19 @@ async fn main() -> anyhow::Result<()> {
                         .expect("failed to execute pacman");
 
                     if !print_cmd.status.success() {
-                        println!("{} failed to resolve dependencies. (do these packages conflict?)", "✗".red());
+                        println!(
+                            "{} failed to resolve dependencies. (do these packages conflict?)",
+                            "✗".red()
+                        );
                         return Ok(());
                     }
 
                     let stdout_str = String::from_utf8_lossy(&print_cmd.stdout);
-                    let targets: Vec<&str> = stdout_str.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+                    let targets: Vec<&str> = stdout_str
+                        .lines()
+                        .map(|l| l.trim())
+                        .filter(|l| !l.is_empty())
+                        .collect();
 
                     println!("{}", "tossing the following packages:".bold().white());
                     for target in &targets {
@@ -520,11 +617,9 @@ async fn main() -> anyhow::Result<()> {
                     }
                     println!("\n{:<15} {}", "total:", targets.len().to_string().cyan());
 
-                    if !cli.noconfirm {
-                        if !prompt_confirm("Proceed with removal? [Y/n]") {
-                            println!("{} aborted.", "✗".red());
-                            return Ok(());
-                        }
+                    if !cli.noconfirm && !prompt_confirm("Proceed with removal? [Y/n]") {
+                        println!("{} aborted.", "✗".red());
+                        return Ok(());
                     }
 
                     drop(alpm_handle);

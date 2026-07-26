@@ -4,21 +4,20 @@ use pacmanconf::Config;
 use std::path::Path;
 
 pub fn init_alpm() -> Result<Alpm> {
-    let config = Config::new()
-        .map_err(|e| anyhow::anyhow!("failed to parse pacman.conf: {}", e))?;
+    let config =
+        Config::new().map_err(|e| anyhow::anyhow!("failed to parse pacman.conf: {}", e))?;
 
-    let root_path = config.root_dir.unwrap_or_else(|| "/".to_string());
-    let db_path = config.db_path.unwrap_or_else(|| "/var/lib/pacman/".to_string());
-
-    let mut handle = Alpm::new(&root_path, &db_path).with_context(|| {
-        format!(
-            "failed to initialize alpm at root: {} and db: {}",
-            root_path, db_path
-        )
-    })?;
+    let handle =
+        Alpm::new(config.root_dir.as_str(), config.db_path.as_str()).with_context(|| {
+            format!(
+                "failed to initialize alpm at root: {} and db: {}",
+                config.root_dir, config.db_path
+            )
+        })?;
 
     for repo in &config.repos {
-        handle.register_syncdb(&repo.name, SigLevel::USE_DEFAULT)
+        handle
+            .register_syncdb(repo.name.as_str(), SigLevel::USE_DEFAULT)
             .map_err(|e| anyhow::anyhow!("failed to register repo '{}': {}", repo.name, e))?;
     }
 

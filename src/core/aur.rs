@@ -76,10 +76,10 @@ pub async fn build(pkg_name: &str, is_verbose: bool) -> anyhow::Result<PathBuf> 
     let mut all_deps = Vec::new();
     for line in srcinfo_str.lines() {
         let line = line.trim();
-        if line.starts_with("depends =") || line.starts_with("makedepends =") {
-            if let Some(dep) = line.split(" = ").nth(1) {
-                all_deps.push(dep.to_string());
-            }
+        if (line.starts_with("depends =") || line.starts_with("makedepends ="))
+            && let Some(dep) = line.split(" = ").nth(1)
+        {
+            all_deps.push(dep.to_string());
         }
     }
 
@@ -129,11 +129,15 @@ pub async fn build(pkg_name: &str, is_verbose: bool) -> anyhow::Result<PathBuf> 
     }
 
     if is_verbose {
-        println!("{} [verbose] building {} with native output...", "::".blue(), pkg_name.bold());
+        println!(
+            "{} [verbose] building {} with native output...",
+            "::".blue(),
+            pkg_name.bold()
+        );
         let mut child = Command::new("makepkg")
             .current_dir(&pkg_dir)
-            .args(&["-cf", "--noconfirm", "--nocheck"])
-            .stdin(Stdio::inherit())  
+            .args(["-cf", "--noconfirm", "--nocheck"])
+            .stdin(Stdio::inherit())
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
             .spawn()?;
@@ -143,13 +147,12 @@ pub async fn build(pkg_name: &str, is_verbose: bool) -> anyhow::Result<PathBuf> 
             anyhow::bail!("makepkg failed with code {}", status.code().unwrap_or(1));
         }
     } else {
-
         let build_spinner =
             crate::ui::progress::spinner(&format!("preparing to build {}...", pkg_name.bold()));
 
         let mut child = Command::new("makepkg")
             .current_dir(&pkg_dir)
-            .args(&["-cf", "--noconfirm", "--nocheck"])
+            .args(["-cf", "--noconfirm", "--nocheck"])
             .stdin(Stdio::null()) // keyboard disconnect
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -183,20 +186,22 @@ pub async fn build(pkg_name: &str, is_verbose: bool) -> anyhow::Result<PathBuf> 
                 if c == '\n' || c == '\r' {
                     let clean = current_line.trim();
                     if clean.starts_with("==> Making package:") {
+                        build_spinner.set_message(format!(
+                            "{} initializing build environment...",
+                            "::".blue()
+                        ));
+                    } else if clean.starts_with("==> Retrieving sources") {
                         build_spinner
-                            .set_message(format!("{} initializing build environment...", "::".blue()));
-                        } else if clean.starts_with("==> Retrieving sources") {
-                            build_spinner
-                                .set_message(format!("{} downloading source code...", "::".blue()));
-                            } else if clean.starts_with("==> Starting build()") {
-                                build_spinner.set_message(format!(
-                                        "{} compiling {} (this may take a while)...",
-                                        "::".blue(),
-                                        pkg_name.bold()
-                                ));
-                            } else if clean.starts_with("==> Starting package()") {
-                                build_spinner.set_message(format!("{} packaging binary...", "::".blue()));
-                            }
+                            .set_message(format!("{} downloading source code...", "::".blue()));
+                    } else if clean.starts_with("==> Starting build()") {
+                        build_spinner.set_message(format!(
+                            "{} compiling {} (this may take a while)...",
+                            "::".blue(),
+                            pkg_name.bold()
+                        ));
+                    } else if clean.starts_with("==> Starting package()") {
+                        build_spinner.set_message(format!("{} packaging binary...", "::".blue()));
+                    }
                     current_line.clear();
                 } else {
                     current_line.push(c);
