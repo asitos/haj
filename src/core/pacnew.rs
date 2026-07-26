@@ -1,93 +1,91 @@
 use owo_colors::OwoColorize;
-use std::fs;
-use std::io::{self, Write};
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::io::Write;
+use std::process::{Command, Stdio};
 
 pub fn manage_pacnew_files() {
-    println!("{} scanning /etc/ for .pacnew files...\n", "✓".green());
+    println!("{} scanning for .pacnew files...", "::".blue());
 
-    let mut pacnew_files = Vec::new();
-    scan_directory(Path::new("/etc"), &mut pacnew_files);
+    let output = Command::new("sudo")
+        .arg("find")
+        .arg("/etc")
+        .arg("-type")
+        .arg("f")
+        .arg("-name")
+        .arg("*.pacnew")
+        .output()
+        .expect("failed to search for pacnew files");
+
+    let files_str = String::from_utf8_lossy(&output.stdout);
+    let pacnew_files: Vec<&str> = files_str.lines().filter(|l| !l.trim().is_empty()).collect();
 
     if pacnew_files.is_empty() {
-        println!(
-            "{} no .pacnew files found. your configs are clean!",
-            "✓".green()
-        );
+        println!("{} no .pacnew files found. system is clean!", "✓".green());
         return;
     }
 
     println!(
-        "{} found {} config updates needing attention.\n",
-        "!".yellow(),
-        pacnew_files.len().bold()
+        "{} found {} pending merge(s):\n",
+        "✓".green(),
+        pacnew_files.len().to_string().cyan()
     );
 
+    let editor = std::env::var("MERGEPROG")
+        .or_else(|_| std::env::var("DIFFPROG"))
+        .unwrap_or_else(|_| "vimdiff".to_string());
+
     for pacnew in pacnew_files {
-        let original = pacnew.with_extension(""); // strips the .pacnew extension
+        let original = pacnew.trim_end_matches(".pacnew");
+        println!("  {} {}", "•".magenta(), original.bold());
+        println!("    └─ {}", pacnew.dimmed());
 
-        println!("{}", "=".repeat(50).dimmed());
-        println!("{} {}", "target:".cyan(), original.display());
-        println!("{} {}\n", "new:".magenta(), pacnew.display());
+        print!(
+            "\n{} merge these files now? [Y/n/q (quit)] ",
+            "?".magenta().bold()
+        );
+        let _ = std::io::stdout().flush();
 
-        loop {
-            print!("action [ (v)iew diff | (o)verwrite | (r)emove new | (s)kip ]: ");
-            io::stdout().flush().unwrap();
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input).unwrap();
+        let ans = input.trim().to_lowercase();
 
-            let mut input = String::new();
-            io::stdin().read_line(&mut input).unwrap();
-            let choice = input.trim().to_lowercase();
+        if ans == "q" {
+            println!("{} aborted.", "✗".red());
+            break;
+        } else if ans.is_empty() || ans == "y" {
+            let mut child = Command::new("sudo")
+                .arg(&editor)
+                .arg(original)
+                .arg(pacnew)
+                .stdin(Stdio::inherit())
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .expect("failed to launch diff editor");
 
-            match choice.as_str() {
-                "v" => {
-                    let status = Command::new("delta").arg(&original).arg(&pacnew).status();
+            let _ = child.wait();
 
-                    if status.is_err() {
-                        Command::new("diff")
-                            .arg("--color=always")
-                            .arg("-u")
-                            .arg(&original)
-                            .arg(&pacnew)
-                            .status()
-                            .ok();
-                    }
-                }
-                "o" => match fs::rename(&pacnew, &original) {
-                    Ok(_) => {
-                        println!("{} overwrote original with new config.", "✓".green());
-                        break;
-                    }
-                    Err(e) => println!("{} failed to overwrite: {}", "✗".red(), e),
-                },
-                "r" => match fs::remove_file(&pacnew) {
-                    Ok(_) => {
-                        println!("{} deleted .pacnew file.", "✓".green());
-                        break;
-                    }
-                    Err(e) => println!("{} failed to delete: {}", "✗".red(), e),
-                },
-                "s" | "" => {
-                    println!("{} skipped.", "→".cyan());
-                    break;
-                }
-                _ => println!("{} invalid choice.", "✗".red()),
+            print!(
+                "\n{} delete {}? [Y/n] ",
+                "?".magenta().bold(),
+                pacnew.dimmed()
+            );
+            let _ = std::io::stdout().flush();
+
+            let mut del_input = String::new();
+            std::io::stdin().read_line(&mut del_input).unwrap();
+            let del_ans = del_input.trim().to_lowercase();
+
+            if del_ans.is_empty() || del_ans == "y" {
+                Command::new("sudo")
+                    .arg("rm")
+                    .arg(pacnew)
+                    .status()
+                    .expect("failed to delete pacnew");
+                println!("{} deleted {}.", "✓".green(), pacnew);
             }
         }
+        println!();
     }
 
-    println!("\n{} all caught up!", "✓".green());
-}
-
-fn scan_directory(dir: &Path, files: &mut Vec<PathBuf>) {
-    if let Ok(entries) = fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                scan_directory(&path, files);
-            } else if path.extension().and_then(|s| s.to_str()) == Some("pacnew") {
-                files.push(path);
-            }
-        }
-    }
+    println!("{} pacnew management complete.", "✓".green());
 }

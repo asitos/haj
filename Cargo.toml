@@ -1,9 +1,9 @@
 [package]
 name = "haj"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2024"
 authors = ["asitos 4shut0shparashar@gmail.com"]
-description = "fast, quiet, beautiful package manager and tui for Arch Linux"
+description = "fast, quiet, beautiful package manager and tui for blahArch Linux"
 license = "MIT"
 repository = "https://github.com/asitos/haj"
 readme = "README.md"

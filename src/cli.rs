@@ -4,8 +4,8 @@ use clap::{Parser, Subcommand};
 #[command(
     name = "haj",
     author = "asitos",
-    version = "0.2.2",
-    about = "fast, quiet, beautiful package management for blahArch Linux.",
+    version = "0.2.3",
+    about = "fast, quiet, beautiful package manager and tui for blahArch Linux.",
     long_about = None,
     disable_help_subcommand = true,
     disable_help_flag = true,
@@ -13,32 +13,33 @@ use clap::{Parser, Subcommand};
     help_template = "\
 {about}
 
-Usage: haj [OPTIONS] <COMMAND>
+Usage: \x1b[36;1mhaj\x1b[0m [OPTIONS] <COMMAND>
 
 Commands (alias):
-  \x1b[1mtui (t)\x1b[0m               launch the interactive package manager dashboard
+  \x1b[36;1mtui (t)\x1b[0m                         launch the interactive package manager dashboard
 
-  \x1b[1mupdate (up/sync)\x1b[0m      synchronize repositories & upgrade installed packages
-  \x1b[1mjump (upgrade)\x1b[0m        full system upgrade
-  \x1b[1minstall (i)\x1b[0m           install one or more packages
-  \x1b[1mremove (rm/toss)\x1b[0m      remove packages & unneeded dependencies
-  \x1b[1msearch (s)\x1b[0m            search remote repositories
-  \x1b[1mshow (info)\x1b[0m           show detailed package information
-  \x1b[1mlist (ls)\x1b[0m             list explicitly installed packages
+  \x1b[36;1mupdate (up/sync)\x1b[0m                synchronize remote repositories 
+  \x1b[36;1mjump (upgrade)\x1b[0m [-u]             full system upgrade
+  \x1b[36;1minstall (i)\x1b[0m <pkg>               install one or more packages
+  \x1b[36;1mremove (rm/toss)\x1b[0m <pkg>          remove packages & unneeded dependencies
+  \x1b[36;1msearch (s)\x1b[0m <query>              search remote repositories
+  \x1b[36;1mshow (info)\x1b[0m <pkg>               show detailed package information
+  \x1b[36;1mgroup (g)\x1b[0m <name>                browse and install package groups
+  \x1b[36;1mlist (ls)\x1b[0m [-e, -p, -f]          list installed packages
+  \x1b[36;1mstats (st)\x1b[0m                      show system health and package statistics
+  \x1b[36;1mload (l)\x1b[0m <path>                 install a local package archive (.pkg.tar.zst)
+  \x1b[36;1mfetch (f)\x1b[0m <pkg>                 download a package without installing
+  \x1b[36;1mdowngrade (sink)\x1b[0m <pkg>          downgrade an installed package
 
-  \x1b[1mload (l)\x1b[0m              install a local package archive (.pkg.tar.zst)
-  \x1b[1mfetch (f)\x1b[0m             download a package without installing
-  \x1b[1mdowngrade (sink)\x1b[0m      downgrade an installed package
+  \x1b[36;1mowns (ow)\x1b[0m <path>                find which installed package owns a file
+  \x1b[36;1mfiles (lf)\x1b[0m <pkg>                list files installed by a package
+  \x1b[36;1mlocate (loc)\x1b[0m <query>            search repositories for a file (pacman -F)
 
-  \x1b[1mowns (ow)\x1b[0m             find which installed package owns a file
-  \x1b[1mfiles (lf)\x1b[0m            list files installed by a package
-  \x1b[1mlocate (loc)\x1b[0m          search repositories for a file (pacman -F)
-
-  \x1b[1mhistory (h)\x1b[0m           show recent package transactions
-  \x1b[1morphan (o)\x1b[0m            detect orphaned dependencies
-  \x1b[1mclean (c)\x1b[0m             clean the package cache
-  \x1b[1mmark (m)\x1b[0m              change a package's install reason
-  \x1b[1mdiff (pn)\x1b[0m             interactively manage and merge .pacnew files
+  \x1b[36;1mhistory (h)\x1b[0m [-l <n>]            show recent package changes
+  \x1b[36;1morphan (o)\x1b[0m                      detect orphaned dependencies
+  \x1b[36;1mclean (c)\x1b[0m [-k <n>]              clean the package cache
+  \x1b[36;1mmark (m)\x1b[0m <pkg> [--as-explicit]  change a package's install reason
+  \x1b[36;1mdiff (pn)\x1b[0m                       interactively manage and merge .pacnew files
 
 Options:
 {options}"
@@ -124,6 +125,9 @@ pub enum Commands {
     #[command(alias = "info")]
     Show { package: String },
 
+    #[command(alias = "g")]
+    Group { name: String },
+
     #[command(alias = "ls")]
     List {
         /// show only packages installed explicitly
@@ -132,7 +136,13 @@ pub enum Commands {
         /// show only packages installed as dependencies
         #[arg(short = 'p', long)]
         deps: bool,
+        /// show only foreign/aur packages
+        #[arg(short = 'f', long)]
+        foreign: bool,
     },
+
+    #[command(alias = "st")]
+    Stats,
 
     #[command(alias = "h")]
     History {

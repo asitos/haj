@@ -146,8 +146,8 @@ async fn run_pacman(
     let mut buf = [0u8; 128];
     let mut current_line = String::new();
     let mut hook_alerts = Vec::new();
-    
-    let is_noconfirm = args.iter().any(|&a| a == "--noconfirm");
+
+    let is_noconfirm = args.contains(&"--noconfirm");
 
     while let Ok(n) = tokio::io::AsyncReadExt::read(&mut stdout, &mut buf).await {
         if n == 0 {
@@ -331,7 +331,7 @@ async fn run_pacman(
                     let _ = tokio::io::AsyncWriteExt::flush(&mut stdin).await;
 
                     current_line.clear();
-                    
+
                     println!();
                     spinner = ui::progress::spinner(&last_spinner_msg);
                 }
@@ -673,7 +673,24 @@ async fn main() -> anyhow::Result<()> {
                 }
 
                 Commands::Upgrade { sysupgrade } => {
-                    // lock release baby
+                    let mut foreign_pkgs = Vec::new();
+
+                    if !cli.repo {
+                        for pkg in local_db.pkgs() {
+                            let mut found_in_repo = false;
+                            for db in alpm_handle.syncdbs() {
+                                if db.pkg(pkg.name()).is_ok() {
+                                    found_in_repo = true;
+                                    break;
+                                }
+                            }
+                            if !found_in_repo {
+                                foreign_pkgs
+                                    .push((pkg.name().to_string(), pkg.version().to_string()));
+                            }
+                        }
+                    }
+
                     drop(alpm_handle);
 
                     if *sysupgrade {
@@ -689,23 +706,65 @@ async fn main() -> anyhow::Result<()> {
                         }
                     }
 
-                    let qu_output = std::process::Command::new("pacman")
-                        .arg("-Qu")
-                        .output()
-                        .expect("failed to query updates");
+                    let mut aur_updates = Vec::new();
+                    if !foreign_pkgs.is_empty() && !cli.repo {
+                        let check_spinner = ui::progress::spinner("querying aur for updates...");
 
-                    let updates = String::from_utf8_lossy(&qu_output.stdout);
-                    let lines: Vec<&str> =
-                        updates.lines().filter(|l| !l.trim().is_empty()).collect();
+                        for chunk in foreign_pkgs.chunks(50) {
+                            let mut url = String::from("https://aur.archlinux.org/rpc/v5/info?");
+                            for (name, _) in chunk {
+                                url.push_str(&format!("arg[]={}&", name));
+                            }
 
-                    if lines.is_empty() {
+                            if let Ok(response) = reqwest::get(&url).await
+                                && let Ok(json) = response.json::<serde_json::Value>().await
+                                && let Some(results) =
+                                    json.get("results").and_then(|r| r.as_array())
+                            {
+                                for result in results {
+                                    if let Some(name) = result.get("Name").and_then(|n| n.as_str())
+                                        && let Some(new_ver) =
+                                            result.get("Version").and_then(|v| v.as_str())
+                                        && let Some((_, local_ver)) =
+                                            chunk.iter().find(|(n, _)| n == name)
+                                        && alpm::vercmp(local_ver.as_str(), new_ver)
+                                            == std::cmp::Ordering::Less
+                                    {
+                                        aur_updates.push((
+                                            name.to_string(),
+                                            local_ver.clone(),
+                                            new_ver.to_string(),
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                        check_spinner.finish_and_clear();
+                    }
+
+                    let mut native_lines: Vec<String> = Vec::new();
+                    if !cli.aur {
+                        let qu_output = std::process::Command::new("pacman")
+                            .arg("-Qu")
+                            .output()
+                            .expect("failed to query updates");
+
+                        let updates = String::from_utf8_lossy(&qu_output.stdout);
+                        native_lines = updates
+                            .lines()
+                            .filter(|l| !l.trim().is_empty())
+                            .map(|s| s.to_string())
+                            .collect();
+                    }
+
+                    if native_lines.is_empty() && aur_updates.is_empty() {
                         println!("{} system is fully up to date!", "✓".green());
                         return Ok(());
                     }
 
                     println!("{}", "available upgrades:".bold().white());
-                    for line in &lines {
-                        // lines look like: "core/linux 6.9.1-1 -> 6.9.2-1"
+
+                    for line in &native_lines {
                         let parts: Vec<&str> = line.split_whitespace().collect();
                         if parts.len() >= 4 {
                             println!(
@@ -719,21 +778,79 @@ async fn main() -> anyhow::Result<()> {
                         }
                     }
 
-                    println!("\n{:<15} {}", "total:", lines.len().to_string().cyan());
+                    for (name, old, new) in &aur_updates {
+                        println!(
+                            "  {:<30} {} -> {}",
+                            name.magenta().bold(),
+                            old.red(),
+                            new.green()
+                        );
+                    }
+
+                    let total_upgrades = native_lines.len() + aur_updates.len();
+                    println!("\n{:<15} {}", "total:", total_upgrades.to_string().cyan());
 
                     if !cli.noconfirm && !prompt_confirm("Proceed with upgrade? [Y/n]") {
                         println!("{} aborted.", "✗".red());
                         return Ok(());
                     }
 
-                    run_pacman(
-                        &["-Su", "--noconfirm"],
-                        "upgrading system packages...",
-                        "system upgraded successfully.",
-                        cli.dry_run,
-                        cli.verbose,
-                    )
-                    .await;
+                    if !native_lines.is_empty() {
+                        run_pacman(
+                            &["-Su", "--noconfirm"],
+                            "upgrading system packages...",
+                            "system upgraded successfully.",
+                            cli.dry_run,
+                            cli.verbose,
+                        )
+                        .await;
+                    }
+
+                    if !aur_updates.is_empty() {
+                        for (name, _, new_ver) in aur_updates {
+                            if cli.dry_run {
+                                println!(
+                                    "{} would build and update aur package: {}",
+                                    "[dry run]".bold().yellow(),
+                                    name.magenta()
+                                );
+                                continue;
+                            }
+
+                            println!(
+                                "\n{} preparing to update {} ({})...",
+                                "::".blue(),
+                                name.magenta().bold(),
+                                new_ver.green()
+                            );
+
+                            match core::aur::build(&name, cli.verbose).await {
+                                Ok(pkg_path) => {
+                                    let spinner_msg = format!(
+                                        "updating built package {}...",
+                                        name.magenta().bold()
+                                    );
+                                    let success_msg = format!(
+                                        "{} updated successfully ({}).",
+                                        name.magenta().bold(),
+                                        new_ver.dimmed()
+                                    );
+                                    let pacman_args =
+                                        vec!["-U", pkg_path.to_str().unwrap(), "--noconfirm"];
+
+                                    run_pacman(
+                                        &pacman_args,
+                                        &spinner_msg,
+                                        &success_msg,
+                                        cli.dry_run,
+                                        cli.verbose,
+                                    )
+                                    .await;
+                                }
+                                Err(e) => eprintln!("{} {}", "error:".red().bold(), e),
+                            }
+                        }
+                    }
                 }
 
                 Commands::History { limit } => {
@@ -972,7 +1089,11 @@ async fn main() -> anyhow::Result<()> {
                     core::pacnew::manage_pacnew_files();
                 }
 
-                Commands::List { explicit, deps } => {
+                Commands::List {
+                    explicit,
+                    deps,
+                    foreign,
+                } => {
                     let mut count = 0;
 
                     for pkg in local_db.pkgs() {
@@ -985,11 +1106,250 @@ async fn main() -> anyhow::Result<()> {
                             continue;
                         }
 
-                        println!("{} {}", pkg.name().cyan(), pkg.version().dimmed());
+                        let mut found_in_repo = false;
+                        for db in alpm_handle.syncdbs() {
+                            if db.pkg(pkg.name()).is_ok() {
+                                found_in_repo = true;
+                                break;
+                            }
+                        }
+
+                        if *foreign && found_in_repo {
+                            continue;
+                        }
+
+                        if found_in_repo {
+                            println!("{} {}", pkg.name().cyan(), pkg.version().dimmed());
+                        } else {
+                            println!("{} {}", pkg.name().magenta(), pkg.version().dimmed());
+                        }
+
                         count += 1;
                     }
 
-                    println!("\n{} {} packages listed.", "✓".green(), count.bold());
+                    println!(
+                        "\n{} {} packages listed.",
+                        "✓".green(),
+                        count.to_string().bold()
+                    );
+                }
+
+                Commands::Stats => {
+                    println!("{} scanning system metrics...\n", "::".blue());
+
+                    let mut native_count = 0;
+                    let mut foreign_count = 0;
+                    // let mut explicit_count = 0;
+                    let mut total_size_bytes: i64 = 0;
+                    let mut orphan_count = 0;
+                    let mut orphan_size_bytes: i64 = 0;
+
+                    for pkg in local_db.pkgs() {
+                        let isize = pkg.isize();
+                        total_size_bytes += isize;
+
+                        let is_explicit = pkg.reason() == alpm::PackageReason::Explicit;
+                        // if is_explicit {
+                        // explicit_count += 1;
+                        // }
+
+                        if !is_explicit
+                            && pkg.required_by().is_empty()
+                            && pkg.optional_for().is_empty()
+                        {
+                            orphan_count += 1;
+                            orphan_size_bytes += isize;
+                        }
+
+                        let mut found_in_repo = false;
+                        for db in alpm_handle.syncdbs() {
+                            if db.pkg(pkg.name()).is_ok() {
+                                found_in_repo = true;
+                                break;
+                            }
+                        }
+
+                        if found_in_repo {
+                            native_count += 1;
+                        } else {
+                            foreign_count += 1;
+                        }
+                    }
+
+                    drop(alpm_handle);
+
+                    let mut pacman_cache: u64 = 0;
+                    if let Ok(entries) = std::fs::read_dir("/var/cache/pacman/pkg") {
+                        for entry in entries.flatten() {
+                            if let Ok(meta) = entry.metadata() {
+                                pacman_cache += meta.len();
+                            }
+                        }
+                    }
+
+                    let mut aur_cache: u64 = 0;
+                    if let Some(home) = std::env::var_os("HOME") {
+                        let cache_dir = std::path::PathBuf::from(home).join(".cache/haj/aur");
+                        if let Ok(entries) = std::fs::read_dir(cache_dir) {
+                            for entry in entries.flatten() {
+                                if entry.path().is_dir()
+                                    && let Ok(sub_entries) = std::fs::read_dir(entry.path())
+                                {
+                                    for sub in sub_entries.flatten() {
+                                        if let Ok(meta) = sub.metadata()
+                                            && meta.is_file()
+                                        {
+                                            aur_cache += meta.len();
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    let sync_time = std::fs::metadata("/var/lib/pacman/sync/core.db")
+                        .or_else(|_| std::fs::metadata("/var/lib/pacman/sync/extra.db"))
+                        .and_then(|m| m.modified())
+                        .map(|t| {
+                            if let Ok(dur) = t.elapsed() {
+                                let secs = dur.as_secs();
+                                if secs < 60 {
+                                    format!("{}s ago", secs)
+                                } else if secs < 3600 {
+                                    format!("{}m ago", secs / 60)
+                                } else if secs < 86400 {
+                                    format!("{}h ago", secs / 3600)
+                                } else {
+                                    format!("{}d ago", secs / 86400)
+                                }
+                            } else {
+                                "unknown".to_string()
+                            }
+                        })
+                        .unwrap_or_else(|_| "unknown".to_string());
+
+                    let format_gb = |bytes: f64| -> String {
+                        if bytes > 1_073_741_824.0 {
+                            format!("{:.2} GB", bytes / 1_073_741_824.0)
+                        } else {
+                            format!("{:.2} MB", bytes / 1_048_576.0)
+                        }
+                    };
+
+                    println!("{}", "✓ system health & statistics".bold().white());
+
+                    println!("\n  {} packages", ":3".cyan());
+                    println!(
+                        "     {:<12} {}",
+                        "total:",
+                        (native_count + foreign_count).to_string().white().bold()
+                    );
+                    println!("     {:<12} {}", "native:", native_count.to_string().cyan());
+                    println!(
+                        "     {:<12} {}",
+                        "aur:",
+                        foreign_count.to_string().magenta()
+                    );
+
+                    println!("\n  {} disk usage", ":O".blue());
+                    println!(
+                        "     {:<12} {}",
+                        "installed:",
+                        format_gb(total_size_bytes as f64).green()
+                    );
+                    if orphan_count > 0 {
+                        println!(
+                            "     {:<12} {} ({})",
+                            "orphans:",
+                            orphan_count.to_string().yellow(),
+                            format_gb(orphan_size_bytes as f64).dimmed()
+                        );
+                    } else {
+                        println!("     {:<12} {}", "orphans:", "0 (clean)".green());
+                    }
+                    println!(
+                        "     {:<12} {} (pacman) / {} (aur)",
+                        "cache:",
+                        format_gb(pacman_cache as f64).dimmed(),
+                        format_gb(aur_cache as f64).dimmed()
+                    );
+
+                    println!("\n  {} databases", ":p".magenta());
+                    println!("     {:<12} {}", "last sync:", sync_time.cyan());
+                }
+
+                Commands::Group { name } => {
+                    let mut group_pkgs = Vec::new();
+
+                    for db in alpm_handle.syncdbs() {
+                        for pkg in db.pkgs() {
+                            for grp in pkg.groups() {
+                                if grp == name.as_str()
+                                    && !group_pkgs.iter().any(|(n, _, _)| n == pkg.name())
+                                {
+                                    let is_installed = local_db.pkg(pkg.name()).is_ok();
+                                    group_pkgs.push((
+                                        pkg.name().to_string(),
+                                        pkg.version().to_string(),
+                                        is_installed,
+                                    ));
+                                }
+                            }
+                        }
+                    }
+
+                    if group_pkgs.is_empty() {
+                        println!(
+                            "{} group '{}' not found in any sync database.",
+                            "✗".red(),
+                            name.bold()
+                        );
+                        return Ok(());
+                    }
+
+                    println!(
+                        "{} packages in group {}:\n",
+                        "✓".green(),
+                        name.cyan().bold()
+                    );
+                    for (pkg_name, pkg_ver, is_installed) in &group_pkgs {
+                        let status = if *is_installed {
+                            format!(" {}", "[installed]".cyan().bold())
+                        } else {
+                            "".to_string()
+                        };
+                        println!("  {} {}{}", pkg_name.bold(), pkg_ver.dimmed(), status);
+                    }
+
+                    println!("\n{:<15} {}", "total:", group_pkgs.len().to_string().cyan());
+
+                    if !cli.noconfirm {
+                        println!();
+                        if !prompt_confirm(&format!(
+                            "Install all packages in group '{}'? [Y/n]",
+                            name
+                        )) {
+                            println!("{} aborted.", "✗".red());
+                            return Ok(());
+                        }
+                    }
+
+                    drop(alpm_handle);
+
+                    let pkgs_to_install: Vec<String> =
+                        group_pkgs.into_iter().map(|(n, _, _)| n).collect();
+
+                    let mut args = vec!["-S", "--noconfirm"];
+                    args.extend(pkgs_to_install.iter().map(|s| s.as_str()));
+
+                    run_pacman(
+                        &args,
+                        &format!("installing group {}...", name.cyan()),
+                        &format!("group {} installed successfully.", name.cyan()),
+                        cli.dry_run,
+                        cli.verbose,
+                    )
+                    .await;
                 }
 
                 Commands::Locate { query } => {
