@@ -146,6 +146,8 @@ async fn run_pacman(
     let mut buf = [0u8; 128];
     let mut current_line = String::new();
     let mut hook_alerts = Vec::new();
+    
+    let is_noconfirm = args.iter().any(|&a| a == "--noconfirm");
 
     while let Ok(n) = tokio::io::AsyncReadExt::read(&mut stdout, &mut buf).await {
         if n == 0 {
@@ -157,6 +159,7 @@ async fn run_pacman(
             if c == '\n' || c == '\r' {
                 let clean = current_line.trim();
                 if clean.is_empty() {
+                    current_line.clear();
                     continue;
                 }
 
@@ -171,42 +174,68 @@ async fn run_pacman(
                     hook_alerts.push(clean.to_string());
                 }
 
-                if clean.contains("Running pre-transaction hooks")
+                if clean.contains("resolving dependencies")
+                    || clean.contains("conflicting packages")
+                {
+                    last_spinner_msg = format!(
+                        "{} {}",
+                        ":3c".yellow(),
+                        "resolving package dependencies...".bold()
+                    );
+                    spinner.set_message(last_spinner_msg.clone());
+                } else if clean.contains("checking keys")
+                    || clean.contains("checking package integrity")
+                    || clean.contains("loading package files")
+                {
+                    last_spinner_msg = format!(
+                        "{} {}",
+                        ":O".yellow(),
+                        "verifying package integrity...".bold()
+                    );
+                    spinner.set_message(last_spinner_msg.clone());
+                } else if clean.contains("Retrieving packages") || clean.contains("downloading") {
+                    last_spinner_msg = format!("  {}", "downloading packages...".dimmed());
+                    spinner.set_message(last_spinner_msg.clone());
+                } else if clean.starts_with('(') && clean.contains(") upgrading")
+                    || clean.starts_with('(') && clean.contains(") installing")
+                {
+                    if let Some(idx_end) = clean.find(')') {
+                        let counter = &clean[..=idx_end];
+                        let action = if clean.contains("installing") {
+                            "installing"
+                        } else {
+                            "upgrading"
+                        };
+                        last_spinner_msg = format!(
+                            "{} {} packages {}...",
+                            ":p".yellow(),
+                            counter.cyan().bold(),
+                            action
+                        );
+                        spinner.set_message(last_spinner_msg.clone());
+                    }
+                } else if clean.contains("Running pre-transaction hooks")
                     || clean.contains("Running post-transaction hooks")
                 {
                     in_hook_phase = true;
-                    last_spinner_msg = format!("{} {}", "⚡".yellow(), clean.bold());
+                    last_spinner_msg =
+                        format!("{} {}", ":v".yellow(), "running system hooks...".bold());
                     spinner.set_message(last_spinner_msg.clone());
                 } else if in_hook_phase {
-                    if clean.starts_with('(') {
-                        last_spinner_msg = format!("{} {}", "⚡".yellow(), clean.bold());
+                    if clean.starts_with("==> Building image")
+                        || clean.starts_with("==> Install DKMS")
+                    {
+                        last_spinner_msg = format!("{}    {}", ":3".yellow(), clean.dimmed());
                         spinner.set_message(last_spinner_msg.clone());
-                    } else if clean.starts_with("::") {
-                        last_spinner_msg = clean.replace("::", "→").cyan().bold().to_string();
-                        spinner.set_message(last_spinner_msg.clone());
-                    } else {
-                        spinner.set_message(format!("{}   {}", "⚡".yellow(), clean.dimmed()));
-
-                        if (lower_clean.contains("missing") || lower_clean.contains("not found"))
-                            && !hook_alerts.contains(&clean.to_string())
-                        {
-                            hook_alerts.push(clean.to_string());
-                        }
+                    } else if (lower_clean.contains("missing") || lower_clean.contains("not found"))
+                        && !hook_alerts.contains(&clean.to_string())
+                    {
+                        hook_alerts.push(clean.to_string());
                     }
                 } else if clean.starts_with("::") {
                     last_spinner_msg = clean.replace("::", "→").cyan().bold().to_string();
                     spinner.set_message(last_spinner_msg.clone());
                     context_buffer.push(current_line.clone());
-                } else if clean.starts_with('(') {
-                    last_spinner_msg = format!("{} {}", "⚡".yellow(), clean.bold());
-                    spinner.set_message(last_spinner_msg.clone());
-                } else if lower_clean.contains("downloading")
-                    || lower_clean.contains("installing")
-                    || lower_clean.contains("removing")
-                    || lower_clean.contains("upgrading")
-                {
-                    last_spinner_msg = format!("  {}", clean.dimmed());
-                    spinner.set_message(last_spinner_msg.clone());
                 } else {
                     matched_spinner = false;
                 }
@@ -222,11 +251,12 @@ async fn run_pacman(
             } else {
                 current_line.push(c);
                 let lower = current_line.to_lowercase();
+                let trimmed_lower = lower.trim_end();
 
-                let is_yn = lower.ends_with("[y/n]") || lower.ends_with("[y/n] ");
-                let is_choice = lower.ends_with("):") || lower.ends_with("): ");
+                let is_yn = trimmed_lower.ends_with("[y/n]");
+                let is_choice = trimmed_lower.ends_with("):");
 
-                if is_yn || is_choice {
+                if (is_yn || is_choice) && !is_noconfirm {
                     spinner.finish_and_clear();
 
                     if !context_buffer.is_empty() {
@@ -237,7 +267,7 @@ async fn run_pacman(
                     }
 
                     use std::io::Write;
-                    print!("{} {} ", "❓".magenta().bold(), current_line.trim().bold());
+                    print!("{} {} ", "?".magenta().bold(), current_line.trim().bold());
                     let _ = std::io::stdout().flush();
 
                     let is_yn_prompt = is_yn;
@@ -301,7 +331,8 @@ async fn run_pacman(
                     let _ = tokio::io::AsyncWriteExt::flush(&mut stdin).await;
 
                     current_line.clear();
-
+                    
+                    println!();
                     spinner = ui::progress::spinner(&last_spinner_msg);
                 }
             }
@@ -326,7 +357,7 @@ async fn run_pacman(
         spinner.finish_with_message(format!("{} {}", "✓".green(), success_msg));
         println!(
             "\n{}",
-            "⚠️ transaction completed, but warnings/errors occurred during hooks:"
+            "!!! changes completed, but warnings/errors occurred during hooks:"
                 .yellow()
                 .bold()
         );
@@ -412,7 +443,6 @@ async fn main() -> anyhow::Result<()> {
                             aur_pkgs.push((pkg.clone(), local_ver));
                         }
                     }
-
                     let mut do_native_install = false;
 
                     if !native_pkgs.is_empty() {
@@ -437,11 +467,16 @@ async fn main() -> anyhow::Result<()> {
                                 println!("\n{:<15} {:.2} MB", "download:", total_dl);
                                 println!("{:<15} {:.2} MB", "disk usage:", total_inst);
 
-                                if !cli.noconfirm
-                                    && !prompt_confirm("\nContinue with native packages? [Y/n]")
-                                {
-                                    do_native_install = false;
-                                    println!("{} skipped native packages.", "✗".red());
+                                if !cli.noconfirm {
+                                    println!();
+                                    if !prompt_confirm("Continue with native packages? [Y/n]") {
+                                        do_native_install = false;
+                                        println!("{} skipped native packages.", "✗".red());
+                                    } else {
+                                        do_native_install = true;
+                                    }
+                                } else {
+                                    do_native_install = true;
                                 }
                             }
                             Err(e) => println!("{} {}", "✗".red(), e),
@@ -452,10 +487,7 @@ async fn main() -> anyhow::Result<()> {
                     drop(alpm_handle);
 
                     if do_native_install {
-                        let mut args = vec!["-S"];
-                        if cli.noconfirm {
-                            args.push("--noconfirm");
-                        }
+                        let mut args = vec!["-S", "--noconfirm"];
                         args.extend(native_pkgs.iter().map(|s| s.as_str()));
 
                         run_pacman(
@@ -617,9 +649,12 @@ async fn main() -> anyhow::Result<()> {
                     }
                     println!("\n{:<15} {}", "total:", targets.len().to_string().cyan());
 
-                    if !cli.noconfirm && !prompt_confirm("Proceed with removal? [Y/n]") {
-                        println!("{} aborted.", "✗".red());
-                        return Ok(());
+                    if !cli.noconfirm {
+                        println!();
+                        if !prompt_confirm("Proceed with removal? [Y/n]") {
+                            println!("{} aborted.", "✗".red());
+                            return Ok(());
+                        }
                     }
 
                     drop(alpm_handle);
@@ -641,19 +676,58 @@ async fn main() -> anyhow::Result<()> {
                     // lock release baby
                     drop(alpm_handle);
 
-                    println!("{} initiating system upgrade...\n", "::".blue().bold());
-                    let mut args = vec!["-S"];
                     if *sysupgrade {
-                        args.push("-yu");
-                    } else {
-                        args.push("-u");
+                        println!("{} syncing package databases...\n", "::".blue().bold());
+                        let status = std::process::Command::new("sudo")
+                            .args(["pacman", "-Sy"])
+                            .status()
+                            .expect("failed to sync databases");
+
+                        if !status.success() {
+                            println!("{} failed to sync databases.", "✗".red());
+                            return Ok(());
+                        }
                     }
-                    if cli.noconfirm {
-                        args.push("--noconfirm");
+
+                    let qu_output = std::process::Command::new("pacman")
+                        .arg("-Qu")
+                        .output()
+                        .expect("failed to query updates");
+
+                    let updates = String::from_utf8_lossy(&qu_output.stdout);
+                    let lines: Vec<&str> =
+                        updates.lines().filter(|l| !l.trim().is_empty()).collect();
+
+                    if lines.is_empty() {
+                        println!("{} system is fully up to date!", "✓".green());
+                        return Ok(());
+                    }
+
+                    println!("{}", "available upgrades:".bold().white());
+                    for line in &lines {
+                        // lines look like: "core/linux 6.9.1-1 -> 6.9.2-1"
+                        let parts: Vec<&str> = line.split_whitespace().collect();
+                        if parts.len() >= 4 {
+                            println!(
+                                "  {:<30} {} -> {}",
+                                parts[0].cyan().bold(),
+                                parts[1].red(),
+                                parts[3].green()
+                            );
+                        } else {
+                            println!("  {}", line.cyan());
+                        }
+                    }
+
+                    println!("\n{:<15} {}", "total:", lines.len().to_string().cyan());
+
+                    if !cli.noconfirm && !prompt_confirm("Proceed with upgrade? [Y/n]") {
+                        println!("{} aborted.", "✗".red());
+                        return Ok(());
                     }
 
                     run_pacman(
-                        &args,
+                        &["-Su", "--noconfirm"],
                         "upgrading system packages...",
                         "system upgraded successfully.",
                         cli.dry_run,

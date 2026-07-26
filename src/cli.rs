@@ -130,14 +130,14 @@ pub enum Commands {
         #[arg(short, long)]
         explicit: bool,
         /// show only packages installed as dependencies
-        #[arg(short, long)]
+        #[arg(short = 'p', long)]
         deps: bool,
     },
 
     #[command(alias = "h")]
     History {
         /// number of recent changes to show
-        #[arg(short = 'n', long, default_value_t = 50)]
+        #[arg(short = 'l', long, default_value_t = 50)]
         limit: usize,
     },
 
