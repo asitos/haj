@@ -384,7 +384,6 @@ async fn main() -> anyhow::Result<()> {
 
             match cmd {
                 Commands::Tui => unreachable!(),
-                Commands::Update => unreachable!(),
                 Commands::Install { packages } => {
                     let mut native_pkgs = Vec::new();
                     let mut aur_pkgs = Vec::new();
@@ -637,17 +636,57 @@ async fn main() -> anyhow::Result<()> {
                     .await;
                 }
 
-                Commands::Clean => {
+                Commands::Upgrade { sysupgrade } => {
+                    // lock release baby
                     drop(alpm_handle);
+                    
+                    println!("{} initiating system upgrade...\n", "::".blue().bold());
+                    let mut args = vec!["-S"];
+                    if *sysupgrade {
+                        args.push("-yu");
+                    } else {
+                        args.push("-u");
+                    }
+                    if cli.noconfirm {
+                        args.push("--noconfirm");
+                    }
 
                     run_pacman(
-                        &["-Sc", "--noconfirm"],
-                        "scrubbing the package cache...",
-                        "cache cleared successfully.",
+                        &args,
+                        "upgrading system packages...",
+                        "system upgraded successfully.",
                         cli.dry_run,
                         cli.verbose,
-                    )
-                    .await;
+                    ).await;
+                }
+
+                Commands::History { limit } => {
+                    drop(alpm_handle);
+                    core::history::show_history(*limit);
+                }
+
+                Commands::Downgrade { package } => {
+                    drop(alpm_handle); 
+                    
+                    if let Some(archive_path) = core::downgrade::select_downgrade_target(package) {
+                        let mut args = vec!["-U", archive_path.to_str().unwrap()];
+                        if cli.noconfirm {
+                            args.push("--noconfirm");
+                        }
+
+                        run_pacman(
+                            &args,
+                            &format!("downgrading to {}...", archive_path.file_name().unwrap().to_string_lossy()),
+                            "package downgraded successfully.",
+                            cli.dry_run,
+                            cli.verbose,
+                        ).await;
+                    }
+                }
+
+                Commands::Clean { keep } => {
+                    drop(alpm_handle);
+                    core::cache::scrub(*keep);
                 }
 
                 Commands::Search { query } => {

@@ -4,34 +4,40 @@ use clap::{Parser, Subcommand};
 #[command(
     name = "haj",
     author = "asitos",
-    version = "0.2.1",
+    version = "0.2.2",
     about = "fast, quiet, beautiful package management for blahArch Linux.",
     long_about = None,
     disable_help_subcommand = true,
     disable_help_flag = true,
     disable_version_flag = true,
     help_template = "\
-{about}
 
 Usage: haj [OPTIONS] <COMMAND>
 
 Commands (alias):
-  \x1b[1mtui (t)\x1b[0m           launch the interactive tui dashboard
-  \x1b[1minstall (i)\x1b[0m       install one or more packages
-  \x1b[1mremove (rm/toss)\x1b[0m  remove packages & unneeded dependencies
-  \x1b[1mupdate (up/sync)\x1b[0m  sync mirror databases
-  \x1b[1msearch (s)\x1b[0m        search all remote sync databases
-  \x1b[1mshow (info)\x1b[0m       show local package details
-  \x1b[1mlist (ls)\x1b[0m         list explicitly installed packages
-  \x1b[1mclean (c)\x1b[0m         scrub the package cache
-  \x1b[1morphan (o)\x1b[0m        detect orphaned dependencies
-  \x1b[1mowns (ow)\x1b[0m         find which local package owns a file
-  \x1b[1mlocate (loc)\x1b[0m      search remote repos for a file name (pacman -F)
-  \x1b[1mfiles (lf)\x1b[0m        list all files installed by a package
-  \x1b[1mload (l)\x1b[0m          install a local package archive (.pkg.tar.zst)
-  \x1b[1mfetch (f)\x1b[0m         download a package to cache without installing
-  \x1b[1mmark (m)\x1b[0m          change the install reason of a package
-  \x1b[1mdiff (pn)\x1b[0m         interactively manage and merge .pacnew config files
+  \x1b[1mtui (t)\x1b[0m               launch the interactive package manager dashboard
+
+  \x1b[1mupdate (up/sync)\x1b[0m      synchronize repositories & upgrade installed packages
+  \x1b[1mjump (upgrade)\x1b[0m        full system upgrade
+  \x1b[1minstall (i)\x1b[0m           install one or more packages
+  \x1b[1mremove (rm/toss)\x1b[0m      remove packages & unneeded dependencies
+  \x1b[1msearch (s)\x1b[0m            search remote repositories
+  \x1b[1mshow (info)\x1b[0m           show detailed package information
+  \x1b[1mlist (ls)\x1b[0m             list explicitly installed packages
+
+  \x1b[1mload (l)\x1b[0m              install a local package archive (.pkg.tar.zst)
+  \x1b[1mfetch (f)\x1b[0m             download a package without installing
+  \x1b[1mdowngrade (sink)\x1b[0m      downgrade an installed package
+
+  \x1b[1mowns (ow)\x1b[0m             find which installed package owns a file
+  \x1b[1mfiles (lf)\x1b[0m            list files installed by a package
+  \x1b[1mlocate (loc)\x1b[0m          search repositories for a file (pacman -F)
+
+  \x1b[1mhistory (h)\x1b[0m           show recent package transactions
+  \x1b[1morphan (o)\x1b[0m            detect orphaned dependencies
+  \x1b[1mclean (c)\x1b[0m             clean the package cache
+  \x1b[1mmark (m)\x1b[0m              change a package's install reason
+  \x1b[1mdiff (pn)\x1b[0m             interactively manage and merge .pacnew files
 
 Options:
 {options}"
@@ -105,6 +111,12 @@ pub enum Commands {
     #[command(alias = "up", alias = "sync")]
     Update,
 
+    #[command(alias = "jump")]
+    Upgrade {
+        #[arg(short = 'u', long)]
+        sysupgrade: bool,
+    },
+
     #[command(alias = "s")]
     Search { query: String },
 
@@ -121,8 +133,25 @@ pub enum Commands {
         deps: bool,
     },
 
+    #[command(alias = "h")]
+    History {
+        /// number of recent changes to show
+        #[arg(short = 'n', long, default_value_t = 50)]
+        limit: usize,
+    },
+    
+    #[command(alias = "sink")]
+    Downgrade {
+        /// package to downgrade
+        package: String,
+    },
+
     #[command(alias = "c")]
-    Clean,
+    Clean {
+        /// number of package versions to keep in cache
+        #[arg(short = 'k', long, default_value_t = 3)]
+        keep: usize,
+    },
 
     #[command(alias = "o")]
     Orphan,

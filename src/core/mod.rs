@@ -3,3 +3,7 @@ pub mod aur;
 pub mod escalate;
 pub mod pacnew;
 pub mod resolver;
+
+pub mod history;
+pub mod downgrade;
+pub mod cache;
