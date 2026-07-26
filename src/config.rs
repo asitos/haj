@@ -1,44 +1,63 @@
-use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::fs;
-// use std::path::PathBuf;
+use std::path::PathBuf;
 
-#[derive(Serialize, Deserialize, Clone)]
-pub struct AppConfig {
+#[derive(Debug, Serialize, Deserialize)]
+pub struct HajConfig {
+    pub aur_only: bool,
+    pub repo_only: bool,
+    pub verbose: bool,
+    pub diff_prog: String,
+    pub build_dir: String,
     pub animations: bool,
-    pub theme: String,
 }
 
-impl Default for AppConfig {
+impl Default for HajConfig {
     fn default() -> Self {
+        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
         Self {
-            animations: true, // default spinning
-            theme: "catppuccin".to_string(),
+            aur_only: false,
+            repo_only: false,
+            verbose: false,
+            diff_prog: "vimdiff".to_string(),
+            build_dir: home.join(".cache/haj/aur").to_string_lossy().to_string(),
+            animations: true,
         }
     }
 }
 
-pub fn load_config() -> AppConfig {
-    if let Some(proj_dirs) = ProjectDirs::from("", "", "haj") {
-        let config_dir = proj_dirs.config_dir();
-        let config_file = config_dir.join("config.toml");
+pub fn load_config() -> HajConfig {
+    let config_dir = dirs::config_dir()
+        .unwrap_or_else(|| {
+            dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("/"))
+                .join(".config")
+        })
+        .join("haj");
 
-        if config_file.exists() {
-            if let Ok(contents) = fs::read_to_string(&config_file)
-                && let Ok(config) = toml::from_str(&contents)
-            {
-                return config;
-            }
-        } else {
-            let _ = fs::create_dir_all(config_dir);
-            let default_config = AppConfig::default();
-            if let Ok(toml_string) = toml::to_string_pretty(&default_config) {
-                let _ = fs::write(config_file, toml_string);
-            }
-            return default_config;
-        }
+    let config_path = config_dir.join("config.toml");
+
+    if !config_path.exists() {
+        let _ = fs::create_dir_all(&config_dir);
+        let default_config = HajConfig::default();
+        
+        let toml_string = format!(
+            "# haj package manager configuration\n\n{}",
+            toml::to_string_pretty(&default_config).unwrap_or_default()
+        );
+        
+        let _ = fs::write(&config_path, toml_string);
+        return default_config;
     }
 
-    // fallback
-    AppConfig::default()
+    match fs::read_to_string(&config_path) {
+        Ok(contents) => match toml::from_str(&contents) {
+            Ok(config) => config,
+            Err(e) => {
+                eprintln!("\x1b[31m✗ failed to parse config.toml: {}\x1b[0m", e);
+                HajConfig::default()
+            }
+        },
+        Err(_) => HajConfig::default(),
+    }
 }

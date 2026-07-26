@@ -191,4 +191,10 @@ pub enum Commands {
 
     #[command(alias = "pn")]
     Diff,
+
+    #[command(hide = true)]
+    Completions {
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
 }

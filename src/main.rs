@@ -383,6 +383,22 @@ async fn run_pacman(
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    tokio::spawn(async move {
+        if let Ok(()) = tokio::signal::ctrl_c().await {
+            println!(
+                "\n\n{} received SIGINT (Ctrl+C). Cleaning up locks and exiting...",
+                "✗".red().bold()
+            );
+
+            let _ = std::process::Command::new("sudo")
+                .args(["rm", "-f", "/var/lib/pacman/db.lck"])
+                .status();
+
+            let _ = std::fs::remove_file("/tmp/haj.lock");
+
+            std::process::exit(130);
+        }
+    });
     let lock_file = OpenOptions::new()
         .read(true)
         .write(true)
@@ -402,12 +418,23 @@ async fn main() -> anyhow::Result<()> {
 
     let _haj_lock = lock_file;
 
-    let cli = Cli::parse();
-    let _config = config::load_config();
+    let mut cli = Cli::parse();
+    let config = config::load_config();
+    cli.aur = cli.aur || config.aur_only;
+    cli.repo = cli.repo || config.repo_only;
+    cli.verbose = cli.verbose || config.verbose;
+
 
     match &cli.command {
         Commands::Tui => {
             tui::run().await?;
+        }
+        Commands::Completions { shell } => {
+            use clap::CommandFactory;
+            let mut cmd = Cli::command();
+            let bin_name = cmd.get_name().to_string();
+            clap_complete::generate(*shell, &mut cmd, bin_name, &mut std::io::stdout());
+            return Ok(());
         }
         Commands::Update => {
             run_pacman(
@@ -427,6 +454,7 @@ async fn main() -> anyhow::Result<()> {
             match cmd {
                 Commands::Tui => unreachable!(),
                 Commands::Update => unreachable!(),
+                Commands::Completions { .. } => unreachable!(),
                 Commands::Install { packages } => {
                     let mut native_pkgs = Vec::new();
                     let mut aur_pkgs = Vec::new();
@@ -940,73 +968,91 @@ async fn main() -> anyhow::Result<()> {
                         target_msg.white().bold(),
                         query.cyan()
                     );
+                    
                     let mut found = false;
+                    let mut header_printed = false;
+
+                    let mut print_header = || {
+                        if !header_printed {
+                            println!(
+                                "  {:<35} {:<20} {}",
+                                "package".white().bold(),
+                                "version".white().bold(),
+                                "origin/status".white().bold()
+                            );
+                            println!("  {}", "-".repeat(75).dimmed());
+                            header_printed = true;
+                        }
+                    };
+
+                    let query_lower = query.to_lowercase();
 
                     if search_repo {
                         for db in alpm_handle.syncdbs() {
-                            if let Ok(results) = db.search([query.as_str()].into_iter()) {
-                                for pkg in results {
+                            for pkg in db.pkgs() {
+                                if pkg.name().to_lowercase().contains(&query_lower) {
                                     found = true;
+                                    print_header();
+                                    
                                     let is_installed = local_db.pkg(pkg.name()).is_ok();
-                                    ui::formatter::print_search_result(
-                                        pkg,
-                                        db.name(),
-                                        is_installed,
+                                    let status = if is_installed {
+                                        format!("{} {}", db.name().blue(), "[installed]".cyan().bold())
+                                    } else {
+                                        db.name().blue().to_string()
+                                    };
+                                    
+                                    println!(
+                                        "  {:<35} {:<20} {}",
+                                        pkg.name().cyan().bold(),
+                                        pkg.version().dimmed(),
+                                        status
                                     );
+                                    
+                                    let desc = pkg.desc().unwrap_or("no description provided.");
+                                    println!("      {}\n", desc.dimmed());
                                 }
                             }
                         }
                     }
 
                     if search_aur {
-                        let aur_url = format!("https://aur.archlinux.org/rpc/v5/search/{}", query);
+                        let aur_url = format!("https://aur.archlinux.org/rpc/v5/search/{}?by=name", query);
 
                         if let Ok(response) = reqwest::get(&aur_url).await
                             && let Ok(json) = response.json::<serde_json::Value>().await
                             && let Some(results) = json.get("results").and_then(|r| r.as_array())
                             && !results.is_empty()
                         {
-                            if found {
-                                println!();
-                            }
                             found = true;
+                            print_header();
 
                             for pkg in results {
-                                let name = pkg
-                                    .get("Name")
-                                    .and_then(|n| n.as_str())
-                                    .unwrap_or("unknown");
-                                let version =
-                                    pkg.get("Version").and_then(|v| v.as_str()).unwrap_or("");
-                                let desc = pkg
-                                    .get("Description")
-                                    .and_then(|d| d.as_str())
-                                    .unwrap_or("no description provided.");
-                                let votes =
-                                    pkg.get("NumVotes").and_then(|v| v.as_u64()).unwrap_or(0);
+                                let name = pkg.get("Name").and_then(|n| n.as_str()).unwrap_or("unknown");
+                                let version = pkg.get("Version").and_then(|v| v.as_str()).unwrap_or("");
+                                let desc = pkg.get("Description").and_then(|d| d.as_str()).unwrap_or("no description provided.");
+                                let votes = pkg.get("NumVotes").and_then(|v| v.as_u64()).unwrap_or(0);
 
                                 let is_installed = local_db.pkg(name).is_ok();
-                                let install_marker = if is_installed {
-                                    format!(" {}", "[installed]".cyan().bold())
+                                let status = if is_installed {
+                                    format!("{} (+{}) {}", "aur".magenta(), votes, "[installed]".cyan().bold())
                                 } else {
-                                    "".to_string()
+                                    format!("{} (+{})", "aur".magenta(), votes)
                                 };
 
                                 println!(
-                                    "{}/{} {} {}{}",
-                                    "aur".magenta().bold(),
-                                    name.bold(),
-                                    version.green(),
-                                    format!("(+{})", votes).yellow(),
-                                    install_marker
+                                    "  {:<35} {:<20} {}",
+                                    name.magenta().bold(),
+                                    version.dimmed(),
+                                    status
                                 );
-                                println!("    {}", desc.dimmed());
+                                println!("      {}\n", desc.dimmed());
                             }
                         }
                     }
+
                     if !found {
                         println!(
-                            "\n{} no packages found matching '{}' in {}.",
+                            "{} no packages found matching '{}' in {}.",
                             "✗".red(),
                             query.bold(),
                             target_msg
@@ -1134,16 +1180,20 @@ async fn main() -> anyhow::Result<()> {
                     foreign,
                 } => {
                     let mut count = 0;
+                    
+                    println!(
+                        "\n  {:<35} {:<25} {}",
+                        "package".white().bold(),
+                        "version".white().bold(),
+                        "origin".white().bold()
+                    );
+                    println!("  {}", "-".repeat(70).dimmed());
 
                     for pkg in local_db.pkgs() {
                         let is_explicit = pkg.reason() == alpm::PackageReason::Explicit;
 
-                        if *explicit && !is_explicit {
-                            continue;
-                        }
-                        if *deps && is_explicit {
-                            continue;
-                        }
+                        if *explicit && !is_explicit { continue; }
+                        if *deps && is_explicit { continue; }
 
                         let mut found_in_repo = false;
                         for db in alpm_handle.syncdbs() {
@@ -1153,16 +1203,23 @@ async fn main() -> anyhow::Result<()> {
                             }
                         }
 
-                        if *foreign && found_in_repo {
-                            continue;
-                        }
+                        if *foreign && found_in_repo { continue; }
 
                         if found_in_repo {
-                            println!("{} {}", pkg.name().cyan(), pkg.version().dimmed());
+                            println!(
+                                "  {:<35} {:<25} {}",
+                                pkg.name().cyan(),
+                                pkg.version().dimmed(),
+                                "native".blue()
+                            );
                         } else {
-                            println!("{} {}", pkg.name().magenta(), pkg.version().dimmed());
+                            println!(
+                                "  {:<35} {:<25} {}",
+                                pkg.name().magenta(),
+                                pkg.version().dimmed(),
+                                "aur".magenta()
+                            );
                         }
-
                         count += 1;
                     }
 
