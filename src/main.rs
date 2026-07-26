@@ -119,6 +119,47 @@ fn prompt_install(msg: &str) -> InstallChoice {
     }
 }
 
+async fn display_arch_news() {
+    let spinner = ui::progress::spinner("checking arch linux news...");
+    let url = "https://archlinux.org/feeds/news/";
+
+    if let Ok(response) = reqwest::get(url).await {
+        if let Ok(xml) = response.text().await {
+            spinner.finish_and_clear();
+            
+            if let Some(item_start) = xml.find("<item>") {
+                let item_str = &xml[item_start..];
+                
+                if let (Some(t_start), Some(t_end)) = (item_str.find("<title>"), item_str.find("</title>")) {
+                    let title = &item_str[t_start + 7..t_end];
+                    
+                    if let (Some(d_start), Some(d_end)) = (item_str.find("<pubDate>"), item_str.find("</pubDate>")) {
+                        let date_str = &item_str[d_start + 9..d_end];
+                        
+                        if let Ok(pub_date) = chrono::DateTime::parse_from_rfc2822(date_str) {
+                            let now = chrono::Utc::now();
+                            if now.signed_duration_since(pub_date.with_timezone(&chrono::Utc)).num_days() <= 7 {
+                                println!(
+                                    "\n{} {}\n  {} {}\n  {}\n",
+                                    "!!!".red().bold(),
+                                    "ACTION REQUIRED: recent Arch Linux news".red().bold(),
+                                    "headline:".dimmed(),
+                                    title.yellow().bold(),
+                                    "haj requests you to read the news before upgrading.".dimmed()
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            spinner.finish_and_clear();
+        }
+    } else {
+        spinner.finish_and_clear();
+    }
+}
+
 async fn view_pkgbuilds(pkgs: &[String]) {
     let pager = std::env::var("PAGER").unwrap_or_else(|_| {
         if std::process::Command::new("bat").arg("--version").output().is_ok() {
@@ -1120,6 +1161,7 @@ async fn main() -> anyhow::Result<()> {
 
                     let total_upgrades = native_lines.len() + aur_updates.len();
                     println!("\n{:<15} {}", "total:", total_upgrades.to_string().cyan());
+                    display_arch_news().await;
 
                     if !cli.noconfirm && !prompt_confirm("Proceed with upgrade? [Y/n]") {
                         println!("{} aborted.", "✗".red());
@@ -1547,30 +1589,43 @@ async fn main() -> anyhow::Result<()> {
                 }
 
                 Commands::Stats => {
-                    println!("{} scanning system metrics...\n", "::".blue());
+                    let spinner = ui::progress::spinner("scanning system metrics...");
 
-                    let mut native_count = 0;
-                    let mut foreign_count = 0;
-                    // let mut explicit_count = 0;
-                    let mut total_size_bytes: i64 = 0;
+                    let mut total_pkgs = 0;
+                    let mut explicit_pkgs = 0;
+                    let mut dep_pkgs = 0;
+                    let mut aur_pkgs = 0;
+                    let mut installed_size: i64 = 0;
                     let mut orphan_count = 0;
-                    let mut orphan_size_bytes: i64 = 0;
+
+                    let mut oldest_pkg = String::new();
+                    let mut oldest_date = i64::MAX;
+                    let mut newest_pkg = String::new();
+                    let mut newest_date = 0;
 
                     for pkg in local_db.pkgs() {
-                        let isize = pkg.isize();
-                        total_size_bytes += isize;
+                        total_pkgs += 1;
+                        installed_size += pkg.isize();
 
                         let is_explicit = pkg.reason() == alpm::PackageReason::Explicit;
-                        // if is_explicit {
-                        // explicit_count += 1;
-                        // }
+                        if is_explicit {
+                            explicit_pkgs += 1;
+                        } else {
+                            dep_pkgs += 1;
+                            if pkg.required_by().is_empty() && pkg.optional_for().is_empty() {
+                                orphan_count += 1;
+                            }
+                        }
 
-                        if !is_explicit
-                            && pkg.required_by().is_empty()
-                            && pkg.optional_for().is_empty()
-                        {
-                            orphan_count += 1;
-                            orphan_size_bytes += isize;
+                        if let Some(idate) = pkg.install_date() {
+                            if idate < oldest_date {
+                                oldest_date = idate;
+                                oldest_pkg = pkg.name().to_string();
+                            }
+                            if idate > newest_date {
+                                newest_date = idate;
+                                newest_pkg = pkg.name().to_string();
+                            }
                         }
 
                         let mut found_in_repo = false;
@@ -1580,11 +1635,8 @@ async fn main() -> anyhow::Result<()> {
                                 break;
                             }
                         }
-
-                        if found_in_repo {
-                            native_count += 1;
-                        } else {
-                            foreign_count += 1;
+                        if !found_in_repo {
+                            aur_pkgs += 1;
                         }
                     }
 
@@ -1619,75 +1671,82 @@ async fn main() -> anyhow::Result<()> {
                         }
                     }
 
+                    let qu_output = std::process::Command::new("pacman")
+                        .arg("-Qu")
+                        .output();
+                    let updates = if let Ok(out) = qu_output {
+                        String::from_utf8_lossy(&out.stdout).lines().count()
+                    } else {
+                        0
+                    };
+
+                    let lock_exists = std::path::Path::new("/var/lib/pacman/db.lck").exists();
+                    let mut health_issues = Vec::new();
+                    if orphan_count > 0 {
+                        health_issues.push(format!("{} orphans", orphan_count));
+                    }
+                    if lock_exists {
+                        health_issues.push("stale db lock".to_string());
+                    }
+
+                    let health_status = if health_issues.is_empty() {
+                        "excellent ✓".green().bold().to_string()
+                    } else {
+                        format!("!!! {}", health_issues.join(", ")).red().bold().to_string()
+                    };
+
+                    let format_gb = |bytes: f64| -> String {
+                        if bytes > 1_073_741_824.0 {
+                            format!("{:.2} GiB", bytes / 1_073_741_824.0)
+                        } else {
+                            format!("{:.2} MiB", bytes / 1_048_576.0)
+                        }
+                    };
+
                     let sync_time = std::fs::metadata("/var/lib/pacman/sync/core.db")
                         .or_else(|_| std::fs::metadata("/var/lib/pacman/sync/extra.db"))
                         .and_then(|m| m.modified())
                         .map(|t| {
                             if let Ok(dur) = t.elapsed() {
                                 let secs = dur.as_secs();
-                                if secs < 60 {
-                                    format!("{}s ago", secs)
-                                } else if secs < 3600 {
-                                    format!("{}m ago", secs / 60)
-                                } else if secs < 86400 {
-                                    format!("{}h ago", secs / 3600)
-                                } else {
-                                    format!("{}d ago", secs / 86400)
-                                }
+                                if secs < 60 { format!("{}s ago", secs) }
+                                else if secs < 3600 { format!("{}m ago", secs / 60) }
+                                else if secs < 86400 { format!("{}h ago", secs / 3600) }
+                                else { format!("{}d ago", secs / 86400) }
                             } else {
                                 "unknown".to_string()
                             }
                         })
                         .unwrap_or_else(|_| "unknown".to_string());
 
-                    let format_gb = |bytes: f64| -> String {
-                        if bytes > 1_073_741_824.0 {
-                            format!("{:.2} GB", bytes / 1_073_741_824.0)
-                        } else {
-                            format!("{:.2} MB", bytes / 1_048_576.0)
-                        }
+                    let os_name = std::fs::read_to_string("/etc/os-release")
+                        .unwrap_or_default()
+                        .lines()
+                        .find(|line| line.starts_with("PRETTY_NAME="))
+                        .and_then(|line| line.split('=').nth(1))
+                        .map(|name| name.trim_matches('"').to_string())
+                        .unwrap_or_else(|| "Arch Linux".to_string());
+
+                    spinner.finish_and_clear();
+
+                    let update_str = if updates > 0 {
+                        updates.to_string().yellow().bold().to_string()
+                    } else {
+                        "0 (up to date)".dimmed().to_string()
                     };
 
-                    println!("{}", "✓ system health & statistics".bold().white());
-
-                    println!("\n  {} packages", ":3".cyan());
-                    println!(
-                        "     {:<12} {}",
-                        "total:",
-                        (native_count + foreign_count).to_string().white().bold()
-                    );
-                    println!("     {:<12} {}", "native:", native_count.to_string().cyan());
-                    println!(
-                        "     {:<12} {}",
-                        "aur:",
-                        foreign_count.to_string().magenta()
-                    );
-
-                    println!("\n  {} disk usage", ":O".blue());
-                    println!(
-                        "     {:<12} {}",
-                        "installed:",
-                        format_gb(total_size_bytes as f64).green()
-                    );
-                    if orphan_count > 0 {
-                        println!(
-                            "     {:<12} {} ({})",
-                            "orphans:",
-                            orphan_count.to_string().yellow(),
-                            format_gb(orphan_size_bytes as f64).dimmed()
-                        );
-                    } else {
-                        println!("     {:<12} {}", "orphans:", "0 (clean)".green());
-                    }
-                    println!(
-                        "     {:<12} {} (pacman) / {} (aur)",
-                        "cache:",
-                        format_gb(pacman_cache as f64).dimmed(),
-                        format_gb(aur_cache as f64).dimmed()
-                    );
-
-                    println!("\n  {} databases", ":p".magenta());
-                    println!("     {:<12} {}", "last sync:", sync_time.cyan());
+                    println!("\n{}", "✓ system overview".bold().white());
+                    println!();
+                    println!("  {:<15} {}", "os:".bold(), os_name.cyan());
+                    println!("  {:<15} {} {}", "packages:".bold(), total_pkgs.to_string().cyan().bold(), format!("({} explicit, {} dependencies)", explicit_pkgs, dep_pkgs).dimmed());
+                    println!("  {:<15} {}", "aur:".bold(), aur_pkgs.to_string().magenta());
+                    println!("  {:<15} {}", "updates:".bold(), update_str);
+                    println!("  {:<15} {}", "installed:".bold(), format_gb(installed_size as f64).green());
+                    println!("  {:<15} {}", "cache:".bold(), format!("{} (pacman) / {} (aur)", format_gb(pacman_cache as f64), format_gb(aur_cache as f64)).dimmed());
+                    println!("  {:<15} {}", "health:".bold(), health_status);
+                    println!("  {:<15} {}", "last sync:".bold(), sync_time.cyan());
+                    println!("  {:<15} {}", "activity:".bold(), format!("{} (newest), {} (oldest)", newest_pkg, oldest_pkg).dimmed());
+                    println!();
                 }
 
                 Commands::Group { name } => {
