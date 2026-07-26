@@ -44,7 +44,6 @@ fn prompt_confirm(msg: &str) -> bool {
         println!("{}", if result { "Y" } else { "n" }); 
         result
     } else {
-        // Failsafe fallback
         let mut input = String::new();
         let _ = std::io::stdin().read_line(&mut input);
         let input = input.trim().to_lowercase();
@@ -75,7 +74,6 @@ async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_
         c
     };
 
-    // --- THE VERBOSE BYPASS ---
     if is_verbose {
         println!("{} [verbose] executing: pacman {}", "::".blue(), args.join(" "));
         let mut child = child_cmd
@@ -92,13 +90,11 @@ async fn run_pacman(args: &[&str], spinner_msg: &str, success_msg: &str, is_dry_
         } else {
             println!("{} operation failed.", "✗".red());
         }
-        return; // We return BEFORE the spinner is ever created!
+        return; 
     }
 
-    // --- NON-VERBOSE PTY ENGINE ---
     child_cmd.arg("--color=never");
 
-    // WE ONLY START THE SPINNER HERE!
     let spinner = ui::progress::spinner(spinner_msg);
 
     let mut child = child_cmd
@@ -385,7 +381,6 @@ async fn main() -> anyhow::Result<()> {
                         return Ok(());
                     }
 
-                    // Query pacman safely for the full cascading removal list
                     let print_cmd = std::process::Command::new("pacman")
                         .arg("-Rsp")
                         .args(packages)
@@ -406,7 +401,6 @@ async fn main() -> anyhow::Result<()> {
                     }
                     println!("\n{:<15} {}", "total:", targets.len().to_string().cyan());
 
-                    // Fire the blazing-fast UX prompt!
                     if !cli.noconfirm {
                         if !prompt_confirm("Proceed with removal? [Y/n]") {
                             println!("{} aborted.", "✗".red());
@@ -416,7 +410,6 @@ async fn main() -> anyhow::Result<()> {
 
                     drop(alpm_handle);
 
-                    // We now safely force noconfirm because the user already approved it!
                     let mut args = vec!["-Rs", "--noconfirm"];
                     args.extend(packages.iter().map(|s| s.as_str()));
 

@@ -133,7 +133,7 @@ pub async fn build(pkg_name: &str, is_verbose: bool) -> anyhow::Result<PathBuf> 
         let mut child = Command::new("makepkg")
             .current_dir(&pkg_dir)
             .args(&["-cf", "--noconfirm", "--nocheck"])
-            .stdin(Stdio::inherit())  // Give terminal control to makepkg
+            .stdin(Stdio::inherit())  
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
             .spawn()?;
