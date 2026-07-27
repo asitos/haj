@@ -1,3 +1,4 @@
 /target
 *.tape
 RELEASE.md
+assets/*.mp4
