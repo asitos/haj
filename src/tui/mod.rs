@@ -1,6 +1,6 @@
 use anyhow::Result;
 use crossterm::{
-    event::{self, Event, KeyCode},
+    event::{self, Event, KeyCode, KeyModifiers},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -13,6 +13,7 @@ use ratatui::{
 use std::{collections::HashSet, io, time::Duration};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt};
 use tokio::sync::mpsc;
+use serde::{Deserialize, Serialize};
 
 use crate::core;
 use ansi_to_tui::IntoText;
@@ -20,10 +21,13 @@ use ansi_to_tui::IntoText;
 pub mod browser;
 pub mod dashboard;
 pub mod transaction;
+pub mod news; // NEW: The news UI module
 
+#[derive(PartialEq)]
 pub enum CurrentScreen {
     Dashboard,
     Browser,
+    News, // NEW: News screen state
 }
 
 #[derive(PartialEq)]
@@ -32,15 +36,15 @@ pub enum InputMode {
     Editing,
 }
 
+#[derive(PartialEq)]
+pub enum NewsFocus {
+    List,
+    Article,
+}
+
 #[derive(Clone, PartialEq, Debug)]
 pub enum PackageFilter {
-    All,
-    Installed,
-    NotInstalled,
-    Updates,
-    Aur,
-    Repositories,
-    Repo(String),
+    All, Installed, NotInstalled, Updates, Aur, Repositories, Repo(String),
 }
 
 impl std::fmt::Display for PackageFilter {
@@ -59,10 +63,7 @@ impl std::fmt::Display for PackageFilter {
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum SortMode {
-    Alphabetical,
-    Installed,
-    Repository,
-    Relevance,
+    Alphabetical, Installed, Repository, Relevance,
 }
 
 impl std::fmt::Display for SortMode {
@@ -78,13 +79,18 @@ impl std::fmt::Display for SortMode {
 
 #[derive(Clone)]
 pub struct PackageInfo {
-    pub name: String,
-    pub version: String,
-    pub desc: String,
-    pub repo: String,
-    pub is_installed: bool,
-    pub is_upgradable: bool,
-    pub size_mb: f64,
+    pub name: String, pub version: String, pub desc: String, pub repo: String,
+    pub is_installed: bool, pub is_upgradable: bool, pub size_mb: f64,
+}
+
+// ---> NEW: News Data Structures <---
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NewsItem {
+    pub title: String,
+    pub link: String,
+    pub pub_date: String,
+    pub description: String,
+    pub is_critical: bool,
 }
 
 pub enum TuiEvent {
@@ -97,6 +103,8 @@ pub enum TuiEvent {
     TransactionFailed,
     CloseTransaction,
     DashboardArtFrame(Text<'static>),
+    NewsFetched(Vec<NewsItem>, String), // NEW: Fetched articles and last updated string
+    NewsFetchFailed(String),            // NEW: Fetch error
 }
 
 pub struct App {
@@ -104,77 +112,103 @@ pub struct App {
     pub screen: CurrentScreen,
     pub input_mode: InputMode,
     
+    // Package Browser State
     pub filters: Vec<PackageFilter>,
     pub filter_idx: usize,
     pub sort_mode: SortMode,
-    
     pub pending_g: bool,
     pub orphan_count: usize,
-
     pub package_list: Vec<PackageInfo>,
     pub filtered_packages: Vec<PackageInfo>,
     pub search_query: String,
     pub list_state: ListState,
     pub selected_packages: HashSet<String>,
 
+    // Transaction State
     pub show_prompt: bool,
     pub prompt_type: String,
     pub prompt_targets: Vec<String>,
-
     pub is_installing: bool,
     pub current_action: String,
     pub progress: u16,
     pub transaction_logs: Vec<String>,
     pub dashboard_art: Text<'static>,
-
     pub abort_tx: Option<mpsc::Sender<()>>,
-}
 
+    // ---> NEW: News Browser State <---
+    pub news_items: Vec<NewsItem>,
+    pub filtered_news: Vec<NewsItem>,
+    pub read_news: HashSet<String>,
+    pub news_list_state: ListState,
+    pub news_scroll: u16,
+    pub news_search_query: String,
+    pub news_focus: NewsFocus,
+    pub is_fetching_news: bool,
+    pub news_last_updated: String,
+    pub news_error: String,
+}
 impl App {
     pub fn new() -> Self {
         let mut dynamic_filters = vec![
-            PackageFilter::All,
-            PackageFilter::Installed,
-            PackageFilter::NotInstalled,
-            PackageFilter::Updates,
-            PackageFilter::Aur,
-            PackageFilter::Repositories,
+            PackageFilter::All, PackageFilter::Installed, PackageFilter::NotInstalled,
+            PackageFilter::Updates, PackageFilter::Aur, PackageFilter::Repositories,
         ];
 
         if let Ok(alpm) = core::alpm_init::init_alpm() {
-            for db in alpm.syncdbs() {
-                dynamic_filters.push(PackageFilter::Repo(db.name().to_string()));
-            }
+            for db in alpm.syncdbs() { dynamic_filters.push(PackageFilter::Repo(db.name().to_string())); }
         }
+
+        // Load read articles from disk
+        let home = dirs::home_dir().unwrap_or_default();
+        let cache_path = home.join(".cache/haj/read_news.json");
+        let read_news: HashSet<String> = std::fs::read_to_string(cache_path)
+            .ok()
+            .and_then(|data| serde_json::from_str(&data).ok())
+            .unwrap_or_default();
 
         let mut app = Self {
             should_quit: false,
             screen: CurrentScreen::Dashboard,
             input_mode: InputMode::Normal,
-            filters: dynamic_filters,
-            filter_idx: 0,
-            sort_mode: SortMode::Relevance,
-            pending_g: false,
-            orphan_count: 0,
-            package_list: Vec::new(),
-            filtered_packages: Vec::new(),
-            search_query: String::new(),
-            list_state: ListState::default(),
-            selected_packages: HashSet::new(),
-            show_prompt: false,
-            prompt_type: String::new(),
-            prompt_targets: Vec::new(),
-            is_installing: false,
-            current_action: String::from("idle"),
-            progress: 0,
-            transaction_logs: Vec::new(),
-            dashboard_art: Text::raw(" loading art... "),
-            abort_tx: None,
+            filters: dynamic_filters, filter_idx: 0, sort_mode: SortMode::Relevance,
+            pending_g: false, orphan_count: 0, package_list: Vec::new(), filtered_packages: Vec::new(),
+            search_query: String::new(), list_state: ListState::default(), selected_packages: HashSet::new(),
+            show_prompt: false, prompt_type: String::new(), prompt_targets: Vec::new(),
+            is_installing: false, current_action: String::from("idle"), progress: 0,
+            transaction_logs: Vec::new(), dashboard_art: Text::raw(" loading art... "), abort_tx: None,
+            
+            // Initialize News State
+            news_items: Vec::new(), filtered_news: Vec::new(), read_news,
+            news_list_state: ListState::default(), news_scroll: 0, news_search_query: String::new(),
+            news_focus: NewsFocus::List, is_fetching_news: true, news_last_updated: "checking...".to_string(),
+            news_error: String::new(),
         };
 
         app.refresh_state();
         app
     }
+
+    pub fn mark_news_read(&mut self, link: String) {
+        self.read_news.insert(link);
+        let home = dirs::home_dir().unwrap_or_default();
+        let cache_dir = home.join(".cache/haj");
+        let _ = std::fs::create_dir_all(&cache_dir);
+        let cache_path = cache_dir.join("read_news.json");
+        if let Ok(data) = serde_json::to_string(&self.read_news) {
+            let _ = std::fs::write(cache_path, data);
+        }
+    }
+
+    pub fn update_news_search(&mut self) {
+        let query = self.news_search_query.to_lowercase();
+        self.filtered_news = self.news_items.iter().filter(|n| {
+            query.is_empty() || n.title.to_lowercase().contains(&query) || n.description.to_lowercase().contains(&query)
+        }).cloned().collect();
+
+        self.news_list_state.select(if self.filtered_news.is_empty() { None } else { Some(0) });
+        self.news_scroll = 0;
+    }
+
 
     pub fn refresh_state(&mut self) {
         if let Ok(output) = std::process::Command::new("pacman").arg("-Qdtq").output() {
@@ -336,6 +370,50 @@ impl App {
     }
 }
 
+pub fn fetch_arch_news(tx: mpsc::Sender<TuiEvent>) {
+    tokio::spawn(async move {
+        let url = "https://archlinux.org/feeds/news/";
+        match reqwest::get(url).await {
+            Ok(response) => {
+                if let Ok(xml) = response.text().await {
+                    let mut items = Vec::new();
+                    let critical_words = ["manual intervention", "requires intervention", "breaking change", "filesystem", "pacman", "keyring", "glibc"];
+                    
+                    let mut search_idx = 0;
+                    while let Some(item_start) = xml[search_idx..].find("<item>") {
+                        let absolute_start = search_idx + item_start;
+                        if let Some(item_end) = xml[absolute_start..].find("</item>") {
+                            let item_str = &xml[absolute_start..absolute_start + item_end];
+                            
+                            let extract = |tag: &str, end_tag: &str| -> String {
+                                if let (Some(s), Some(e)) = (item_str.find(tag), item_str.find(end_tag)) {
+                                    item_str[s + tag.len()..e].to_string()
+                                } else { String::new() }
+                            };
+
+                            let title = extract("<title>", "</title>");
+                            let link = extract("<link>", "</link>");
+                            let pub_date = extract("<pubDate>", "</pubDate>");
+                            let desc = extract("<description>", "</description>");
+
+                            // Strip CDATA and basic HTML for searching
+                            let clean_desc = desc.replace("<![CDATA[", "").replace("]]>", "");
+                            let is_crit = critical_words.iter().any(|&w| title.to_lowercase().contains(w) || clean_desc.to_lowercase().contains(w));
+
+                            if !title.is_empty() {
+                                items.push(NewsItem { title, link, pub_date, description: clean_desc, is_critical: is_crit });
+                            }
+                            search_idx = absolute_start + item_end;
+                        } else { break; }
+                    }
+                    let _ = tx.send(TuiEvent::NewsFetched(items, "just now".into())).await;
+                }
+            }
+            Err(e) => { let _ = tx.send(TuiEvent::NewsFetchFailed(e.to_string())).await; }
+        }
+    });
+}
+
 pub async fn run() -> Result<()> {
     println!("🦈 haj requires root privileges for package management.");
     let status = std::process::Command::new("sudo").arg("-v").status()?;
@@ -372,6 +450,17 @@ where
     let _use_3d_animation = config.general.animations;
 
     let (tx, mut rx) = mpsc::channel::<TuiEvent>(100);
+    fetch_arch_news(tx.clone());
+
+    let tx_input = tx.clone();
+    tokio::spawn(async move {
+        loop {
+            if tx_input.is_closed() { break; }
+            if event::poll(Duration::from_millis(50)).unwrap_or(false)
+                && let Ok(Event::Key(key)) = event::read()
+                && tx_input.send(TuiEvent::Key(key)).await.is_err() { break; }
+        }
+    });
 
     let tx_input = tx.clone();
     tokio::spawn(async move {
@@ -453,7 +542,7 @@ where
                     args.push("--color=never".into());
                 }
 
-                let mut child_res = tokio::process::Command::new("sudo")
+                let child_res = tokio::process::Command::new("sudo")
                     .args(args)
                     .stdout(std::process::Stdio::piped())
                     .stderr(std::process::Stdio::piped())
@@ -578,6 +667,7 @@ where
             match app.screen {
                 CurrentScreen::Dashboard => dashboard::render(f, app),
                 CurrentScreen::Browser => browser::render(f, app),
+                CurrentScreen::News => news::render(f, app),
             }
             transaction::render_popup(f, app);
             transaction::render_confirm_popup(f, app);
@@ -602,6 +692,19 @@ where
                     app.progress = 0;
                     app.refresh_state();
                 }
+
+                TuiEvent::NewsFetched(items, time) => {
+                    app.is_fetching_news = false;
+                    app.news_items = items;
+                    app.news_last_updated = time;
+                    app.update_news_search();
+                }
+
+                TuiEvent::NewsFetchFailed(err) => {
+                    app.is_fetching_news = false;
+                    app.news_error = err;
+                }
+
                 TuiEvent::Key(key) => {
                     if app.is_installing {
                         if let KeyCode::Char('q') = key.code {
@@ -660,6 +763,7 @@ where
                                 app.screen = CurrentScreen::Browser;
                                 app.input_mode = InputMode::Editing;
                             }
+                            KeyCode::Char('n') => { app.screen = CurrentScreen::News; }
                             KeyCode::Char('u') => {
                                 app.is_installing = true;
                                 app.current_action = "syncing & updating system...".to_string();
@@ -707,6 +811,90 @@ where
                             }
                             _ => {}
                         },
+                        CurrentScreen::News => match app.input_mode {
+                            InputMode::Normal => match key.code {
+                                KeyCode::Esc => app.screen = CurrentScreen::Dashboard,
+                                KeyCode::Char('q') => app.should_quit = true,
+                                KeyCode::Char('/') | KeyCode::Char('f') | KeyCode::Char('s') => app.input_mode = InputMode::Editing,
+                                KeyCode::Char('r') => {
+                                    app.is_fetching_news = true;
+                                    fetch_arch_news(tx.clone());
+                                }
+                                KeyCode::Tab | KeyCode::Enter => {
+                                    app.news_focus = if app.news_focus == NewsFocus::List { NewsFocus::Article } else { NewsFocus::List };
+                                }
+                                KeyCode::Char('o') => {
+                                    if let Some(idx) = app.news_list_state.selected() {
+                                        if let Some(item) = app.filtered_news.get(idx) {
+                                            let _ = std::process::Command::new("xdg-open").arg(&item.link).spawn();
+                                        }
+                                    }
+                                }
+                                KeyCode::Char('y') => {
+                                    if let Some(idx) = app.news_list_state.selected() {
+                                        if let Some(item) = app.filtered_news.get(idx) {
+                                            // Fallback clipboard logic using xclip/wl-copy
+                                            if std::process::Command::new("wl-copy").arg(&item.link).output().is_err() {
+                                                let mut child = std::process::Command::new("xclip").args(["-selection", "clipboard"]).stdin(std::process::Stdio::piped()).spawn().unwrap();
+                                                if let Some(mut stdin) = child.stdin.take() {
+                                                    use std::io::Write;
+                                                    let _ = stdin.write_all(item.link.as_bytes());
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                KeyCode::Down | KeyCode::Char('j') => {
+                                    if app.news_focus == NewsFocus::List {
+                                        let i = match app.news_list_state.selected() {
+                                            Some(i) => if i >= app.filtered_news.len().saturating_sub(1) { 0 } else { i + 1 },
+                                            None => 0,
+                                        };
+                                        app.news_list_state.select(Some(i));
+                                        app.news_scroll = 0;
+                                        // Mark read when navigating
+                                        if let Some(item) = app.filtered_news.get(i) {
+                                            let link = item.link.clone();
+                                            app.mark_news_read(link);
+                                        }
+                                    } else {
+                                        app.news_scroll = app.news_scroll.saturating_add(1);
+                                    }
+                                }
+                                KeyCode::Up | KeyCode::Char('k') => {
+                                    if app.news_focus == NewsFocus::List {
+                                        let i = match app.news_list_state.selected() {
+                                            Some(i) => if i == 0 { app.filtered_news.len().saturating_sub(1) } else { i - 1 },
+                                            None => 0,
+                                        };
+                                        app.news_list_state.select(Some(i));
+                                        app.news_scroll = 0;
+                                        if let Some(item) = app.filtered_news.get(i) {
+                                            let link = item.link.clone();
+                                            app.mark_news_read(link);
+                                        }
+                                    } else {
+                                        app.news_scroll = app.news_scroll.saturating_sub(1);
+                                    }
+                                }
+                                KeyCode::PageDown => if app.news_focus == NewsFocus::Article { app.news_scroll = app.news_scroll.saturating_add(15); }
+                                KeyCode::PageUp => if app.news_focus == NewsFocus::Article { app.news_scroll = app.news_scroll.saturating_sub(15); }
+                                KeyCode::Home => if app.news_focus == NewsFocus::Article { app.news_scroll = 0; }
+                                KeyCode::End => if app.news_focus == NewsFocus::Article { app.news_scroll = 999; } // Max clamp in render
+                                _ => {}
+                            },
+                            InputMode::Editing => match key.code {
+                                KeyCode::Esc | KeyCode::Enter => app.input_mode = InputMode::Normal,
+                                KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                    app.news_search_query.clear();
+                                    app.update_news_search();
+                                }
+                                KeyCode::Backspace | KeyCode::Delete => { app.news_search_query.pop(); app.update_news_search(); }
+                                KeyCode::Char(c) => { app.news_search_query.push(c); app.update_news_search(); }
+                                _ => {}
+                            }
+                        },
+
                         CurrentScreen::Browser => match app.input_mode {
                             InputMode::Normal => match key.code {
                                 KeyCode::Char('x') => {
