@@ -68,6 +68,7 @@ pub enum PackageFilter {
     Aur,
     Repositories,
     Repo(String),
+    Group(String),
 }
 
 #[derive(Clone)]
@@ -92,6 +93,7 @@ impl std::fmt::Display for PackageFilter {
             Self::Aur => write!(f, "aur"),
             Self::Repositories => write!(f, "repositories"),
             Self::Repo(name) => write!(f, "repo:{}", name),
+            Self::Group(name) => write!(f, "group:{}", name),
         }
     }
 }
@@ -552,6 +554,14 @@ impl App {
                     PackageFilter::Aur => p.repo == "local/aur",
                     PackageFilter::Repositories => p.repo != "local/aur",
                     PackageFilter::Repo(name) => &p.repo == name,
+
+                    PackageFilter::Group(gname) => {
+                        if let Some(g) = self.groups.iter().find(|x| &x.name == gname) {
+                            g.packages.iter().any(|pkg| pkg.0 == p.name)
+                        } else {
+                            false
+                        }
+                    }
                 };
                 matches_query && matches_filter
             })
@@ -1572,28 +1582,104 @@ where
                             }
                             _ => {}
                         },
-                        CurrentScreen::Groups => match key.code {
-                            KeyCode::Esc => app.screen = CurrentScreen::Dashboard,
-                            KeyCode::Char('q') => app.should_quit = true,
-                            KeyCode::Down | KeyCode::Char('j') => {
-                                if !app.group_items.is_empty() {
-                                    let i = match app.group_state.selected() {
-                                        Some(i) => if i >= app.group_items.len() - 1 { 0 } else { i + 1 },
-                                        None => 0,
-                                    };
-                                    app.group_state.select(Some(i));
+                                                CurrentScreen::Groups => match app.group_input_mode {
+                            InputMode::Normal => match key.code {
+                                KeyCode::Esc => app.screen = CurrentScreen::Dashboard,
+                                KeyCode::Char('q') => app.should_quit = true,
+                                KeyCode::Char('/') => app.group_input_mode = InputMode::Editing,
+                                KeyCode::Char(' ') => {
+                                    if let Some(idx) = app.group_state.selected() {
+                                        if let Some(selected_group) = app.filtered_groups.get(idx) {
+                                            let name = selected_group.name.clone();
+                                            if let Some(g) = app.groups.iter_mut().find(|x| x.name == name) {
+                                                g.is_favorite = !g.is_favorite;
+                                            }
+                                            app.update_group_filter();
+                                        }
+                                    }
                                 }
-                            }
-                            KeyCode::Up | KeyCode::Char('k') => {
-                                if !app.group_items.is_empty() {
-                                    let i = match app.group_state.selected() {
-                                        Some(i) => if i == 0 { app.group_items.len() - 1 } else { i - 1 },
-                                        None => 0,
+                                KeyCode::Char('S') => {
+                                    app.group_sort_mode = match app.group_sort_mode {
+                                        GroupSortMode::Alphabetical => GroupSortMode::PackageCount,
+                                        GroupSortMode::PackageCount => GroupSortMode::InstallCompletion,
+                                        GroupSortMode::InstallCompletion => GroupSortMode::Alphabetical,
                                     };
-                                    app.group_state.select(Some(i));
+                                    app.update_group_filter();
                                 }
+                                KeyCode::Char('i') => {
+                                    if let Some(idx) = app.group_state.selected() {
+                                        if let Some(selected_group) = app.filtered_groups.get(idx) {
+                                            app.prompt_targets = selected_group.packages.iter().map(|p| p.0.clone()).collect();
+                                            if !app.prompt_targets.is_empty() {
+                                                app.prompt_type = "install".to_string();
+                                                app.show_prompt = true;
+                                            }
+                                        }
+                                    }
+                                }
+                                KeyCode::Char('r') => {
+                                    if let Some(idx) = app.group_state.selected() {
+                                        if let Some(selected_group) = app.filtered_groups.get(idx) {
+                                            let installed_pkgs: Vec<String> = selected_group.packages.iter().filter(|p| p.1).map(|p| p.0.clone()).collect();
+                                            if !installed_pkgs.is_empty() {
+                                                app.prompt_targets = installed_pkgs;
+                                                app.prompt_type = "remove".to_string();
+                                                app.show_prompt = true;
+                                            }
+                                        }
+                                    }
+                                }
+                                KeyCode::Enter => {
+                                    if let Some(idx) = app.group_state.selected() {
+                                        if let Some(selected_group) = app.filtered_groups.get(idx) {
+                                            let gname = selected_group.name.clone();
+                                            if let Some(pos) = app.filters.iter().position(|f| *f == PackageFilter::Group(gname.clone())) {
+                                                app.filter_idx = pos;
+                                            } else {
+                                                app.filters.push(PackageFilter::Group(gname.clone()));
+                                                app.filter_idx = app.filters.len() - 1;
+                                            }
+                                            app.screen = CurrentScreen::Browser;
+                                            app.update_search();
+                                        }
+                                    }
+                                }
+                                KeyCode::Down | KeyCode::Char('j') => {
+                                    if !app.filtered_groups.is_empty() {
+                                        let i = match app.group_state.selected() {
+                                            Some(i) => if i >= app.filtered_groups.len() - 1 { 0 } else { i + 1 },
+                                            None => 0,
+                                        };
+                                        app.group_state.select(Some(i));
+                                    }
+                                }
+                                KeyCode::Up | KeyCode::Char('k') => {
+                                    if !app.filtered_groups.is_empty() {
+                                        let i = match app.group_state.selected() {
+                                            Some(i) => if i == 0 { app.filtered_groups.len() - 1 } else { i - 1 },
+                                            None => 0,
+                                        };
+                                        app.group_state.select(Some(i));
+                                    }
+                                }
+                                _ => {}
+                            },
+                            InputMode::Editing => match key.code {
+                                KeyCode::Esc | KeyCode::Enter => app.group_input_mode = InputMode::Normal,
+                                KeyCode::Backspace | KeyCode::Delete => {
+                                    app.group_search_query.pop();
+                                    app.update_group_filter();
+                                }
+                                KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                    app.group_search_query.clear();
+                                    app.update_group_filter();
+                                }
+                                KeyCode::Char(c) => {
+                                    app.group_search_query.push(c);
+                                    app.update_group_filter();
+                                }
+                                _ => {}
                             }
-                            _ => {}
                         },
 
                         CurrentScreen::Browser => match app.input_mode {

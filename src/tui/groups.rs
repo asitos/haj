@@ -1,4 +1,4 @@
-use crate::tui::{App, CurrentScreen, InputMode};
+use crate::tui::{App, CurrentScreen, InputMode, PackageFilter};
 use crate::tui::GroupSortMode;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout},
@@ -14,15 +14,13 @@ pub fn render(f: &mut Frame, app: &mut App) {
         .direction(Direction::Vertical)
         .margin(1)
         .constraints([
-            Constraint::Length(3), // Statistics Header
-            Constraint::Length(3), // Search Bar
-            Constraint::Min(0),    // Split Layout
-            Constraint::Length(3), // Footer
+            Constraint::Length(3), 
+            Constraint::Length(3), 
+            Constraint::Min(0),    
+            Constraint::Length(3), 
         ].as_ref())
         .split(f.area());
 
-    // 1. Statistics Header
-    let _total_groups = app.groups.len();
     let installed_groups = app.groups.iter().filter(|g| !g.packages.is_empty() && g.packages.iter().all(|p| p.1)).count();
     let partial_groups = app.groups.iter().filter(|g| {
         let inst = g.packages.iter().filter(|p| p.1).count();
@@ -31,29 +29,35 @@ pub fn render(f: &mut Frame, app: &mut App) {
     let total_pkgs_in_groups: usize = app.groups.iter().map(|g| g.packages.len()).sum();
 
     let stats_line = Line::from(vec![
-        Span::styled(format!(" Groups Installed : {} ", installed_groups + partial_groups), Style::default().fg(Color::Green)),
+        Span::styled(format!(" groups installed : {} ", installed_groups + partial_groups), Style::default().fg(Color::Green)),
         Span::styled(" | ", Style::default().fg(Color::DarkGray)),
-        Span::styled(format!(" Packages in Groups : {} ", total_pkgs_in_groups), Style::default().fg(Color::Cyan)),
+        Span::styled(format!(" packages in groups : {} ", total_pkgs_in_groups), Style::default().fg(Color::Cyan)),
         Span::styled(" | ", Style::default().fg(Color::DarkGray)),
-        Span::styled(format!(" Fully Installed : {} ", installed_groups), Style::default().fg(Color::Green)),
+        Span::styled(format!(" fully installed : {} ", installed_groups), Style::default().fg(Color::Green)),
         Span::styled(" | ", Style::default().fg(Color::DarkGray)),
-        Span::styled(format!(" Partial : {} ", partial_groups), Style::default().fg(Color::Yellow)),
+        Span::styled(format!(" partial : {} ", partial_groups), Style::default().fg(Color::Yellow)),
     ]);
     f.render_widget(
         Paragraph::new(stats_line).block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::DarkGray))).alignment(Alignment::Center),
         main_chunks[0]
     );
 
-    // 2. Search Bar
     let (border_color, cursor) = match app.group_input_mode {
         InputMode::Editing => (Color::Cyan, "█"),
         InputMode::Normal => (Color::DarkGray, ""),
     };
-    let search_display = format!(" Search (/): {}{} ", app.group_search_query, cursor);
+    let search_display = format!(" search (/): {}{} ", app.group_search_query, cursor);
+    
+    let sort_str = match app.group_sort_mode {
+        GroupSortMode::Alphabetical => "alphabetical",
+        GroupSortMode::PackageCount => "package count",
+        GroupSortMode::InstallCompletion => "completion",
+    };
+
     f.render_widget(
         Paragraph::new(search_display).style(Style::default().fg(border_color)).block(
             Block::default().borders(Borders::ALL).border_style(Style::default().fg(border_color))
-                .title_bottom(format!(" [sort: a=alpha, p=count, i=completion (S)] "))
+                .title_bottom(format!(" [sort: {} (S)] ", sort_str))
                 .title_alignment(Alignment::Right)
         ),
         main_chunks[1]
@@ -72,11 +76,11 @@ pub fn render(f: &mut Frame, app: &mut App) {
             Line::from(Span::styled("     ( •.• )", Style::default().fg(Color::Magenta))),
             Line::from(Span::styled("     > 📦 < ", Style::default().fg(Color::Magenta))),
             Line::from(""),
-            Line::from(Span::styled("No matching package groups.", Style::default().fg(Color::White).add_modifier(Modifier::BOLD))),
-            Line::from(Span::styled("Press Esc to clear search.", Style::default().fg(Color::DarkGray))),
+            Line::from(Span::styled("no matching package groups.", Style::default().fg(Color::White).add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled("press esc to clear search.", Style::default().fg(Color::DarkGray))),
         ];
-        f.render_widget(Paragraph::new(empty_msg).block(Block::default().borders(Borders::ALL).title(" Groups ")).alignment(Alignment::Center), split[0]);
-        f.render_widget(Paragraph::new("").block(Block::default().borders(Borders::ALL).title(" Group Information ")), split[1]);
+        f.render_widget(Paragraph::new(empty_msg).block(Block::default().borders(Borders::ALL).title(" groups ")).alignment(Alignment::Center), split[0]);
+        f.render_widget(Paragraph::new("").block(Block::default().borders(Borders::ALL).title(" group information ")), split[1]);
     } else {
         let items: Vec<ListItem> = app.filtered_groups.iter().map(|group| {
             let total = group.packages.len();
@@ -96,7 +100,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
         }).collect();
 
         let list = List::new(items)
-            .block(Block::default().borders(Borders::ALL).title(format!(" Groups ({}) ", app.filtered_groups.len())))
+            .block(Block::default().borders(Borders::ALL).title(format!(" groups ({}) ", app.filtered_groups.len())))
             .highlight_style(Style::default().bg(Color::Cyan).fg(Color::Black).add_modifier(Modifier::BOLD))
             .highlight_symbol(">> ");
 
@@ -111,19 +115,19 @@ pub fn render(f: &mut Frame, app: &mut App) {
                 let mut details = vec![
                     Line::from(vec![
                         Span::styled(group.name.clone(), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-                        Span::styled(if group.is_favorite { " ★ Favorite" } else { "" }, Style::default().fg(Color::Yellow)),
+                        Span::styled(if group.is_favorite { " ★ favorite" } else { "" }, Style::default().fg(Color::Yellow)),
                     ]),
                     Line::from(""),
-                    Line::from(Span::styled("Statistics", Style::default().fg(Color::LightMagenta).add_modifier(Modifier::BOLD))),
-                    Line::from(format!("  Packages   : {}", total)),
-                    Line::from(format!("  Installed  : {} / {}", installed, total)),
-                    Line::from(format!("  Completion : {:.0}%", pct)),
-                    Line::from(format!("  Progress   : {}", draw_bar(pct, 25))),
+                    Line::from(Span::styled("statistics", Style::default().fg(Color::LightMagenta).add_modifier(Modifier::BOLD))),
+                    Line::from(format!("  packages   : {}", total)),
+                    Line::from(format!("  installed  : {} / {}", installed, total)),
+                    Line::from(format!("  completion : {:.0}%", pct)),
+                    Line::from(format!("  progress   : {}", draw_bar(pct, 25))),
                     Line::from(""),
-                    Line::from(Span::styled("Description", Style::default().fg(Color::LightMagenta).add_modifier(Modifier::BOLD))),
+                    Line::from(Span::styled("description", Style::default().fg(Color::LightMagenta).add_modifier(Modifier::BOLD))),
                     Line::from(format!("  {}", group.description)),
                     Line::from(""),
-                    Line::from(Span::styled("Package Preview (First 20)", Style::default().fg(Color::LightMagenta).add_modifier(Modifier::BOLD))),
+                    Line::from(Span::styled("package preview (first 20)", Style::default().fg(Color::LightMagenta).add_modifier(Modifier::BOLD))),
                 ];
 
                 for (pkg, is_inst) in group.packages.iter().take(20) {
@@ -140,7 +144,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
                 }
 
                 let info_block = Paragraph::new(details)
-                    .block(Block::default().borders(Borders::ALL).title(" Group Information "))
+                    .block(Block::default().borders(Borders::ALL).title(" group information "))
                     .wrap(Wrap { trim: true });
 
                 f.render_widget(info_block, split[1]);
@@ -148,7 +152,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
         }
     }
 
-    let footer = Paragraph::new(Span::styled(" j/k Move • Enter Browse • / Search • i Install • r Remove • Space Favorite • Esc Back ", Style::default().fg(Color::DarkGray)))
+    let footer = Paragraph::new(Span::styled(" j/k move • enter browse • / search • i install • r remove • space favorite • esc back ", Style::default().fg(Color::DarkGray)))
         .alignment(Alignment::Center);
     f.render_widget(footer, main_chunks[3]);
 }
@@ -186,6 +190,44 @@ pub fn handle_key(key: crossterm::event::KeyEvent, app: &mut App) {
                     GroupSortMode::InstallCompletion => GroupSortMode::Alphabetical,
                 };
                 app.update_group_filter();
+            }
+            KeyCode::Char('i') => {
+                if let Some(idx) = app.group_state.selected() {
+                    if let Some(selected_group) = app.filtered_groups.get(idx) {
+                        app.prompt_targets = selected_group.packages.iter().map(|p| p.0.clone()).collect();
+                        if !app.prompt_targets.is_empty() {
+                            app.prompt_type = "install".to_string();
+                            app.show_prompt = true;
+                        }
+                    }
+                }
+            }
+            KeyCode::Char('r') => {
+                if let Some(idx) = app.group_state.selected() {
+                    if let Some(selected_group) = app.filtered_groups.get(idx) {
+                        let installed_pkgs: Vec<String> = selected_group.packages.iter().filter(|p| p.1).map(|p| p.0.clone()).collect();
+                        if !installed_pkgs.is_empty() {
+                            app.prompt_targets = installed_pkgs;
+                            app.prompt_type = "remove".to_string();
+                            app.show_prompt = true;
+                        }
+                    }
+                }
+            }
+            KeyCode::Enter => {
+                if let Some(idx) = app.group_state.selected() {
+                    if let Some(selected_group) = app.filtered_groups.get(idx) {
+                        let gname = selected_group.name.clone();
+                        if let Some(pos) = app.filters.iter().position(|f| *f == PackageFilter::Group(gname.clone())) {
+                            app.filter_idx = pos;
+                        } else {
+                            app.filters.push(PackageFilter::Group(gname.clone()));
+                            app.filter_idx = app.filters.len() - 1;
+                        }
+                        app.screen = CurrentScreen::Browser;
+                        app.update_search();
+                    }
+                }
             }
             KeyCode::Down | KeyCode::Char('j') => {
                 if !app.filtered_groups.is_empty() {
