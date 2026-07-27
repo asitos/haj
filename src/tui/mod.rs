@@ -25,7 +25,6 @@ use ansi_to_tui::IntoText;
 pub mod browser;
 pub mod dashboard;
 pub mod news;
-pub mod reddit;
 pub mod transaction;
 
 #[derive(PartialEq)]
@@ -33,14 +32,12 @@ pub enum CurrentScreen {
     Dashboard,
     Browser,
     News,
-    Reddit,
 }
 
 #[derive(PartialEq, Clone, Copy)]
 pub enum DashboardWidget {
     Blahaj,
     News,
-    Reddit,
 }
 
 #[derive(PartialEq)]
@@ -119,23 +116,6 @@ pub struct NewsItem {
     pub is_critical: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct RedditItem {
-    pub title: String,
-    pub author: String,
-    pub score: i64,
-    pub num_comments: i64,
-    pub selftext: String,
-    pub url: String,
-    pub thumbnail: String,
-    pub created_utc: f64,
-    pub link_flair_text: Option<String>,
-    pub nsfw: bool,
-    pub pinned: bool,
-    pub post_hint: Option<String>,
-    pub permalink: String,
-}
-
 pub enum TuiEvent {
     _Tick,
     Key(crossterm::event::KeyEvent),
@@ -148,8 +128,6 @@ pub enum TuiEvent {
     DashboardArtFrame(Text<'static>),
     NewsFetched(Vec<NewsItem>, String),
     NewsFetchFailed(String),
-    RedditFetched(Vec<RedditItem>, String),
-    RedditFetchFailed(String),
 }
 
 pub struct App {
@@ -191,17 +169,6 @@ pub struct App {
     pub is_fetching_news: bool,
     pub news_last_updated: String,
     pub news_error: String,
-
-    pub reddit_items: Vec<RedditItem>,
-    pub filtered_reddit: Vec<RedditItem>,
-    pub reddit_list_state: ListState,
-    pub reddit_scroll: u16,
-    pub reddit_search_query: String,
-    pub reddit_focus: NewsFocus,
-    pub is_fetching_reddit: bool,
-    pub reddit_last_updated: String,
-    pub reddit_error: String,
-    pub show_reddit_image: bool,
 }
 
 impl App {
@@ -243,6 +210,9 @@ impl App {
             screen: CurrentScreen::Dashboard,
             input_mode: InputMode::Normal,
             last_activity: Instant::now(),
+            
+            active_widget: DashboardWidget::Blahaj,
+            
             filters: dynamic_filters,
             filter_idx: 0,
             sort_mode: SortMode::Relevance,
@@ -263,8 +233,6 @@ impl App {
             dashboard_art: Text::raw(" loading art... "),
             abort_tx: None,
 
-            active_widget: DashboardWidget::Blahaj,
-
             news_items: Vec::new(),
             filtered_news: Vec::new(),
             read_news,
@@ -275,17 +243,6 @@ impl App {
             is_fetching_news: true,
             news_last_updated: "checking...".to_string(),
             news_error: String::new(),
-
-            reddit_items: Vec::new(),
-            filtered_reddit: Vec::new(),
-            reddit_list_state: ListState::default(),
-            reddit_scroll: 0,
-            reddit_search_query: String::new(),
-            reddit_focus: NewsFocus::List,
-            is_fetching_reddit: true,
-            reddit_last_updated: "checking...".to_string(),
-            reddit_error: String::new(),
-            show_reddit_image: true,
         };
 
         app.refresh_state();
@@ -296,7 +253,6 @@ impl App {
         if self.read_news.insert(link) {
             let home = dirs::home_dir().unwrap_or_default();
             let data = serde_json::to_string(&self.read_news).unwrap_or_default();
-            // FIX: File writing moved to an async task to prevent UI lockups
             tokio::spawn(async move {
                 let _ = tokio::fs::create_dir_all(home.join(".cache/haj")).await;
                 let _ = tokio::fs::write(home.join(".cache/haj/read_news.json"), data).await;
@@ -323,27 +279,6 @@ impl App {
                 Some(0)
             });
         self.news_scroll = 0;
-    }
-
-    pub fn update_reddit_search(&mut self) {
-        let query = self.reddit_search_query.to_lowercase();
-        self.filtered_reddit = self
-            .reddit_items
-            .iter()
-            .filter(|r| {
-                query.is_empty()
-                    || r.title.to_lowercase().contains(&query)
-                    || r.selftext.to_lowercase().contains(&query)
-            })
-            .cloned()
-            .collect();
-        self.reddit_list_state
-            .select(if self.filtered_reddit.is_empty() {
-                None
-            } else {
-                Some(0)
-            });
-        self.reddit_scroll = 0;
     }
 
     pub fn refresh_state(&mut self) {
@@ -570,7 +505,6 @@ fn parse_arch_xml(xml: &str) -> Vec<NewsItem> {
             let pub_date = extract("<pubDate>", "</pubDate>");
             let mut desc = decode_html(&extract("<description>", "</description>"));
 
-            // FIX: Stripping HTML *during the fetch* prevents the 60FPS render loop from catching on fire.
             desc = desc
                 .replace("<![CDATA[", "")
                 .replace("]]>", "")
@@ -626,77 +560,6 @@ fn parse_arch_xml(xml: &str) -> Vec<NewsItem> {
     items
 }
 
-fn parse_reddit_json(json: &serde_json::Value) -> Vec<RedditItem> {
-    let mut items = Vec::new();
-    if let Some(children) = json.pointer("/data/children").and_then(|c| c.as_array()) {
-        for child in children {
-            if let Some(data) = child.get("data") {
-                let item = RedditItem {
-                    title: data
-                        .get("title")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string(),
-                    author: data
-                        .get("author")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string(),
-                    score: data.get("score").and_then(|v| v.as_i64()).unwrap_or(0),
-                    num_comments: data
-                        .get("num_comments")
-                        .and_then(|v| v.as_i64())
-                        .unwrap_or(0),
-                    selftext: data
-                        .get("selftext")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string(),
-                    url: data
-                        .get("url")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string(),
-                    thumbnail: data
-                        .get("thumbnail")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string(),
-                    created_utc: data
-                        .get("created_utc")
-                        .and_then(|v| v.as_f64())
-                        .unwrap_or(0.0),
-                    link_flair_text: data
-                        .get("link_flair_text")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string()),
-                    nsfw: data
-                        .get("over_18")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false),
-                    pinned: data
-                        .get("stickied")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false),
-                    post_hint: data
-                        .get("post_hint")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string()),
-                    permalink: data
-                        .get("permalink")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string(),
-                };
-                if !item.pinned {
-                    items.push(item);
-                }
-            }
-        }
-    }
-    items
-}
-
 pub fn fetch_arch_news(tx: mpsc::Sender<TuiEvent>) {
     tokio::spawn(async move {
         let client = reqwest::Client::builder()
@@ -746,96 +609,6 @@ pub fn fetch_arch_news(tx: mpsc::Sender<TuiEvent>) {
     });
 }
 
-pub fn fetch_reddit(tx: mpsc::Sender<TuiEvent>) {
-    tokio::spawn(async move {
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert(
-            reqwest::header::ACCEPT,
-            reqwest::header::HeaderValue::from_static("application/json"),
-        );
-
-        let client_res = reqwest::Client::builder()
-            .user_agent("Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0") // Standard browser UA to bypass 403
-            .default_headers(headers)
-            .timeout(Duration::from_secs(10))
-            .build();
-
-        let client = match client_res {
-            Ok(c) => c,
-            Err(e) => {
-                let _ = tx
-                    .send(TuiEvent::RedditFetchFailed(format!("Client err: {}", e)))
-                    .await;
-                return;
-            }
-        };
-
-        let home = dirs::home_dir().unwrap_or_default();
-        let cache_path = home.join(".cache/haj/reddit.json");
-
-        match client
-            .get("https://old.reddit.com/r/blahaj/hot.json?limit=25")
-            .send()
-            .await
-        {
-            Ok(resp) if resp.status().is_success() => {
-                if let Ok(json) = resp.json::<serde_json::Value>().await {
-                    let items = parse_reddit_json(&json);
-                    if !items.is_empty() {
-                        if let Ok(cache_data) = serde_json::to_string(&items) {
-                            let _ = tokio::fs::write(&cache_path, cache_data).await;
-                        }
-                        let _ = tx
-                            .send(TuiEvent::RedditFetched(items, "just now".into()))
-                            .await;
-                        return;
-                    }
-                }
-                let _ = tx
-                    .send(TuiEvent::RedditFetchFailed(
-                        "Failed to parse Reddit response".into(),
-                    ))
-                    .await;
-            }
-            Ok(resp) => {
-                let status = resp.status();
-                let msg = if status.as_u16() == 403 {
-                    "HTTP 403 Forbidden".to_string()
-                } else if status.as_u16() == 429 {
-                    "HTTP 429 Too Many Requests".to_string()
-                } else {
-                    format!("HTTP {}", status)
-                };
-
-                if let Ok(data) = std::fs::read_to_string(&cache_path) {
-                    if let Ok(items) = serde_json::from_str::<Vec<RedditItem>>(&data) {
-                        let _ = tx.send(TuiEvent::RedditFetchFailed(msg)).await;
-                        let _ = tx
-                            .send(TuiEvent::RedditFetched(items, "cached".into()))
-                            .await;
-                        return;
-                    }
-                }
-                let _ = tx.send(TuiEvent::RedditFetchFailed(msg)).await;
-            }
-            Err(e) => {
-                if let Ok(data) = std::fs::read_to_string(&cache_path) {
-                    if let Ok(items) = serde_json::from_str::<Vec<RedditItem>>(&data) {
-                        let _ = tx
-                            .send(TuiEvent::RedditFetchFailed("Network offline".into()))
-                            .await;
-                        let _ = tx
-                            .send(TuiEvent::RedditFetched(items, "cached".into()))
-                            .await;
-                        return;
-                    }
-                }
-                let _ = tx.send(TuiEvent::RedditFetchFailed(e.to_string())).await;
-            }
-        }
-    });
-}
-
 pub async fn run() -> Result<()> {
     println!("🦈 haj requires root privileges for package management.");
     let status = std::process::Command::new("sudo").arg("-v").status()?;
@@ -868,7 +641,6 @@ where
     let (tx, mut rx) = mpsc::channel::<TuiEvent>(100);
 
     fetch_arch_news(tx.clone());
-    fetch_reddit(tx.clone());
 
     let tx_input = tx.clone();
     tokio::spawn(async move {
@@ -878,8 +650,7 @@ where
             }
             if event::poll(Duration::from_millis(50)).unwrap_or(false) {
                 if let Ok(Event::Key(key)) = event::read() {
-                    // FIX: try_send prevents the entire UI thread from permanently deadlocking if channels fill up
-                    let _ = tx_input.try_send(TuiEvent::Key(key));
+                    let _ = tx_input.send(TuiEvent::Key(key)).await; 
                 }
             } else {
                 let _ = tx_input.try_send(TuiEvent::_Tick);
@@ -925,7 +696,7 @@ where
                     };
 
                     match read_res {
-                        Ok(0) => break, // Fallback triggered below
+                        Ok(0) => break,
                         Ok(n) => {
                             first_frame = false;
                             frame_buffer.extend_from_slice(&buf[..n]);
@@ -1158,7 +929,6 @@ where
                 CurrentScreen::Dashboard => dashboard::render(f, app),
                 CurrentScreen::Browser => browser::render(f, app),
                 CurrentScreen::News => news::render(f, app),
-                CurrentScreen::Reddit => reddit::render(f, app),
             }
             transaction::render_popup(f, app);
             transaction::render_confirm_popup(f, app);
@@ -1216,18 +986,6 @@ where
                 TuiEvent::NewsFetchFailed(err) => {
                     app.is_fetching_news = false;
                     app.news_error = err;
-                }
-
-                TuiEvent::RedditFetched(items, time) => {
-                    app.is_fetching_reddit = false;
-                    app.reddit_error.clear();
-                    app.reddit_items = items;
-                    app.reddit_last_updated = time;
-                    app.update_reddit_search();
-                }
-                TuiEvent::RedditFetchFailed(err) => {
-                    app.is_fetching_reddit = false;
-                    app.reddit_error = err;
                 }
 
                 TuiEvent::Key(key) => {
@@ -1303,33 +1061,23 @@ where
                                     app.active_widget = DashboardWidget::News;
                                 }
                             }
-                            KeyCode::Char('r') => {
-                                if app.active_widget == DashboardWidget::Reddit {
-                                    app.screen = CurrentScreen::Reddit;
-                                } else {
-                                    app.active_widget = DashboardWidget::Reddit;
-                                }
-                            }
                             KeyCode::Char('b') => {
                                 app.active_widget = DashboardWidget::Blahaj;
                             }
                             KeyCode::Enter => match app.active_widget {
                                 DashboardWidget::News => app.screen = CurrentScreen::News,
-                                DashboardWidget::Reddit => app.screen = CurrentScreen::Reddit,
                                 DashboardWidget::Blahaj => app.screen = CurrentScreen::Browser,
                             },
                             KeyCode::Tab => {
                                 app.active_widget = match app.active_widget {
                                     DashboardWidget::Blahaj => DashboardWidget::News,
-                                    DashboardWidget::News => DashboardWidget::Reddit,
-                                    DashboardWidget::Reddit => DashboardWidget::Blahaj,
+                                    DashboardWidget::News => DashboardWidget::Blahaj,
                                 };
                             }
                             KeyCode::BackTab => {
                                 app.active_widget = match app.active_widget {
-                                    DashboardWidget::Blahaj => DashboardWidget::Reddit,
+                                    DashboardWidget::Blahaj => DashboardWidget::News,
                                     DashboardWidget::News => DashboardWidget::Blahaj,
-                                    DashboardWidget::Reddit => DashboardWidget::News,
                                 };
                             }
                             _ => {}
@@ -1354,13 +1102,9 @@ where
                                     };
                                 }
                                 KeyCode::Char('o') => {
-                                    if let Some(idx) = app.reddit_list_state.selected() {
-                                        // OR news_list_state
-                                        if let Some(item) = app.filtered_reddit.get(idx) {
-                                            app.current_action =
-                                                "opening in browser...".to_string();
-                                            let url = item.url.clone(); // (or item.link)
-                                            // FIX: Background process spawn so the UI thread doesn't freeze
+                                    if let Some(idx) = app.news_list_state.selected() {
+                                        if let Some(item) = app.filtered_news.get(idx) {
+                                            let url = item.link.clone();
                                             tokio::spawn(async move {
                                                 let _ = tokio::process::Command::new("xdg-open")
                                                     .arg(&url)
@@ -1373,20 +1117,65 @@ where
                                 KeyCode::Char('y') => {
                                     if let Some(idx) = app.news_list_state.selected() {
                                         if let Some(item) = app.filtered_news.get(idx) {
-                                            if std::process::Command::new("wl-copy")
-                                                .arg(&item.link)
-                                                .output()
-                                                .is_err()
-                                            {
-                                                let mut child = std::process::Command::new("xclip")
-                                                    .args(["-selection", "clipboard"])
-                                                    .stdin(std::process::Stdio::piped())
-                                                    .spawn()
-                                                    .unwrap();
-                                                if let Some(mut stdin) = child.stdin.take() {
-                                                    use std::io::Write;
-                                                    let _ = stdin.write_all(item.link.as_bytes());
+                                            let link = item.link.clone();
+                                            tokio::spawn(async move {
+                                                if std::process::Command::new("wl-copy")
+                                                    .arg(&link)
+                                                    .output()
+                                                    .is_err()
+                                                {
+                                                    let mut child =
+                                                        std::process::Command::new("xclip")
+                                                            .args(["-selection", "clipboard"])
+                                                            .stdin(std::process::Stdio::piped())
+                                                            .spawn()
+                                                            .unwrap();
+                                                    if let Some(mut stdin) = child.stdin.take() {
+                                                        use std::io::Write;
+                                                        let _ = stdin.write_all(link.as_bytes());
+                                                    }
                                                 }
+                                            });
+                                        }
+                                    }
+                                }
+                                KeyCode::Char('c') => {
+                                    if let Some(idx) = app.news_list_state.selected() {
+                                        if let Some(item) = app.filtered_news.get(idx) {
+                                            let mut cmd_to_copy = String::new();
+                                            for line in item.description.lines() {
+                                                let l = line.trim();
+                                                if l.starts_with("pacman ")
+                                                    || l.starts_with("systemctl ")
+                                                    || l.starts_with("mkinitcpio ")
+                                                    || l.starts_with("grub-install ")
+                                                {
+                                                    cmd_to_copy = l.to_string();
+                                                    break;
+                                                }
+                                            }
+                                            if !cmd_to_copy.is_empty() {
+                                                tokio::spawn(async move {
+                                                    if std::process::Command::new("wl-copy")
+                                                        .arg(&cmd_to_copy)
+                                                        .output()
+                                                        .is_err()
+                                                    {
+                                                        let mut child =
+                                                            std::process::Command::new("xclip")
+                                                                .args(["-selection", "clipboard"])
+                                                                .stdin(std::process::Stdio::piped())
+                                                                .spawn()
+                                                                .unwrap();
+                                                        if let Some(mut stdin) = child.stdin.take() {
+                                                            use std::io::Write;
+                                                            let _ = stdin
+                                                                .write_all(cmd_to_copy.as_bytes());
+                                                        }
+                                                    }
+                                                });
+                                                app.current_action =
+                                                    "copied command to clipboard ✓".to_string();
                                             }
                                         }
                                     }
@@ -1603,127 +1392,11 @@ where
                                 _ => {}
                             },
                         },
-
-                        CurrentScreen::Reddit => match app.input_mode {
-                            InputMode::Normal => match key.code {
-                                KeyCode::Esc => app.screen = CurrentScreen::Dashboard,
-                                KeyCode::Char('q') => app.should_quit = true,
-                                KeyCode::Char('/') | KeyCode::Char('f') | KeyCode::Char('s') => {
-                                    app.input_mode = InputMode::Editing
-                                }
-                                KeyCode::Char('r') => {
-                                    app.is_fetching_reddit = true;
-                                    app.reddit_error.clear();
-                                    fetch_reddit(tx.clone());
-                                }
-                                KeyCode::Tab | KeyCode::Enter => {
-                                    app.reddit_focus = if app.reddit_focus == NewsFocus::List {
-                                        NewsFocus::Article
-                                    } else {
-                                        NewsFocus::List
-                                    };
-                                }
-                                KeyCode::Char('o') => {
-                                    if let Some(idx) = app.reddit_list_state.selected() {
-                                        // OR news_list_state
-                                        if let Some(item) = app.filtered_reddit.get(idx) {
-                                            app.current_action =
-                                                "opening in browser...".to_string();
-                                            let url = item.url.clone(); // (or item.link)
-                                            // FIX: Background process spawn so the UI thread doesn't freeze
-                                            tokio::spawn(async move {
-                                                let _ = tokio::process::Command::new("xdg-open")
-                                                    .arg(&url)
-                                                    .output()
-                                                    .await;
-                                            });
-                                        }
-                                    }
-                                }
-                                KeyCode::Down | KeyCode::Char('j') => {
-                                    if app.reddit_focus == NewsFocus::List {
-                                        let i = match app.reddit_list_state.selected() {
-                                            Some(i) => {
-                                                if i >= app.filtered_reddit.len().saturating_sub(1)
-                                                {
-                                                    0
-                                                } else {
-                                                    i + 1
-                                                }
-                                            }
-                                            None => 0,
-                                        };
-                                        app.reddit_list_state.select(Some(i));
-                                        app.reddit_scroll = 0;
-                                    } else {
-                                        app.reddit_scroll = app.reddit_scroll.saturating_add(1);
-                                    }
-                                }
-                                KeyCode::Up | KeyCode::Char('k') => {
-                                    if app.reddit_focus == NewsFocus::List {
-                                        let i = match app.reddit_list_state.selected() {
-                                            Some(i) => {
-                                                if i == 0 {
-                                                    app.filtered_reddit.len().saturating_sub(1)
-                                                } else {
-                                                    i - 1
-                                                }
-                                            }
-                                            None => 0,
-                                        };
-                                        app.reddit_list_state.select(Some(i));
-                                        app.reddit_scroll = 0;
-                                    } else {
-                                        app.reddit_scroll = app.reddit_scroll.saturating_sub(1);
-                                    }
-                                }
-                                KeyCode::PageDown => {
-                                    if app.reddit_focus == NewsFocus::Article {
-                                        app.reddit_scroll = app.reddit_scroll.saturating_add(15);
-                                    }
-                                }
-                                KeyCode::PageUp => {
-                                    if app.reddit_focus == NewsFocus::Article {
-                                        app.reddit_scroll = app.reddit_scroll.saturating_sub(15);
-                                    }
-                                }
-                                KeyCode::Home => {
-                                    if app.reddit_focus == NewsFocus::Article {
-                                        app.reddit_scroll = 0;
-                                    }
-                                }
-                                KeyCode::End => {
-                                    if app.reddit_focus == NewsFocus::Article {
-                                        app.reddit_scroll = 999;
-                                    }
-                                }
-                                _ => {}
-                            },
-                            InputMode::Editing => match key.code {
-                                KeyCode::Esc | KeyCode::Enter => app.input_mode = InputMode::Normal,
-                                KeyCode::Char('l')
-                                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
-                                {
-                                    app.reddit_search_query.clear();
-                                    app.update_reddit_search();
-                                }
-                                KeyCode::Backspace | KeyCode::Delete => {
-                                    app.reddit_search_query.pop();
-                                    app.update_reddit_search();
-                                }
-                                KeyCode::Char(c) => {
-                                    app.reddit_search_query.push(c);
-                                    app.update_reddit_search();
-                                }
-                                _ => {}
-                            },
-                        },
                     }
                 }
                 _ => {}
             }
         }
-
         if app.should_quit {
             return Ok(());
         }
