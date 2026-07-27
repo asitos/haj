@@ -4,7 +4,8 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     prelude::Stylize,
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Clear, LineGauge, List, ListItem, Paragraph},
+    text::{Line, Span},
+    widgets::{Block, Borders, Clear, LineGauge, Paragraph, Wrap},
 };
 
 pub fn render_popup(f: &mut Frame, app: &App) {
@@ -60,17 +61,51 @@ pub fn render_popup(f: &mut Frame, app: &App) {
         .ratio(ratio);
     f.render_widget(gauge, chunks[2]);
 
-    let log_items: Vec<ListItem> = app
+    let log_lines: Vec<Line> = app
         .transaction_logs
         .iter()
-        .map(|log| ListItem::new(log.clone()))
+        .map(|log| Line::from(log.clone()))
         .collect();
 
-    let logs_list = List::new(log_items)
+    let logs_paragraph = Paragraph::new(log_lines)
         .style(Style::default().fg(Color::DarkGray))
+        .wrap(Wrap { trim: false }) 
         .block(Block::default().borders(Borders::NONE));
 
-    f.render_widget(logs_list, chunks[4]);
+    f.render_widget(logs_paragraph, chunks[4]);
+}
+
+pub fn render_confirm_popup(f: &mut Frame, app: &App) {
+    if !app.show_prompt {
+        return;
+    }
+
+    let area = centered_rect(40, 20, f.area());
+    f.render_widget(Clear, area);
+
+    let action_color = if app.prompt_type == "install" { Color::Green } else { Color::Red };
+    
+    let block = Block::default()
+        .title(" confirm transaction ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(action_color));
+
+    let text = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::raw(format!("Proceed to {} ", app.prompt_type)),
+            Span::styled(format!("{}", app.prompt_targets.len()), Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" package(s)?"),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(" [Y]es   [N]o ", Style::default().fg(Color::DarkGray))),
+    ];
+
+    let paragraph = Paragraph::new(text)
+        .block(block)
+        .alignment(ratatui::layout::Alignment::Center);
+
+    f.render_widget(paragraph, area);
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {

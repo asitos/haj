@@ -1,4 +1,4 @@
-use super::{App, InputMode, PackageFilter};
+use super::{App, InputMode};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout},
@@ -19,11 +19,8 @@ pub fn render(f: &mut Frame, app: &mut App) {
         InputMode::Normal => (Color::DarkGray, ""),
     };
 
-    let filter_display = match app.filter {
-        PackageFilter::All => "all",
-        PackageFilter::Installed => "installed",
-        PackageFilter::NotInstalled => "not installed",
-    };
+    let filter_display = app.filters[app.filter_idx].to_string();
+    let sort_display = app.sort_mode.to_string();
 
     let search_display = format!(" search (/): {}{} ", app.search_query, cursor);
     let search_bar = Paragraph::new(search_display)
@@ -32,35 +29,35 @@ pub fn render(f: &mut Frame, app: &mut App) {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(border_color))
-                .title_bottom(format!(" [filter: {}] (tab) ", filter_display))
+                .title_bottom(format!(" [sort: {} (S)] [filter: {} (tab)] ", sort_display, filter_display))
                 .title_alignment(Alignment::Right),
         );
     f.render_widget(search_bar, chunks[0]);
 
     let content_chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(30), Constraint::Percentage(70)].as_ref())
+        .constraints([Constraint::Percentage(35), Constraint::Percentage(65)].as_ref())
         .split(chunks[1]);
 
-    let items: Vec<ListItem> = app
-        .filtered_packages
-        .iter()
-        .map(|pkg| {
-            let (icon, color) = if pkg.is_installed {
-                ("✓", Color::Green)
-            } else {
-                (" ", Color::White)
-            };
+    let items = app.filtered_packages.iter().map(|pkg| {
+        let is_queued = app.selected_packages.contains(&pkg.name);
+        let queue_icon = if is_queued { "[x] " } else { "[ ] " };
+        let queue_color = if is_queued { Color::Yellow } else { Color::DarkGray };
 
-            ListItem::new(Line::from(vec![
-                Span::styled(
-                    format!("{} ", icon),
-                    Style::default().fg(color).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(pkg.name.clone(), Style::default().fg(color)),
-            ]))
-        })
-        .collect();
+        let (icon, color) = if pkg.is_upgradable {
+            ("↑ ", Color::Cyan)
+        } else if pkg.is_installed {
+            ("✓ ", Color::Green)
+        } else {
+            ("  ", Color::White)
+        };
+
+        ListItem::new(Line::from(vec![
+            Span::styled(queue_icon, Style::default().fg(queue_color)),
+            Span::styled(icon, Style::default().fg(color).add_modifier(Modifier::BOLD)),
+            Span::styled(pkg.name.as_str(), Style::default().fg(color)),
+        ]))
+    });
 
     let list_title = format!(" packages ({}) ", app.filtered_packages.len());
 
@@ -78,7 +75,8 @@ pub fn render(f: &mut Frame, app: &mut App) {
 
     if let Some(selected_idx) = app.list_state.selected() {
         if let Some(selected_pkg) = app.filtered_packages.get(selected_idx) {
-            let details_text = vec![
+            
+            let mut details_text = vec![
                 Line::from(vec![
                     Span::styled(
                         selected_pkg.name.clone(),
@@ -89,19 +87,44 @@ pub fn render(f: &mut Frame, app: &mut App) {
                     Span::raw(format!(" v{}", selected_pkg.version)),
                 ]),
                 Line::from(""),
-                Line::from(format!("repository: {}", selected_pkg.repo)),
-                Line::from(""),
-                Line::from(Span::styled(
-                    "description:",
-                    Style::default().fg(Color::DarkGray),
-                )),
-                Line::from(selected_pkg.desc.clone()),
-                Line::from(""),
-                Line::from(Span::styled(
-                    "[i] install  [r] remove  [u] update",
-                    Style::default().fg(Color::DarkGray),
-                )),
+                Line::from(vec![
+                    Span::styled(format!("{:<15}", "repository:"), Style::default().fg(Color::DarkGray)),
+                    Span::raw(selected_pkg.repo.clone()),
+                ]),
+                Line::from(vec![
+                    Span::styled(format!("{:<15}", "size:"), Style::default().fg(Color::DarkGray)),
+                    Span::raw(format!("{:.2} MB", selected_pkg.size_mb)),
+                ]),
             ];
+
+            if selected_pkg.is_upgradable {
+                details_text.push(Line::from(vec![
+                    Span::styled(format!("{:<15}", "status:"), Style::default().fg(Color::DarkGray)),
+                    Span::styled("update available ↑", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                ]));
+            }
+
+            details_text.push(Line::from(""));
+            details_text.push(Line::from(Span::styled("description:", Style::default().fg(Color::DarkGray))));
+            details_text.push(Line::from(selected_pkg.desc.clone()));
+            details_text.push(Line::from(""));
+
+            if !app.selected_packages.is_empty() {
+                details_text.push(Line::from(Span::styled(
+                    format!("queued for transaction: {} packages", app.selected_packages.len()),
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                )));
+                details_text.push(Line::from(""));
+            }
+
+            details_text.push(Line::from(Span::styled(
+                "[space] toggle queue  [c] clear queue",
+                Style::default().fg(Color::Magenta),
+            )));
+            details_text.push(Line::from(Span::styled(
+                "[i] install queue  [r] remove queue",
+                Style::default().fg(Color::DarkGray),
+            )));
 
             let details = Paragraph::new(details_text)
                 .block(
