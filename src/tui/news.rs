@@ -40,9 +40,9 @@ fn render_search_bar(f: &mut Frame, app: &App, area: Rect) {
     };
 
     let search_display = if app.news_search_query.is_empty() {
-        format!(" 🔎 {} ", cursor)
+        format!("search (/):  {} ", cursor)
     } else {
-        format!(" 🔎 {}{} ", app.news_search_query, cursor)
+        format!("search (/): {}{} ", app.news_search_query, cursor)
     };
 
     let search_bar = Paragraph::new(search_display)
@@ -62,7 +62,7 @@ fn render_headlines(f: &mut Frame, app: &mut App, area: Rect) {
         .map(|news| {
             let is_read = app.read_news.contains(&news.link);
             let (prefix, title_color, modifier) = if news.is_critical {
-                ("⚠ ", Color::Red, Modifier::BOLD)
+                ("!! ", Color::Red, Modifier::BOLD)
             } else if !is_read {
                 ("● ", Color::White, Modifier::BOLD)
             } else {
@@ -106,12 +106,12 @@ fn render_headlines(f: &mut Frame, app: &mut App, area: Rect) {
         Color::DarkGray
     };
     let mut title = if is_focused {
-        " Headlines ● ".to_string()
+        " headlines ● ".to_string()
     } else {
-        " Headlines ".to_string()
+        " headlines ".to_string()
     };
     if app.news_last_updated == "cached" {
-        title = format!(" Headlines (cached) {} ", if is_focused { "●" } else { "" });
+        title = format!(" headlines (cached) {} ", if is_focused { "●" } else { "" });
     }
 
     let list = List::new(items)
@@ -146,7 +146,7 @@ fn render_article(f: &mut Frame, app: &mut App, area: Rect) {
 
     if !app.news_error.is_empty() && app.filtered_news.is_empty() {
         let err = Paragraph::new(format!(
-            "\n\n  Error: {}\n\n  Press r to retry",
+            "\n\n  error: {}\n\n  press r to retry",
             app.news_error
         ))
         .style(Style::default().fg(Color::Red))
@@ -154,7 +154,7 @@ fn render_article(f: &mut Frame, app: &mut App, area: Rect) {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(article_border))
-                .title(" Reading "),
+                .title(" reading "),
         );
         f.render_widget(err, area);
         return;
@@ -169,9 +169,9 @@ fn render_article(f: &mut Frame, app: &mut App, area: Rect) {
         if let Some(article) = app.filtered_news.get(selected_idx) {
             let total = app.filtered_news.len();
             let title = if is_focused {
-                format!(" Reading ● {}/{} ", selected_idx + 1, total)
+                format!(" reading ● {}/{} ", selected_idx + 1, total)
             } else {
-                format!(" Reading • {}/{} ", selected_idx + 1, total)
+                format!(" reading • {}/{} ", selected_idx + 1, total)
             };
 
             let query = app.news_search_query.clone();
@@ -218,12 +218,12 @@ fn format_article<'a>(article: &super::NewsItem, search_query: &str) -> Vec<Line
         )));
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
-            " ⚠ Manual intervention required",
+            " ⚠ manual intervention required",
             Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
         )));
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
-            " Read carefully before updating your system.",
+            " read carefully before updating your system.",
             Style::default().fg(Color::White),
         )));
         lines.push(Line::from(""));
@@ -250,7 +250,7 @@ fn format_article<'a>(article: &super::NewsItem, search_query: &str) -> Vec<Line
     )));
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "Published",
+        "published",
         Style::default().fg(Color::DarkGray),
     )));
     lines.push(Line::from(Span::styled(
@@ -284,7 +284,7 @@ fn format_article<'a>(article: &super::NewsItem, search_query: &str) -> Vec<Line
                 Style::default().fg(Color::DarkGray),
             )));
             lines.push(Line::from(Span::styled(
-                "Command",
+                "command",
                 Style::default().fg(Color::DarkGray),
             )));
             lines.push(Line::from(""));
@@ -359,18 +359,18 @@ fn render_loading(f: &mut Frame, area: Rect, border: Color) {
     let text = vec![
         Line::from(""),
         Line::from(""),
-        Line::from("  Fetching latest Arch News…"),
+        Line::from("  fetching latest arch news…"),
         Line::from(""),
         Line::from(Span::styled(
-            "  ⠋ Downloading feed",
+            "  ⠋ downloading feed",
             Style::default().fg(Color::Cyan),
         )),
         Line::from(Span::styled(
-            "  ⠙ Parsing articles",
+            "  ⠙ parsing articles",
             Style::default().fg(Color::Cyan),
         )),
         Line::from(Span::styled(
-            "  ⠹ Building cache",
+            "  ⠹ building cache",
             Style::default().fg(Color::Cyan),
         )),
     ];
@@ -378,19 +378,19 @@ fn render_loading(f: &mut Frame, area: Rect, border: Color) {
         Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(border))
-            .title(" Reading "),
+            .title(" reading "),
     );
     f.render_widget(loading, area);
 }
 
 fn render_empty_state(f: &mut Frame, area: Rect, border: Color) {
-    let empty = Paragraph::new("\n\n  No articles matched\n\n  Press Esc to clear search")
+    let empty = Paragraph::new("\n\n  no articles matched\n\n  press esc to clear search")
         .style(Style::default().fg(Color::DarkGray))
         .block(
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(border))
-                .title(" Reading "),
+                .title(" reading "),
         );
     f.render_widget(empty, area);
 }
@@ -420,7 +420,7 @@ fn render_footer(f: &mut Frame, app: &App, area: Rect) {
             format!(" {} articles", app.filtered_news.len()),
             Style::default().fg(Color::White),
         ),
-        Span::styled("    Updated ", Style::default().fg(Color::DarkGray)),
+        Span::styled("    updated ", Style::default().fg(Color::DarkGray)),
         Span::styled(last_up, Style::default().fg(Color::White)),
         Span::styled(
             format!("    {} unread ", unread_count),

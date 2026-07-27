@@ -162,7 +162,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
                     Block::default()
                         .borders(Borders::ALL)
                         .title(" details ")
-                        .title_bottom(" j/k:nav gg/G:jump f:search x:del esc:back q:quit ")
+                        .title_bottom(" j/k:nav gg/G:jump f:search x:del esc:back ?:help q:quit ")
                         .title_alignment(Alignment::Right),
                 )
                 .wrap(Wrap { trim: true });

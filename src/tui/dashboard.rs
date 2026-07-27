@@ -35,7 +35,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
     let updates_color = if updates > 0 { Color::Green } else { Color::DarkGray };
 
     let (news_prefix, news_color, news_mod) = if has_critical {
-        ("⚠ Manual intervention", Color::Red, Modifier::BOLD)
+        ("!! manual intervention", Color::Red, Modifier::BOLD)
     } else if unread_news > 0 {
         ("●", Color::Yellow, Modifier::BOLD)
     } else {
@@ -72,8 +72,8 @@ pub fn render(f: &mut Frame, app: &mut App) {
 
     // 5. Dynamic Footer
     let footer_str = match app.active_widget {
-        DashboardWidget::Blahaj => " tab widgets • / search • n news • u upgrade • c clean • q quit ",
-        DashboardWidget::News => " enter open • tab widgets • / search • b blahaj • q quit ",
+        DashboardWidget::Blahaj => " tab next • / search • n news • ? help • q quit ",
+        DashboardWidget::News => " enter open • tab next • / search • b blahaj • ? help • q quit ",
     };
 
     let footer = Paragraph::new(Span::styled(footer_str, Style::default().fg(Color::DarkGray))).alignment(Alignment::Center);
@@ -93,7 +93,7 @@ fn render_news(f: &mut Frame, app: &App, area: Rect) {
 
     for news in app.news_items.iter().take(5) {
         let is_read = app.read_news.contains(&news.link);
-        let (prefix, color, modifier) = if news.is_critical { ("⚠ ", Color::Red, Modifier::BOLD) }
+        let (prefix, color, modifier) = if news.is_critical { ("!! ", Color::Red, Modifier::BOLD) }
             else if !is_read { ("● ", Color::White, Modifier::BOLD) }
             else { ("○ ", Color::DarkGray, Modifier::empty()) };
 
@@ -111,10 +111,10 @@ fn render_news(f: &mut Frame, app: &App, area: Rect) {
     }
 
     items.push(ListItem::new(Line::from(Span::styled("  ────────────────────────────────────────────────────────────", Style::default().fg(Color::DarkGray)))));
-    items.push(ListItem::new(Line::from(Span::styled("  Press Enter to open full News reader", Style::default().fg(Color::Cyan)))));
+    items.push(ListItem::new(Line::from(Span::styled("  press enter to open full news reader", Style::default().fg(Color::Cyan)))));
 
     let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Cyan)).title(" Arch Linux News "));
+        .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Cyan)).title(" arch linux news "));
     
     // We center the list block by shrinking it to a fixed width
     let layout = Layout::default().direction(Direction::Horizontal).constraints([Constraint::Percentage(15), Constraint::Percentage(70), Constraint::Percentage(15)].as_ref()).split(area);

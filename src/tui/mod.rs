@@ -26,12 +26,19 @@ pub mod browser;
 pub mod dashboard;
 pub mod news;
 pub mod transaction;
+pub mod help;   
+pub mod stats;
+pub mod history;
+pub mod groups;
 
 #[derive(PartialEq)]
 pub enum CurrentScreen {
     Dashboard,
     Browser,
     News,
+    Stats,
+    History,
+    Groups,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -62,6 +69,18 @@ pub enum PackageFilter {
     Repositories,
     Repo(String),
 }
+
+#[derive(Clone)]
+pub struct GroupInfo {
+    pub name: String,
+    pub packages: Vec<(String, bool)>, 
+    pub description: String,
+    pub repo: String,
+    pub is_favorite: bool,
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub enum GroupSortMode { Alphabetical, PackageCount, InstallCompletion }
 
 impl std::fmt::Display for PackageFilter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -136,13 +155,17 @@ pub struct App {
     pub input_mode: InputMode,
     pub last_activity: Instant,
 
+    pub orphan_count: usize,
+    pub installed_count: usize, 
+    pub updates_count: usize,
+
+    pub show_help: bool,
     pub active_widget: DashboardWidget,
 
     pub filters: Vec<PackageFilter>,
     pub filter_idx: usize,
     pub sort_mode: SortMode,
     pub pending_g: bool,
-    pub orphan_count: usize,
     pub package_list: Vec<PackageInfo>,
     pub filtered_packages: Vec<PackageInfo>,
     pub search_query: String,
@@ -169,6 +192,25 @@ pub struct App {
     pub is_fetching_news: bool,
     pub news_last_updated: String,
     pub news_error: String,
+
+    pub history_items: Vec<String>,
+    pub history_state: ListState,
+    pub group_items: Vec<String>,
+    pub group_state: ListState,
+    pub cache_size: String,
+
+    pub groups: Vec<GroupInfo>,
+    pub filtered_groups: Vec<GroupInfo>,
+    pub group_search_query: String,
+    pub group_sort_mode: GroupSortMode,
+    pub group_input_mode: InputMode,
+
+    pub explicit_count: usize,
+    pub kernel: String,
+    pub uptime: String,
+    pub free_space: String,
+    pub last_sync: String,
+    pub last_refreshed: String,
 }
 
 impl App {
@@ -211,6 +253,7 @@ impl App {
             input_mode: InputMode::Normal,
             last_activity: Instant::now(),
             
+            show_help: false,
             active_widget: DashboardWidget::Blahaj,
             
             filters: dynamic_filters,
@@ -243,10 +286,59 @@ impl App {
             is_fetching_news: true,
             news_last_updated: "checking...".to_string(),
             news_error: String::new(),
+
+            history_items: Vec::new(),
+            history_state: ListState::default(),
+            group_items: Vec::new(),
+            cache_size: "Unknown".into(),
+            explicit_count: 0,
+            kernel: "Unknown".into(),
+            uptime: "Unknown".into(),
+            free_space: "Unknown".into(),
+            last_sync: "Unknown".into(),
+            last_refreshed: "Never".into(),
+
+            groups: Vec::new(),
+            filtered_groups: Vec::new(),
+            group_state: ListState::default(),
+            group_search_query: String::new(),
+            group_sort_mode: GroupSortMode::Alphabetical,
+            group_input_mode: InputMode::Normal,
+
+            installed_count: 0,
+            updates_count: 0,
         };
 
         app.refresh_state();
         app
+    }
+
+    pub fn update_group_filter(&mut self) {
+        let query = self.group_search_query.to_lowercase();
+        self.filtered_groups = self.groups.iter().filter(|g| {
+            query.is_empty() || g.name.to_lowercase().contains(&query)
+        }).cloned().collect();
+
+        self.filtered_groups.sort_by(|a, b| {
+            b.is_favorite.cmp(&a.is_favorite).then_with(|| {
+                match self.group_sort_mode {
+                    GroupSortMode::Alphabetical => a.name.cmp(&b.name),
+                    GroupSortMode::PackageCount => b.packages.len().cmp(&a.packages.len()),
+                    GroupSortMode::InstallCompletion => {
+                        let a_inst = a.packages.iter().filter(|p| p.1).count() as f64 / a.packages.len().max(1) as f64;
+                        let b_inst = b.packages.iter().filter(|p| p.1).count() as f64 / b.packages.len().max(1) as f64;
+                        b_inst.partial_cmp(&a_inst).unwrap_or(std::cmp::Ordering::Equal)
+                    }
+                }
+            })
+        });
+
+        if self.filtered_groups.is_empty() {
+            self.group_state.select(None);
+        } else {
+            let idx = self.group_state.selected().unwrap_or(0).min(self.filtered_groups.len() - 1);
+            self.group_state.select(Some(idx));
+        }
     }
 
     pub fn mark_news_read(&mut self, link: String) {
@@ -282,18 +374,19 @@ impl App {
     }
 
     pub fn refresh_state(&mut self) {
-        if let Ok(output) = std::process::Command::new("pacman").arg("-Qdtq").output() {
-            self.orphan_count = String::from_utf8_lossy(&output.stdout)
-                .split_whitespace()
-                .count();
+        if let Ok(output) = std::process::Command::new("sudo").args(["pacman", "-Qdtq"]).output() {
+            self.orphan_count = String::from_utf8_lossy(&output.stdout).split_whitespace().count();
         } else {
             self.orphan_count = 0;
         }
 
+        let mut package_list = Vec::new();
+        let mut installed_count = 0;
+        let mut updates_count = 0;
+
         if let Ok(alpm) = core::alpm_init::init_alpm() {
             let local_db = alpm.localdb();
             let mut seen_packages = HashSet::new();
-            let mut new_list = Vec::new();
 
             for db in alpm.syncdbs() {
                 for pkg in db.pkgs() {
@@ -303,15 +396,15 @@ impl App {
                     let mut is_upgradable = false;
 
                     if let Ok(l_pkg) = local_pkg {
-                        if alpm::vercmp(pkg.version().to_string(), l_pkg.version().to_string())
-                            == std::cmp::Ordering::Greater
-                        {
+                        installed_count += 1;
+                        if alpm::vercmp(pkg.version().to_string(), l_pkg.version().to_string()) == std::cmp::Ordering::Greater {
                             is_upgradable = true;
+                            updates_count += 1;
                         }
                     }
 
                     seen_packages.insert(name.clone());
-                    new_list.push(PackageInfo {
+                    package_list.push(PackageInfo {
                         name,
                         version: pkg.version().to_string(),
                         desc: pkg.desc().unwrap_or("none").to_string(),
@@ -326,7 +419,8 @@ impl App {
             for pkg in local_db.pkgs() {
                 let name = pkg.name().to_string();
                 if !seen_packages.contains(&name) {
-                    new_list.push(PackageInfo {
+                    installed_count += 1;
+                    package_list.push(PackageInfo {
                         name,
                         version: pkg.version().to_string(),
                         desc: pkg.desc().unwrap_or("none").to_string(),
@@ -338,11 +432,106 @@ impl App {
                 }
             }
 
-            new_list.sort_by(|a, b| a.name.cmp(&b.name));
-            self.package_list = new_list;
+            package_list.sort_by(|a, b| a.name.cmp(&b.name));
+            self.package_list = package_list;
+            self.installed_count = installed_count;
+            self.updates_count = updates_count;
         }
 
+        // 1. History log loading with sudo privileges
+        self.history_items.clear();
+        if let Ok(output) = std::process::Command::new("sh").arg("-c").arg("sudo grep '\\[ALPM\\]' /var/log/pacman.log | tail -n 100").output() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines().rev() {
+                self.history_items.push(line.to_string());
+            }
+        }
+
+        // 2. Groups population with fallback and sudo
+        let mut groups_map: std::collections::BTreeMap<String, Vec<(String, bool)>> = std::collections::BTreeMap::new();
+        if let Ok(output) = std::process::Command::new("sudo").args(["pacman", "-Sg"]).output() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    let grp = parts[0].to_string();
+                    let pkg = parts[1].to_string();
+                    let is_installed = self.package_list.iter().any(|p| p.name == pkg && p.is_installed);
+                    groups_map.entry(grp).or_default().push((pkg, is_installed));
+                }
+            }
+        }
+
+        if groups_map.is_empty() {
+            if let Ok(output) = std::process::Command::new("sudo").args(["pacman", "-Qg"]).output() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                for line in stdout.lines() {
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() >= 2 {
+                        let grp = parts[0].to_string();
+                        let pkg = parts[1].to_string();
+                        let is_installed = self.package_list.iter().any(|p| p.name == pkg && p.is_installed);
+                        groups_map.entry(grp).or_default().push((pkg, is_installed));
+                    }
+                }
+            }
+        }
+
+        self.groups = groups_map.into_iter().map(|(name, pkgs)| {
+            let total = pkgs.len();
+            let installed = pkgs.iter().filter(|p| p.1).count();
+            GroupInfo {
+                name,
+                packages: pkgs,
+                description: format!("Package group containing {} packages ({} installed)", total, installed),
+                repo: "extra".to_string(),
+                is_favorite: false,
+            }
+        }).collect();
+
+        self.group_items = self.groups.iter().map(|g| g.name.clone()).collect();
+
+        // 3. Cache Size calculation with sudo
+        self.cache_size = if let Ok(output) = std::process::Command::new("sh").arg("-c").arg("sudo du -sh /var/cache/pacman/pkg | cut -f1").output() {
+            String::from_utf8_lossy(&output.stdout).trim().to_string()
+        } else {
+            "Unknown".to_string()
+        };
+
+        if !self.history_items.is_empty() { self.history_state.select(Some(0)); }
+        if !self.groups.is_empty() { self.group_state.select(Some(0)); }
+
+        // System Health / Stats metrics
+        if let Ok(output) = std::process::Command::new("sh").arg("-c").arg("sudo pacman -Qeq | wc -l").output() {
+            self.explicit_count = String::from_utf8_lossy(&output.stdout).trim().parse().unwrap_or(0);
+        }
+        if let Ok(output) = std::process::Command::new("uname").arg("-r").output() {
+            self.kernel = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        }
+        if let Ok(output) = std::process::Command::new("uptime").arg("-p").output() {
+            self.uptime = String::from_utf8_lossy(&output.stdout).trim().replace("up ", "");
+        }
+        if let Ok(output) = std::process::Command::new("sh").arg("-c").arg("df -h / | awk 'NR==2 {print $4}'").output() {
+            self.free_space = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        }
+        if let Ok(output) = std::process::Command::new("sh").arg("-c").arg("sudo stat -c %Y /var/lib/pacman/sync/core.db 2>/dev/null").output() {
+            let ts: i64 = String::from_utf8_lossy(&output.stdout).trim().parse().unwrap_or(0);
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+            let diff = now - ts;
+            if diff < 3600 { self.last_sync = format!("{} min ago", diff / 60); }
+            else if diff < 86400 { self.last_sync = format!("{} hrs ago", diff / 3600); }
+            else { self.last_sync = format!("{} days ago", diff / 86400); }
+        }
+        self.last_refreshed = chrono::Local::now().format("%H:%M:%S").to_string();
+
         self.update_search();
+
+        for group in &mut self.groups {
+            for pkg in &mut group.packages {
+                pkg.1 = self.package_list.iter().any(|p| p.name == pkg.0 && p.is_installed);
+            }
+        }
+        self.update_group_filter();
     }
 
     pub fn update_search(&mut self) {
@@ -929,9 +1118,16 @@ where
                 CurrentScreen::Dashboard => dashboard::render(f, app),
                 CurrentScreen::Browser => browser::render(f, app),
                 CurrentScreen::News => news::render(f, app),
+                CurrentScreen::Stats => stats::render(f, app),     
+                CurrentScreen::History => history::render(f, app), 
+                CurrentScreen::Groups => groups::render(f, app),
             }
             transaction::render_popup(f, app);
             transaction::render_confirm_popup(f, app);
+
+            if app.show_help {
+                help::render_popup(f);
+            }
         })?;
 
         if let Some(event) = rx.recv().await {
@@ -990,6 +1186,22 @@ where
 
                 TuiEvent::Key(key) => {
                     app.last_activity = Instant::now();
+
+                    if app.show_help {
+                        match key.code {
+                            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') => {
+                                app.show_help = false;
+                            }
+                            _ => {}
+                        }
+                        continue;
+                    }
+
+                    if let KeyCode::Char('?') = key.code {
+                        app.show_help = true;
+                        continue;
+                    }
+
                     if app.is_installing {
                         if let KeyCode::Char('q') = key.code {
                             if let Some(tx_abort) = app.abort_tx.take() {
@@ -1054,6 +1266,68 @@ where
                                 app.input_mode = InputMode::Editing;
                             }
 
+                            KeyCode::Char('u') => {
+                                app.is_installing = true;
+                                app.current_action = "syncing repositories...".to_string();
+                                app.transaction_logs.clear();
+                                app.progress = 0;
+
+                                let (abort_tx, abort_rx) = mpsc::channel(1);
+                                app.abort_tx = Some(abort_tx);
+                                spawn_pacman(
+                                    tx.clone(),
+                                    vec!["pacman".into(), "-Sy".into(), "--noconfirm".into()],
+                                    "syncing repositories".into(),
+                                    abort_rx,
+                                );
+                            }
+
+                            KeyCode::Char('o') => {
+                                if let Ok(output) = std::process::Command::new("pacman").arg("-Qdtq").output() {
+                                    let stdout = String::from_utf8_lossy(&output.stdout);
+                                    let orphans: Vec<String> = stdout.split_whitespace().map(|s| s.to_string()).collect();
+
+                                    app.is_installing = true;
+                                    app.transaction_logs.clear();
+                                    app.progress = 0;
+
+                                    if orphans.is_empty() {
+                                        app.current_action = "system clean ✓".to_string();
+                                        app.progress = 100;
+                                        app.transaction_logs.push("no orphaned packages to remove.".to_string());
+
+                                        let tx_clone = tx.clone();
+                                        tokio::spawn(async move {
+                                            tokio::time::sleep(Duration::from_secs(2)).await;
+                                            let _ = tx_clone.send(TuiEvent::CloseTransaction).await;
+                                        });
+                                    } else {
+                                        app.current_action = format!("sweeping {} orphans...", orphans.len());
+                                        let mut args = vec!["pacman".into(), "-Rns".into(), "--noconfirm".into()];
+                                        args.extend(orphans);
+                                        
+                                        let (abort_tx, abort_rx) = mpsc::channel(1);
+                                        app.abort_tx = Some(abort_tx);
+                                        spawn_pacman(tx.clone(), args, "cleaning orphans".into(), abort_rx);
+                                    }
+                                }
+                            }
+                            KeyCode::Char('c') => {
+                                app.is_installing = true;
+                                app.current_action = "cleaning package cache...".to_string();
+                                app.transaction_logs.clear();
+                                app.progress = 0;
+
+                                let (abort_tx, abort_rx) = mpsc::channel(1);
+                                app.abort_tx = Some(abort_tx);
+                                spawn_pacman(
+                                    tx.clone(),
+                                    vec!["pacman".into(), "-Sc".into(), "--noconfirm".into()],
+                                    "cleaning cache".into(),
+                                    abort_rx,
+                                );
+                            }
+
                             KeyCode::Char('n') => {
                                 if app.active_widget == DashboardWidget::News {
                                     app.screen = CurrentScreen::News;
@@ -1061,6 +1335,9 @@ where
                                     app.active_widget = DashboardWidget::News;
                                 }
                             }
+                            KeyCode::Char('t') => app.screen = CurrentScreen::Stats,
+                            KeyCode::Char('h') => app.screen = CurrentScreen::History,
+                            KeyCode::Char('g') => app.screen = CurrentScreen::Groups,
                             KeyCode::Char('b') => {
                                 app.active_widget = DashboardWidget::Blahaj;
                             }
@@ -1264,6 +1541,59 @@ where
                                 }
                                 _ => {}
                             },
+                        },
+                        CurrentScreen::Stats => match key.code {
+                            KeyCode::Esc => app.screen = CurrentScreen::Dashboard,
+                            KeyCode::Char('q') => app.should_quit = true,
+                            KeyCode::Char('r') => { app.refresh_state(); }
+                            KeyCode::Char('h') => app.screen = CurrentScreen::History,
+                            _ => {}
+                        },
+                        CurrentScreen::History => match key.code {
+                            KeyCode::Esc => app.screen = CurrentScreen::Dashboard,
+                            KeyCode::Char('q') => app.should_quit = true,
+                            KeyCode::Down | KeyCode::Char('j') => {
+                                if !app.history_items.is_empty() {
+                                    let i = match app.history_state.selected() {
+                                        Some(i) => if i >= app.history_items.len() - 1 { 0 } else { i + 1 },
+                                        None => 0,
+                                    };
+                                    app.history_state.select(Some(i));
+                                }
+                            }
+                            KeyCode::Up | KeyCode::Char('k') => {
+                                if !app.history_items.is_empty() {
+                                    let i = match app.history_state.selected() {
+                                        Some(i) => if i == 0 { app.history_items.len() - 1 } else { i - 1 },
+                                        None => 0,
+                                    };
+                                    app.history_state.select(Some(i));
+                                }
+                            }
+                            _ => {}
+                        },
+                        CurrentScreen::Groups => match key.code {
+                            KeyCode::Esc => app.screen = CurrentScreen::Dashboard,
+                            KeyCode::Char('q') => app.should_quit = true,
+                            KeyCode::Down | KeyCode::Char('j') => {
+                                if !app.group_items.is_empty() {
+                                    let i = match app.group_state.selected() {
+                                        Some(i) => if i >= app.group_items.len() - 1 { 0 } else { i + 1 },
+                                        None => 0,
+                                    };
+                                    app.group_state.select(Some(i));
+                                }
+                            }
+                            KeyCode::Up | KeyCode::Char('k') => {
+                                if !app.group_items.is_empty() {
+                                    let i = match app.group_state.selected() {
+                                        Some(i) => if i == 0 { app.group_items.len() - 1 } else { i - 1 },
+                                        None => 0,
+                                    };
+                                    app.group_state.select(Some(i));
+                                }
+                            }
+                            _ => {}
                         },
 
                         CurrentScreen::Browser => match app.input_mode {
