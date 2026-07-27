@@ -3,37 +3,52 @@
 [![AUR](https://img.shields.io/aur/version/haj?logo=archlinux)](https://aur.archlinux.org/packages/haj)
 [![Crates.io](https://img.shields.io/crates/v/haj?logo=rust)](https://crates.io/crates/haj)
 [![Rust](https://img.shields.io/badge/built_with-Rust-dca282.svg?logo=rust)](https://www.rust-lang.org/)
+[![GitHub release](https://img.shields.io/github/v/release/asitos/haj)](https://github.com/asitos/haj/releases/tag/v0.2.5)
 
-fast, quiet, beautiful package management for blahArch. 
+fast, quiet, beautiful package manager for blahArch. 
 *(and yes, it is named after the ikea shark. all hail blahaj. 🦈)*
+
+after weeks of polishing and refinement, **[v0.2.5 is finally here](https://github.com/asitos/haj/releases/tag/v0.2.5)** and ready for public testing! PRs and issues are welcome :3
 
 `haj` is a modern, memory-safe wrapper for `pacman` written in rust. It replaces arch's notoriously loud and verbose terminal output with the clean, minimalistic aesthetic of modern package managers like `cargo` and `bun`, without compromising on speed or safety. also comes with love from the supreme plushie shark.
 
-<img alt="haj demo" src="assets/demo-output.gif" width="100%" />
+works on virtually every `pacman`-based distro — arch linux, blahArch, artix, endeavouros, garuda, manjaro, cachyos, and 25+ more.
+
+<img alt="haj demo" src="assets/cli-demo.gif" width="100%" />
 
 ## features
 
 ### the tui dashboard
 
-`haj` now features a blazing-fast, interactive tui powered by `ratatui`. run `haj tui` to access:
+`haj` now features a ridiculously-fast, interactive tui powered by `ratatui`. run `haj tui` to access:
 
-<img alt="haj tui demo" src="assets/tui-demo.gif" width="100%" />
+<img alt="haj tui demo" src="assets/tui-dem0.gif" width="100%" />
 
-- **real-time search:** press / or f to instantly filter all sync repository packages natively via libalpm.
-- **live commands popups:** haj streams native pacman execution logs directly into floating, minimalist UI panels with razor-thin progress bars.
-- **the orphan sweeper:** press c on the dashboard to instantly detect and vaporize unneeded dependencies (pacman -Rns) and reclaim disk space.
-- **3d rotating blahaj (best):** a fully 3D, spinning ascii art shark rendered natively via [display3d](https://github.com/renpenguin/display3d).
+* **the ultimate package browser:** a beautiful, responsive explorer. search live, cycle filters with `tab` (aur, installed, updates, repos), and press `1-4` to seamlessly lazy-load rich package overviews, dependency trees, and installed file paths without ever freezing the ui.
 
-### cli & v0.2.4 highlights
+* **smart batch queueing:** press `space` to toggle packages and build a virtual install/remove queue, keeping memory usage minimal even with 100,000+ aur packages loaded.
 
+* **transaction history & groups:** press `h` to browse your parsed package transaction history (what upgraded, what failed, and when), or `g` to quickly explore and install arch package groups.
+
+* **the orphan sweeper & cache manager:** hit `o` on the dashboard to instantly detect and vaporize unneeded dependencies, or `c` to clean your package cache natively.
+
+* **live commands popups:** haj streams native pacman execution logs directly into floating, minimalist ui panels with live transaction logs, concise progress indicators, and native pacman output without the wall of noise.
+
+* **system statistics:** press `t` for a cozy dashboard tracking your explicit packages, dependency splits, disk usage, and system health at a glance.
+
+* **3d rotating blahaj (best):** a fully 3D, spinning ascii art shark rendered natively via [display3d](https://github.com/renpenguin/display3d).
+
+### cli & v0.2.5 highlights
+
+- **native package browser:** browse repositories, inspect dependencies, installed files, package metadata and groups entirely inside the tui with asynchronous lazy loading.
 - **interactive search-install:** type a naked query (e.g., `haj discord`) to display a numbered table of matching native and AUR packages. Select numbers (e.g., `1 3`) to queue them instantly.
-- **AUR PKGBUILD auditing:** press `v` during the AUR pre-transaction prompt to inspect the live `PKGBUILD` via a fast shallow clone, piped directly into `bat` or `less` right in your terminal.
-- **Arch News safety guard:** before running `haj jump`, the system pings the official Arch RSS feed. If a post from the last 7 days requires manual intervention, `haj` displays an unmissable red warning banner with the headline.
-- **system overview (`stats`):** a pristine status dashboard tracking package counts, explicit vs. dependency splits, cache sizes, update counts, and system health at a glance.
+- **aur PKGBUILD auditing:** press `v` during the aur pre-transaction prompt to inspect the live `PKGBUILD` via a fast shallow clone, piped directly into `bat` or `less` right in your terminal.
+- **arch news safety guard:** before running `haj jump`, the system pings the official Arch rss feed. If a post from the last 7 days requires manual intervention, `haj` displays an unmissable red warning banner with the headline.
+- **system overview (`stats`):** a clean status dashboard tracking package counts, explicit vs. dependency splits, cache sizes, update counts, and system health at a glance.
 - **the cargo/bun aesthetic:** no more jagged progress bars or walls of text. `haj` parses `pacman` output streams in real-time, displaying a single, elegant progress spinner and clean transaction summaries.
-- **native alpm engine:** `haj` uses `alpm.rs` (C bindings for `libalpm`) to query your local and sync databases directly in memory.
+- **native libalpm backend:** `haj` uses `alpm.rs` (C bindings for `libalpm`) to query your local and sync databases directly in memory.
 
-## working   
+## how it works   
 
 `haj` is completely transparent and relies entirely on standard arch linux infrastructure:
 1. **reads** (`search`, `show`, `orphan`) are done natively via `libalpm` bindings for maximum performance.
@@ -53,7 +68,7 @@ paru -S haj
 
 ### pacman (blaharch-repo)
 
-install `haj` from the [official blahArch repo](https://asitos.github.io/blaharch-repo/) for self-updating release via `pacman`,
+install `haj` from the [official blahArch repo](https://asitos.github.io/blaharch-repo/) for future updates through `pacman`,
 add this to the bottom of your `/etc/pacman.conf`:
 
 ```bash
@@ -91,7 +106,7 @@ sudo install -Dm755 target/release/haj /usr/bin/haj
 
 ## usage & commands
 
-`haj` provides highly aliased commands for a faster typing experience.
+`haj` provides highly aliased commands for a faster typing experience, and currently supports the full day-to-day arch package management workflow through both the cli and the interactive tui
 
 ### options
 
@@ -162,7 +177,7 @@ haj sync
 haj up
 
 haj install htop cmatrix
-or 
+# or 
 haj i htop cmatrix
 ```
 
@@ -194,9 +209,21 @@ verbose = false
 `haj` is built with a focus on memory safety, zero-cost abstractions, and concurrent execution.
 
 * **asynchronous pty parsing:** uses `tokio` to spawn non-blocking pseudo-terminals, capturing and formatting `pacman`'s c-level standard streams in real-time without deadlocking background workers.
+
 * **ffi & memory safety:** utilizes `alpm.rs` to interface with arch linux's `libalpm`. database locks are explicitly managed and safely dropped from memory before handing state mutation over to external processes.
+
 * **dag traversal:** the `orphan` detection engine completely avoids bash scripting, instead traversing the system's directed acyclic graph (dag) directly in memory via c-bindings to calculate unneeded dependencies in microseconds.
+
+* **lazy-loaded virtual ui:** the tui package browser aggressively caches asynchronous metadata and virtualizes list rendering. this guarantees that scrolling through huge aur databases or rendering massive file trees runs at a flawless 60 fps without ever blocking the main thread.
+
+* **fully asynchronous tui:** background workers fetch package metadata, dependency trees and installed file lists while the ui remains responsive, ensuring navigation never blocks on slow pacman queries.
 
 ## license (BORING)
 
 MIT license. see `LICENSE` for more information.
+
+---
+
+made with rust, libalpm, and an unreasonable amount of love for the ikea shark.
+
+**haj loves you all :3**

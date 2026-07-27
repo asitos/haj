@@ -1,6 +1,7 @@
+#![allow(dead_code, clippy::collapsible_if, clippy::collapsible_match)]
 use anyhow::Result;
 use crossterm::{
-    event::{self, Event, KeyCode},
+    event::{self, Event, KeyCode, KeyModifiers},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -10,7 +11,12 @@ use ratatui::{
     text::Text,
     widgets::ListState,
 };
-use std::{collections::HashSet, io, time::Duration};
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::HashSet,
+    io,
+    time::{Duration, Instant},
+};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt};
 use tokio::sync::mpsc;
 
@@ -19,11 +25,51 @@ use ansi_to_tui::IntoText;
 
 pub mod browser;
 pub mod dashboard;
+pub mod groups;
+pub mod help;
+pub mod history;
+pub mod news;
+pub mod stats;
 pub mod transaction;
 
+#[derive(PartialEq, Clone, Copy)]
+pub enum BrowserTab {
+    Overview,
+    Dependencies,
+    Files,
+    Queue,
+}
+
+#[derive(Clone, Debug)]
+pub struct BrowserCache {
+    pub package: String,
+    pub info: String,
+    pub files: Vec<String>,
+    pub dependencies: Vec<String>,
+    pub loading_info: bool,
+    pub loading_files: bool,
+}
+
+#[derive(PartialEq, Clone, Copy, Debug)]
+pub enum SelectionMode {
+    Explicit,
+    AllVisible,
+}
+
+#[derive(PartialEq)]
 pub enum CurrentScreen {
     Dashboard,
     Browser,
+    News,
+    Stats,
+    History,
+    Groups,
+}
+
+#[derive(PartialEq, Clone, Copy)]
+pub enum DashboardWidget {
+    Blahaj,
+    News,
 }
 
 #[derive(PartialEq)]
@@ -32,11 +78,72 @@ pub enum InputMode {
     Editing,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(PartialEq)]
+pub enum NewsFocus {
+    List,
+    Article,
+}
+
+#[derive(Clone, PartialEq, Debug)]
 pub enum PackageFilter {
     All,
     Installed,
     NotInstalled,
+    Updates,
+    Aur,
+    Repositories,
+    Repo(String),
+    Group(String),
+}
+
+#[derive(Clone)]
+pub struct GroupInfo {
+    pub name: String,
+    pub packages: Vec<(String, bool)>,
+    pub description: String,
+    pub repo: String,
+    pub is_favorite: bool,
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub enum GroupSortMode {
+    Alphabetical,
+    PackageCount,
+    InstallCompletion,
+}
+
+impl std::fmt::Display for PackageFilter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::All => write!(f, "all"),
+            Self::Installed => write!(f, "installed"),
+            Self::NotInstalled => write!(f, "not installed"),
+            Self::Updates => write!(f, "updates"),
+            Self::Aur => write!(f, "aur"),
+            Self::Repositories => write!(f, "repositories"),
+            Self::Repo(name) => write!(f, "repo:{}", name),
+            Self::Group(name) => write!(f, "group:{}", name),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub enum SortMode {
+    Alphabetical,
+    Installed,
+    Repository,
+    Relevance,
+}
+
+impl std::fmt::Display for SortMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Alphabetical => write!(f, "alphabetical"),
+            Self::Installed => write!(f, "installed"),
+            Self::Repository => write!(f, "repository"),
+            Self::Relevance => write!(f, "relevance"),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -46,41 +153,407 @@ pub struct PackageInfo {
     pub desc: String,
     pub repo: String,
     pub is_installed: bool,
+    pub is_upgradable: bool,
+    pub size_mb: f64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NewsItem {
+    pub title: String,
+    pub link: String,
+    pub pub_date: String,
+    pub description: String,
+    pub is_critical: bool,
 }
 
 pub enum TuiEvent {
     _Tick,
     Key(crossterm::event::KeyEvent),
     PacmanLog(String),
+    UpdateAction(String),
     PacmanProgress(u16),
     TransactionComplete,
+    TransactionFailed,
     CloseTransaction,
     DashboardArtFrame(Text<'static>),
+    NewsFetched(Vec<NewsItem>, String),
+    NewsFetchFailed(String),
+    BrowserInfoLoaded(String, String, Vec<String>),
+    BrowserFilesLoaded(String, Vec<String>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum TxAction {
+    Install,
+    Upgrade,
+    Remove,
+    Reinstall,
+    Unknown,
+}
+
+#[derive(Clone, Debug)]
+pub struct PkgChange {
+    pub name: String,
+    pub old_version: Option<String>,
+    pub new_version: String,
+    pub action: TxAction,
+}
+
+#[derive(Clone, Debug)]
+pub struct Transaction {
+    pub timestamp: String,
+    pub is_success: bool,
+    pub primary_action: TxAction,
+    pub packages: Vec<PkgChange>,
+    pub hooks: Vec<String>,
+    pub warnings: Vec<String>,
+    pub raw_log: Vec<String>,
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub enum HistoryFilter {
+    All,
+    Installs,
+    Upgrades,
+    Removals,
+    Failures,
 }
 
 pub struct App {
     pub should_quit: bool,
     pub screen: CurrentScreen,
     pub input_mode: InputMode,
-    pub filter: PackageFilter,
-    pub pending_g: bool,
-    pub orphan_count: usize,
+    pub last_activity: Instant,
 
+    pub orphan_count: usize,
+    pub installed_count: usize,
+    pub updates_count: usize,
+
+    pub show_help: bool,
+    pub active_widget: DashboardWidget,
+
+    pub filters: Vec<PackageFilter>,
+    pub filter_idx: usize,
+    pub sort_mode: SortMode,
+    pub pending_g: bool,
     pub package_list: Vec<PackageInfo>,
     pub filtered_packages: Vec<PackageInfo>,
     pub search_query: String,
     pub list_state: ListState,
+    pub selected_packages: HashSet<String>,
 
+    pub show_prompt: bool,
+    pub prompt_type: String,
+    pub prompt_targets: Vec<String>,
     pub is_installing: bool,
     pub current_action: String,
     pub progress: u16,
     pub transaction_logs: Vec<String>,
     pub dashboard_art: Text<'static>,
+    pub abort_tx: Option<mpsc::Sender<()>>,
+
+    pub news_items: Vec<NewsItem>,
+    pub filtered_news: Vec<NewsItem>,
+    pub read_news: HashSet<String>,
+    pub news_list_state: ListState,
+    pub news_scroll: u16,
+    pub news_search_query: String,
+    pub news_focus: NewsFocus,
+    pub is_fetching_news: bool,
+    pub news_last_updated: String,
+    pub news_error: String,
+
+    pub transactions: Vec<Transaction>,
+    pub filtered_transactions: Vec<Transaction>,
+    pub history_state: ListState,
+    pub history_search_query: String,
+    pub history_filter: HistoryFilter,
+    pub history_expanded: bool,
+    pub history_input_mode: InputMode,
+
+    pub group_items: Vec<String>,
+    pub group_state: ListState,
+    pub cache_size: String,
+
+    pub groups: Vec<GroupInfo>,
+    pub filtered_groups: Vec<GroupInfo>,
+    pub group_search_query: String,
+    pub group_sort_mode: GroupSortMode,
+    pub group_input_mode: InputMode,
+
+    pub explicit_count: usize,
+    pub kernel: String,
+    pub uptime: String,
+    pub free_space: String,
+    pub last_sync: String,
+    pub last_refreshed: String,
+
+    pub browser_tab: BrowserTab,
+    pub browser_pkg_name: String,
+
+    pub browser_caches: std::collections::HashMap<String, BrowserCache>,
+    pub browser_scroll: u16,
+
+    pub deselected_packages: HashSet<String>,
+    pub selection_mode: SelectionMode,
 }
 
 impl App {
     pub fn new() -> Self {
+        let mut dynamic_filters = vec![
+            PackageFilter::All,
+            PackageFilter::Installed,
+            PackageFilter::NotInstalled,
+            PackageFilter::Updates,
+            PackageFilter::Aur,
+            PackageFilter::Repositories,
+        ];
+
+        if let Ok(alpm) = core::alpm_init::init_alpm() {
+            for db in alpm.syncdbs() {
+                dynamic_filters.push(PackageFilter::Repo(db.name().to_string()));
+            }
+        }
+
+        let home = dirs::home_dir().unwrap_or_default();
+        let cache_dir = home.join(".cache/haj");
+        let _ = std::fs::create_dir_all(&cache_dir);
+
+        let read_news: HashSet<String> = std::fs::read_to_string(cache_dir.join("read_news.json"))
+            .ok()
+            .and_then(|data| serde_json::from_str(&data).ok())
+            .unwrap_or_default();
+
+        let (saved_idx, saved_scroll) = std::fs::read_to_string(cache_dir.join("news_state.json"))
+            .ok()
+            .and_then(|data| serde_json::from_str::<(usize, u16)>(&data).ok())
+            .unwrap_or((0, 0));
+
+        let mut list_state = ListState::default();
+        list_state.select(Some(saved_idx));
+
+        let mut app = Self {
+            should_quit: false,
+            screen: CurrentScreen::Dashboard,
+            input_mode: InputMode::Normal,
+            last_activity: Instant::now(),
+
+            show_help: false,
+            active_widget: DashboardWidget::Blahaj,
+
+            filters: dynamic_filters,
+            filter_idx: 0,
+            sort_mode: SortMode::Relevance,
+            pending_g: false,
+            orphan_count: 0,
+            package_list: Vec::new(),
+            filtered_packages: Vec::new(),
+            search_query: String::new(),
+            list_state: ListState::default(),
+            selected_packages: HashSet::new(),
+            show_prompt: false,
+            prompt_type: String::new(),
+            prompt_targets: Vec::new(),
+            is_installing: false,
+            current_action: String::from("idle"),
+            progress: 0,
+            transaction_logs: Vec::new(),
+            dashboard_art: Text::raw(" loading art... "),
+            abort_tx: None,
+
+            news_items: Vec::new(),
+            filtered_news: Vec::new(),
+            read_news,
+            news_list_state: list_state,
+            news_scroll: saved_scroll,
+            news_search_query: String::new(),
+            news_focus: NewsFocus::List,
+            is_fetching_news: true,
+            news_last_updated: "checking...".to_string(),
+            news_error: String::new(),
+
+            transactions: Vec::new(),
+            filtered_transactions: Vec::new(),
+            history_state: ListState::default(),
+            history_search_query: String::new(),
+            history_filter: HistoryFilter::All,
+            history_expanded: false,
+            history_input_mode: InputMode::Normal,
+
+            group_items: Vec::new(),
+            cache_size: "Unknown".into(),
+            explicit_count: 0,
+            kernel: "Unknown".into(),
+            uptime: "Unknown".into(),
+            free_space: "Unknown".into(),
+            last_sync: "Unknown".into(),
+            last_refreshed: "Never".into(),
+
+            groups: Vec::new(),
+            filtered_groups: Vec::new(),
+            group_state: ListState::default(),
+            group_search_query: String::new(),
+            group_sort_mode: GroupSortMode::Alphabetical,
+            group_input_mode: InputMode::Normal,
+
+            installed_count: 0,
+            updates_count: 0,
+
+            browser_tab: BrowserTab::Overview,
+            browser_pkg_name: String::new(),
+
+            browser_caches: std::collections::HashMap::new(),
+            browser_scroll: 0,
+
+            deselected_packages: HashSet::new(),
+            selection_mode: SelectionMode::Explicit,
+        };
+
+        app.refresh_state();
+        app
+    }
+
+    pub fn get_selected_count(&self) -> usize {
+        match self.selection_mode {
+            SelectionMode::Explicit => self.selected_packages.len(),
+            SelectionMode::AllVisible => self
+                .filtered_packages
+                .len()
+                .saturating_sub(self.deselected_packages.len()),
+        }
+    }
+
+    pub fn is_package_selected(&self, name: &str) -> bool {
+        match self.selection_mode {
+            SelectionMode::Explicit => self.selected_packages.contains(name),
+            SelectionMode::AllVisible => !self.deselected_packages.contains(name),
+        }
+    }
+
+    pub fn update_history_filter(&mut self) {
+        let query = self.history_search_query.to_lowercase();
+        self.filtered_transactions = self
+            .transactions
+            .iter()
+            .filter(|tx| {
+                let matches_query = query.is_empty()
+                    || tx.timestamp.to_lowercase().contains(&query)
+                    || tx
+                        .packages
+                        .iter()
+                        .any(|p| p.name.to_lowercase().contains(&query));
+
+                let matches_filter = match self.history_filter {
+                    HistoryFilter::All => true,
+                    HistoryFilter::Installs => tx.primary_action == TxAction::Install,
+                    HistoryFilter::Upgrades => tx.primary_action == TxAction::Upgrade,
+                    HistoryFilter::Removals => tx.primary_action == TxAction::Remove,
+                    HistoryFilter::Failures => !tx.is_success,
+                };
+
+                matches_query && matches_filter
+            })
+            .cloned()
+            .collect();
+
+        if self.filtered_transactions.is_empty() {
+            self.history_state.select(None);
+        } else {
+            let idx = self
+                .history_state
+                .selected()
+                .unwrap_or(0)
+                .min(self.filtered_transactions.len() - 1);
+            self.history_state.select(Some(idx));
+        }
+    }
+
+    pub fn update_group_filter(&mut self) {
+        let query = self.group_search_query.to_lowercase();
+        self.filtered_groups = self
+            .groups
+            .iter()
+            .filter(|g| query.is_empty() || g.name.to_lowercase().contains(&query))
+            .cloned()
+            .collect();
+
+        self.filtered_groups.sort_by(|a, b| {
+            b.is_favorite
+                .cmp(&a.is_favorite)
+                .then_with(|| match self.group_sort_mode {
+                    GroupSortMode::Alphabetical => a.name.cmp(&b.name),
+                    GroupSortMode::PackageCount => b.packages.len().cmp(&a.packages.len()),
+                    GroupSortMode::InstallCompletion => {
+                        let a_inst = a.packages.iter().filter(|p| p.1).count() as f64
+                            / a.packages.len().max(1) as f64;
+                        let b_inst = b.packages.iter().filter(|p| p.1).count() as f64
+                            / b.packages.len().max(1) as f64;
+                        b_inst
+                            .partial_cmp(&a_inst)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    }
+                })
+        });
+
+        if self.filtered_groups.is_empty() {
+            self.group_state.select(None);
+        } else {
+            let idx = self
+                .group_state
+                .selected()
+                .unwrap_or(0)
+                .min(self.filtered_groups.len() - 1);
+            self.group_state.select(Some(idx));
+        }
+    }
+
+    pub fn mark_news_read(&mut self, link: String) {
+        if self.read_news.insert(link) {
+            let home = dirs::home_dir().unwrap_or_default();
+            let data = serde_json::to_string(&self.read_news).unwrap_or_default();
+            tokio::spawn(async move {
+                let _ = tokio::fs::create_dir_all(home.join(".cache/haj")).await;
+                let _ = tokio::fs::write(home.join(".cache/haj/read_news.json"), data).await;
+            });
+        }
+    }
+
+    pub fn update_news_search(&mut self) {
+        let query = self.news_search_query.to_lowercase();
+        self.filtered_news = self
+            .news_items
+            .iter()
+            .filter(|n| {
+                query.is_empty()
+                    || n.title.to_lowercase().contains(&query)
+                    || n.description.to_lowercase().contains(&query)
+            })
+            .cloned()
+            .collect();
+        self.news_list_state
+            .select(if self.filtered_news.is_empty() {
+                None
+            } else {
+                Some(0)
+            });
+        self.news_scroll = 0;
+    }
+
+    pub fn refresh_state(&mut self) {
+        if let Ok(output) = std::process::Command::new("sudo")
+            .args(["pacman", "-Qdtq"])
+            .output()
+        {
+            self.orphan_count = String::from_utf8_lossy(&output.stdout)
+                .split_whitespace()
+                .count();
+        } else {
+            self.orphan_count = 0;
+        }
+
         let mut package_list = Vec::new();
+        let mut installed_count = 0;
+        let mut updates_count = 0;
 
         if let Ok(alpm) = core::alpm_init::init_alpm() {
             let local_db = alpm.localdb();
@@ -89,7 +562,19 @@ impl App {
             for db in alpm.syncdbs() {
                 for pkg in db.pkgs() {
                     let name = pkg.name().to_string();
-                    let is_installed = local_db.pkg(name.as_str()).is_ok();
+                    let local_pkg = local_db.pkg(name.as_str());
+                    let is_installed = local_pkg.is_ok();
+                    let mut is_upgradable = false;
+
+                    if let Ok(l_pkg) = local_pkg {
+                        installed_count += 1;
+                        if alpm::vercmp(pkg.version().to_string(), l_pkg.version().to_string())
+                            == std::cmp::Ordering::Greater
+                        {
+                            is_upgradable = true;
+                            updates_count += 1;
+                        }
+                    }
 
                     seen_packages.insert(name.clone());
                     package_list.push(PackageInfo {
@@ -98,6 +583,8 @@ impl App {
                         desc: pkg.desc().unwrap_or("none").to_string(),
                         repo: db.name().to_string(),
                         is_installed,
+                        is_upgradable,
+                        size_mb: pkg.isize() as f64 / 1_048_576.0,
                     });
                 }
             }
@@ -105,81 +592,364 @@ impl App {
             for pkg in local_db.pkgs() {
                 let name = pkg.name().to_string();
                 if !seen_packages.contains(&name) {
+                    installed_count += 1;
                     package_list.push(PackageInfo {
                         name,
                         version: pkg.version().to_string(),
                         desc: pkg.desc().unwrap_or("none").to_string(),
                         repo: "local/aur".to_string(),
                         is_installed: true,
+                        is_upgradable: false,
+                        size_mb: pkg.isize() as f64 / 1_048_576.0,
                     });
+                }
+            }
+
+            package_list.sort_by(|a, b| a.name.cmp(&b.name));
+            self.package_list = package_list;
+            self.installed_count = installed_count;
+            self.updates_count = updates_count;
+        }
+
+        self.transactions.clear();
+        if let Ok(output) = std::process::Command::new("sh")
+            .arg("-c")
+            .arg("sudo tail -n 5000 /var/log/pacman.log")
+            .output()
+        {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let mut current_tx: Option<Transaction> = None;
+
+            for line in stdout.lines() {
+                let ts = if line.starts_with('[') && line.len() > 18 {
+                    line[1..17].to_string()
+                } else {
+                    "Unknown".to_string()
+                };
+
+                if line.contains("transaction started") {
+                    current_tx = Some(Transaction {
+                        timestamp: ts,
+                        is_success: false,
+                        primary_action: TxAction::Unknown,
+                        packages: Vec::new(),
+                        hooks: Vec::new(),
+                        warnings: Vec::new(),
+                        raw_log: vec![line.to_string()],
+                    });
+                } else if line.contains("transaction completed")
+                    || line.contains("transaction failed")
+                {
+                    if let Some(mut tx) = current_tx.take() {
+                        tx.raw_log.push(line.to_string());
+                        tx.is_success = line.contains("transaction completed");
+
+                        let installs = tx
+                            .packages
+                            .iter()
+                            .filter(|p| p.action == TxAction::Install)
+                            .count();
+                        let upgrades = tx
+                            .packages
+                            .iter()
+                            .filter(|p| p.action == TxAction::Upgrade)
+                            .count();
+                        let removals = tx
+                            .packages
+                            .iter()
+                            .filter(|p| p.action == TxAction::Remove)
+                            .count();
+
+                        tx.primary_action = if upgrades > installs && upgrades > removals {
+                            TxAction::Upgrade
+                        } else if removals > installs && removals > upgrades {
+                            TxAction::Remove
+                        } else if installs > 0 {
+                            TxAction::Install
+                        } else {
+                            TxAction::Unknown
+                        };
+
+                        self.transactions.push(tx);
+                    }
+                } else if let Some(ref mut tx) = current_tx {
+                    tx.raw_log.push(line.to_string());
+
+                    if line.contains("[ALPM] installed") {
+                        let parts: Vec<&str> = line.split_whitespace().collect();
+                        if parts.len() >= 5 {
+                            tx.packages.push(PkgChange {
+                                name: parts[3].to_string(),
+                                old_version: None,
+                                new_version: parts[4].replace("(", "").replace(")", ""),
+                                action: TxAction::Install,
+                            });
+                        }
+                    } else if line.contains("[ALPM] upgraded") {
+                        let parts: Vec<&str> = line.split_whitespace().collect();
+                        if parts.len() >= 7 {
+                            tx.packages.push(PkgChange {
+                                name: parts[3].to_string(),
+                                old_version: Some(parts[4].replace("(", "")),
+                                new_version: parts[6].replace(")", ""),
+                                action: TxAction::Upgrade,
+                            });
+                        }
+                    } else if line.contains("[ALPM] removed") {
+                        let parts: Vec<&str> = line.split_whitespace().collect();
+                        if parts.len() >= 5 {
+                            tx.packages.push(PkgChange {
+                                name: parts[3].to_string(),
+                                old_version: None,
+                                new_version: parts[4].replace("(", "").replace(")", ""),
+                                action: TxAction::Remove,
+                            });
+                        }
+                    } else if line.contains("warning:") {
+                        tx.warnings.push(
+                            line.split("warning:")
+                                .last()
+                                .unwrap_or("")
+                                .trim()
+                                .to_string(),
+                        );
+                    } else if line.contains("Running") && line.contains("hook") {
+                        tx.hooks.push(
+                            line.split("Running")
+                                .last()
+                                .unwrap_or("")
+                                .replace("hook...", "")
+                                .trim()
+                                .to_string(),
+                        );
+                    }
+                }
+            }
+            self.transactions.reverse();
+        }
+        self.update_history_filter();
+
+        let mut groups_map: std::collections::BTreeMap<String, Vec<(String, bool)>> =
+            std::collections::BTreeMap::new();
+        if let Ok(output) = std::process::Command::new("sudo")
+            .args(["pacman", "-Sg"])
+            .output()
+        {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    let grp = parts[0].to_string();
+                    let pkg = parts[1].to_string();
+                    let is_installed = self
+                        .package_list
+                        .iter()
+                        .any(|p| p.name == pkg && p.is_installed);
+                    groups_map.entry(grp).or_default().push((pkg, is_installed));
                 }
             }
         }
 
-        package_list.sort_by(|a, b| a.name.cmp(&b.name));
-
-        let filtered_packages = package_list.clone();
-
-        let mut list_state = ListState::default();
-        if !package_list.is_empty() {
-            list_state.select(Some(0));
+        if groups_map.is_empty() {
+            if let Ok(output) = std::process::Command::new("sudo")
+                .args(["pacman", "-Qg"])
+                .output()
+            {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                for line in stdout.lines() {
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() >= 2 {
+                        let grp = parts[0].to_string();
+                        let pkg = parts[1].to_string();
+                        let is_installed = self
+                            .package_list
+                            .iter()
+                            .any(|p| p.name == pkg && p.is_installed);
+                        groups_map.entry(grp).or_default().push((pkg, is_installed));
+                    }
+                }
+            }
         }
 
-        let orphan_count = std::process::Command::new("pacman")
-            .arg("-Qdtq")
-            .output()
-            .map(|o| {
-                String::from_utf8_lossy(&o.stdout)
-                    .split_whitespace()
-                    .count()
+        self.groups = groups_map
+            .into_iter()
+            .map(|(name, pkgs)| {
+                let total = pkgs.len();
+                let installed = pkgs.iter().filter(|p| p.1).count();
+                GroupInfo {
+                    name,
+                    packages: pkgs,
+                    description: format!(
+                        "Package group containing {} packages ({} installed)",
+                        total, installed
+                    ),
+                    repo: "extra".to_string(),
+                    is_favorite: false,
+                }
             })
-            .unwrap_or(0);
+            .collect();
 
-        Self {
-            should_quit: false,
-            screen: CurrentScreen::Dashboard,
-            input_mode: InputMode::Normal,
-            filter: PackageFilter::All,
-            pending_g: false,
-            orphan_count,
-            package_list,
-            filtered_packages,
-            search_query: String::new(),
-            list_state,
-            is_installing: false,
-            current_action: String::from("idle"),
-            progress: 0,
-            transaction_logs: Vec::new(),
-            dashboard_art: Text::raw(" loading art... "),
+        self.group_items = self.groups.iter().map(|g| g.name.clone()).collect();
+
+        self.cache_size = if let Ok(output) = std::process::Command::new("sh")
+            .arg("-c")
+            .arg("sudo du -sh /var/cache/pacman/pkg | cut -f1")
+            .output()
+        {
+            String::from_utf8_lossy(&output.stdout).trim().to_string()
+        } else {
+            "Unknown".to_string()
+        };
+
+        if !self.transactions.is_empty() {
+            self.history_state.select(Some(0));
         }
+        if !self.groups.is_empty() {
+            self.group_state.select(Some(0));
+        }
+
+        if let Ok(output) = std::process::Command::new("sh")
+            .arg("-c")
+            .arg("sudo pacman -Qeq | wc -l")
+            .output()
+        {
+            self.explicit_count = String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .parse()
+                .unwrap_or(0);
+        }
+        if let Ok(output) = std::process::Command::new("uname").arg("-r").output() {
+            self.kernel = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        }
+        if let Ok(output) = std::process::Command::new("uptime").arg("-p").output() {
+            self.uptime = String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .replace("up ", "");
+        }
+        if let Ok(output) = std::process::Command::new("sh")
+            .arg("-c")
+            .arg("df -h / | awk 'NR==2 {print $4}'")
+            .output()
+        {
+            self.free_space = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        }
+        if let Ok(output) = std::process::Command::new("sh")
+            .arg("-c")
+            .arg("sudo stat -c %Y /var/lib/pacman/sync/core.db 2>/dev/null")
+            .output()
+        {
+            let ts: i64 = String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .parse()
+                .unwrap_or(0);
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64;
+            let diff = now - ts;
+            if diff < 3600 {
+                self.last_sync = format!("{} min ago", diff / 60);
+            } else if diff < 86400 {
+                self.last_sync = format!("{} hrs ago", diff / 3600);
+            } else {
+                self.last_sync = format!("{} days ago", diff / 86400);
+            }
+        }
+        self.last_refreshed = chrono::Local::now().format("%H:%M:%S").to_string();
+
+        self.update_search();
+
+        for group in &mut self.groups {
+            for pkg in &mut group.packages {
+                pkg.1 = self
+                    .package_list
+                    .iter()
+                    .any(|p| p.name == pkg.0 && p.is_installed);
+            }
+        }
+        self.update_group_filter();
     }
 
     pub fn update_search(&mut self) {
         let query = self.search_query.to_lowercase();
+        let current_filter = &self.filters[self.filter_idx];
 
         self.filtered_packages = self
             .package_list
             .iter()
             .filter(|p| {
-                let matches_query = query.is_empty()
-                    || p.name.to_lowercase().contains(&query)
-                    || p.desc.to_lowercase().contains(&query);
-                let matches_filter = match self.filter {
+                let matches_query = query.is_empty() || p.name.to_lowercase().contains(&query);
+
+                let matches_filter = match current_filter {
                     PackageFilter::All => true,
                     PackageFilter::Installed => p.is_installed,
                     PackageFilter::NotInstalled => !p.is_installed,
+                    PackageFilter::Updates => p.is_upgradable,
+                    PackageFilter::Aur => p.repo == "local/aur",
+                    PackageFilter::Repositories => p.repo != "local/aur",
+                    PackageFilter::Repo(name) => &p.repo == name,
+
+                    PackageFilter::Group(gname) => {
+                        if let Some(g) = self.groups.iter().find(|x| &x.name == gname) {
+                            g.packages.iter().any(|pkg| pkg.0 == p.name)
+                        } else {
+                            false
+                        }
+                    }
                 };
                 matches_query && matches_filter
             })
             .cloned()
             .collect();
 
-        self.list_state
-            .select(if self.filtered_packages.is_empty() {
-                None
+        match self.sort_mode {
+            SortMode::Alphabetical => {
+                self.filtered_packages.sort_by(|a, b| a.name.cmp(&b.name));
+            }
+            SortMode::Repository => {
+                self.filtered_packages
+                    .sort_by(|a, b| a.repo.cmp(&b.repo).then(a.name.cmp(&b.name)));
+            }
+            SortMode::Installed => {
+                self.filtered_packages.sort_by(|a, b| {
+                    b.is_installed
+                        .cmp(&a.is_installed)
+                        .then(a.name.cmp(&b.name))
+                });
+            }
+            SortMode::Relevance => {
+                if query.is_empty() {
+                    self.filtered_packages.sort_by(|a, b| a.name.cmp(&b.name));
+                } else {
+                    self.filtered_packages.sort_by(|a, b| {
+                        let a_name = a.name.to_lowercase();
+                        let b_name = b.name.to_lowercase();
+                        let a_exact = a_name == query;
+                        let b_exact = b_name == query;
+                        let a_starts = a_name.starts_with(&query);
+                        let b_starts = b_name.starts_with(&query);
+
+                        b_exact
+                            .cmp(&a_exact)
+                            .then(b_starts.cmp(&a_starts))
+                            .then(a_name.len().cmp(&b_name.len()))
+                            .then(a.name.cmp(&b_name))
+                    });
+                }
+            }
+        }
+
+        if self.filtered_packages.is_empty() {
+            self.list_state.select(None);
+        } else {
+            let current_idx = self.list_state.selected().unwrap_or(0);
+            if current_idx >= self.filtered_packages.len() {
+                self.list_state
+                    .select(Some(self.filtered_packages.len() - 1));
             } else {
-                Some(0)
-            });
+                self.list_state.select(Some(current_idx));
+            }
+        }
     }
 
     pub fn next_item(&mut self) {
@@ -230,33 +1000,169 @@ impl App {
     }
 }
 
+fn parse_arch_xml(xml: &str) -> Vec<NewsItem> {
+    let mut items = Vec::new();
+    let critical_words = [
+        "manual intervention",
+        "requires intervention",
+        "breaking change",
+        "filesystem",
+        "pacman",
+        "keyring",
+        "glibc",
+    ];
+
+    let mut search_idx = 0;
+    while let Some(item_start) = xml[search_idx..].find("<item>") {
+        let absolute_start = search_idx + item_start;
+        if let Some(item_end) = xml[absolute_start..].find("</item>") {
+            let item_str = &xml[absolute_start..absolute_start + item_end];
+
+            let extract = |tag: &str, end_tag: &str| -> String {
+                if let (Some(s), Some(e)) = (item_str.find(tag), item_str.find(end_tag)) {
+                    item_str[s + tag.len()..e].to_string()
+                } else {
+                    String::new()
+                }
+            };
+
+            let decode_html = |s: &str| {
+                s.replace("&gt;", ">")
+                    .replace("&lt;", "<")
+                    .replace("&quot;", "\"")
+                    .replace("&amp;", "&")
+                    .replace("&#39;", "'")
+            };
+            let title = decode_html(&extract("<title>", "</title>"));
+            let link = extract("<link>", "</link>");
+            let pub_date = extract("<pubDate>", "</pubDate>");
+            let mut desc = decode_html(&extract("<description>", "</description>"));
+
+            desc = desc
+                .replace("<![CDATA[", "")
+                .replace("]]>", "")
+                .replace("<p>", "")
+                .replace("</p>", "\n\n")
+                .replace("<li>", "• ")
+                .replace("</li>", "\n")
+                .replace("<ul>", "")
+                .replace("</ul>", "\n")
+                .replace("<br>", "\n")
+                .replace("<br/>", "\n");
+
+            while let Some(start) = desc.find('<') {
+                if let Some(end) = desc[start..].find('>') {
+                    let tag = &desc[start..=start + end];
+                    if tag == "<code>" || tag == "</code>" {
+                        desc.replace_range(
+                            start..=start + end,
+                            if tag == "<code>" {
+                                "[[CODE_START]]"
+                            } else {
+                                "[[CODE_END]]"
+                            },
+                        );
+                    } else {
+                        desc.replace_range(start..=start + end, "");
+                    }
+                } else {
+                    break;
+                }
+            }
+            desc = desc
+                .replace("[[CODE_START]]", "<code>")
+                .replace("[[CODE_END]]", "</code>");
+
+            let is_crit = critical_words
+                .iter()
+                .any(|&w| title.to_lowercase().contains(w) || desc.to_lowercase().contains(w));
+            if !title.is_empty() {
+                items.push(NewsItem {
+                    title,
+                    link,
+                    pub_date,
+                    description: desc,
+                    is_critical: is_crit,
+                });
+            }
+            search_idx = absolute_start + item_end;
+        } else {
+            break;
+        }
+    }
+    items
+}
+
+pub fn fetch_arch_news(tx: mpsc::Sender<TuiEvent>) {
+    tokio::spawn(async move {
+        let client = reqwest::Client::builder()
+            .user_agent("haj/0.2.5 (https://github.com/asitos/haj)")
+            .timeout(Duration::from_secs(10))
+            .build()
+            .unwrap();
+
+        let home = dirs::home_dir().unwrap_or_default();
+        let cache_path = home.join(".cache/haj/news.json");
+
+        match client.get("https://archlinux.org/feeds/news/").send().await {
+            Ok(resp) if resp.status().is_success() => {
+                if let Ok(xml) = resp.text().await {
+                    let items = parse_arch_xml(&xml);
+                    if !items.is_empty() {
+                        if let Ok(cache_data) = serde_json::to_string(&items) {
+                            let _ = tokio::fs::write(&cache_path, cache_data).await;
+                        }
+                        let _ = tx
+                            .send(TuiEvent::NewsFetched(items, "just now".into()))
+                            .await;
+                        return;
+                    }
+                }
+                let _ = tx
+                    .send(TuiEvent::NewsFetchFailed(
+                        "Failed to parse Arch news".into(),
+                    ))
+                    .await;
+            }
+            Ok(resp) => {
+                let _ = tx
+                    .send(TuiEvent::NewsFetchFailed(format!("HTTP {}", resp.status())))
+                    .await;
+            }
+            Err(e) => {
+                if let Ok(data) = std::fs::read_to_string(&cache_path) {
+                    if let Ok(items) = serde_json::from_str::<Vec<NewsItem>>(&data) {
+                        let _ = tx.send(TuiEvent::NewsFetched(items, "cached".into())).await;
+                        return;
+                    }
+                }
+                let _ = tx.send(TuiEvent::NewsFetchFailed(e.to_string())).await;
+            }
+        }
+    });
+}
+
 pub async fn run() -> Result<()> {
     println!("🦈 haj requires root privileges for package management.");
     let status = std::process::Command::new("sudo").arg("-v").status()?;
-
     if !status.success() {
         return Err(anyhow::anyhow!(
             "sudo authentication failed or was cancelled."
         ));
     }
-
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
-
     let mut app = App::new();
     let res = run_app(&mut terminal, &mut app).await;
-
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
-
     if let Err(err) = res {
         println!("{:?}", err);
     }
-
     std::process::exit(0);
 }
 
@@ -265,9 +1171,9 @@ where
     <B as Backend>::Error: Send + Sync + 'static,
 {
     let config = crate::config::load_config();
-    let _use_3d_animation = config.animations;
-
     let (tx, mut rx) = mpsc::channel::<TuiEvent>(100);
+
+    fetch_arch_news(tx.clone());
 
     let tx_input = tx.clone();
     tokio::spawn(async move {
@@ -275,21 +1181,19 @@ where
             if tx_input.is_closed() {
                 break;
             }
-
-            if event::poll(Duration::from_millis(50)).unwrap_or(false)
-                && let Ok(Event::Key(key)) = event::read()
-                && tx_input.send(TuiEvent::Key(key)).await.is_err()
-            {
-                break;
+            if event::poll(Duration::from_millis(50)).unwrap_or(false) {
+                if let Ok(Event::Key(key)) = event::read() {
+                    let _ = tx_input.send(TuiEvent::Key(key)).await;
+                }
+            } else {
+                let _ = tx_input.try_send(TuiEvent::_Tick);
             }
         }
     });
 
     let tx_art = tx.clone();
     tokio::spawn(async move {
-        let use_3d_animation = config.animations;
-
-        if use_3d_animation {
+        if config.general.animations {
             let temp_dir = std::env::temp_dir();
             let obj_path = temp_dir.join("blahaj.obj");
             let mtl_path = temp_dir.join("blahaj.mtl");
@@ -301,337 +1205,1166 @@ where
                 let _ = std::fs::write(&mtl_path, include_bytes!("../../resources/blahaj.mtl"));
             }
 
-            let obj_path_str = obj_path.to_string_lossy().to_string();
-
             let child = tokio::process::Command::new("display3d")
-                .args([&obj_path_str, "-t", "0,0.5,7.5"])
+                .args([&obj_path.to_string_lossy(), "-t", "0,0.5,7.5"])
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::null())
+                .kill_on_drop(true)
+                .spawn();
+
+            if let Ok(mut child_proc) = child {
+                let mut stdout = child_proc.stdout.take().unwrap();
+                let mut buf = vec![0; 8192];
+                let mut frame_buffer = Vec::new();
+                let mut first_frame = true;
+
+                loop {
+                    let read_fut = stdout.read(&mut buf);
+                    let read_res = if first_frame {
+                        tokio::time::timeout(Duration::from_secs(2), read_fut)
+                            .await
+                            .unwrap_or(Ok(0))
+                    } else {
+                        read_fut.await
+                    };
+
+                    match read_res {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            first_frame = false;
+                            frame_buffer.extend_from_slice(&buf[..n]);
+                            while let Some(pos) =
+                                frame_buffer.windows(3).position(|w| w == b"\x1b[H")
+                            {
+                                let frame = frame_buffer[..pos].to_vec();
+                                frame_buffer.drain(..=pos + 2);
+                                if let Ok(text) = frame.into_text() {
+                                    let _ = tx_art.send(TuiEvent::DashboardArtFrame(text)).await;
+                                }
+                            }
+                        }
+                        Err(_) => break,
+                    }
+                }
+            }
+        }
+
+        let fallback_str = include_str!("../../resources/ascii.txt");
+        let text = fallback_str
+            .as_bytes()
+            .into_text()
+            .unwrap_or_else(|_| Text::raw(fallback_str));
+        let _ = tx_art.send(TuiEvent::DashboardArtFrame(text)).await;
+    });
+
+    let spawn_pacman = |tx_channel: mpsc::Sender<TuiEvent>,
+                        mut args: Vec<String>,
+                        _action_name: String,
+                        mut abort_rx: mpsc::Receiver<()>| {
+        tokio::spawn(async move {
+            if !args.contains(&"--color=never".to_string()) {
+                args.push("--color=never".into());
+            }
+
+            let child_res = tokio::process::Command::new("sudo")
+                .args(args)
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .kill_on_drop(true)
                 .spawn();
 
-            match child {
-                Ok(mut child_proc) => {
-                    let mut stdout = child_proc.stdout.take().unwrap();
-                    let mut buf = vec![0; 8192];
-                    let mut frame_buffer = Vec::new();
+            if let Ok(mut child) = child_res {
+                let pid = child.id();
+                let stdout = child.stdout.take().unwrap();
+                let stderr = child.stderr.take().unwrap();
 
-                    while let Ok(n) = stdout.read(&mut buf).await {
-                        if n == 0 {
-                            break;
-                        }
-                        frame_buffer.extend_from_slice(&buf[..n]);
-
-                        while let Some(pos) = frame_buffer.windows(3).position(|w| w == b"\x1b[H") {
-                            let frame = frame_buffer[..pos].to_vec();
-                            frame_buffer.drain(..=pos + 2);
-
-                            if let Ok(text) = frame.into_text()
-                                && tx_art
-                                    .send(TuiEvent::DashboardArtFrame(text))
-                                    .await
-                                    .is_err()
-                            {
-                                break;
-                            }
+                let abort_task = tokio::spawn(async move {
+                    if let Some(()) = abort_rx.recv().await {
+                        if let Some(p) = pid {
+                            let _ = tokio::process::Command::new("sudo")
+                                .args(["kill", "-INT", &p.to_string()])
+                                .status()
+                                .await;
                         }
                     }
-                }
-                Err(_) => {
-                    let _ = tx_art
-                        .send(TuiEvent::DashboardArtFrame(Text::raw(
-                            " error: display3d binary not found in PATH ",
-                        )))
-                        .await;
-                }
-            }
-        } else {
-            let art_str = std::fs::read_to_string("../../resources/ascii.txt")
-                .unwrap_or_else(|_| " SHARK ASCII MISSING ".to_string());
-            if let Ok(text) = art_str.into_bytes().into_text() {
-                let _ = tx_art.send(TuiEvent::DashboardArtFrame(text)).await;
-            }
-        }
-    });
+                });
 
-    let spawn_pacman =
-        |tx_channel: mpsc::Sender<TuiEvent>, args: Vec<String>, _action_name: String| {
-            tokio::spawn(async move {
-                let mut child = tokio::process::Command::new("sudo")
-                    .args(args)
-                    .stdout(std::process::Stdio::piped())
-                    .stderr(std::process::Stdio::piped())
-                    .kill_on_drop(true)
-                    .spawn()
-                    .expect("failed to spawn pacman");
-
-                if let Some(stdout) = child.stdout.take() {
+                let tx_out = tx_channel.clone();
+                let out_task = tokio::spawn(async move {
                     let mut reader = tokio::io::BufReader::new(stdout).lines();
+                    let mut in_hook_phase = false;
+
                     while let Ok(Some(line)) = reader.next_line().await {
                         let clean = line.trim();
                         if clean.is_empty() {
                             continue;
                         }
+                        let lower_clean = clean.to_lowercase();
 
-                        if clean.contains("resolving dependencies")
-                            || clean.contains("looking for conflicting")
-                            || clean.contains("checking keyring")
-                            || clean.contains("checking package integrity")
-                            || clean.contains("loading package files")
+                        if lower_clean.contains("resolving dependencies")
+                            || lower_clean.contains("conflicting packages")
                         {
-                            continue;
+                            let _ = tx_out
+                                .send(TuiEvent::UpdateAction(
+                                    "resolving package dependencies...".into(),
+                                ))
+                                .await;
+                        } else if lower_clean.contains("checking keys")
+                            || lower_clean.contains("checking package integrity")
+                        {
+                            let _ = tx_out
+                                .send(TuiEvent::UpdateAction(
+                                    "verifying package integrity...".into(),
+                                ))
+                                .await;
+                        } else if lower_clean.contains("loading package files") {
+                            let _ = tx_out
+                                .send(TuiEvent::UpdateAction("loading package files...".into()))
+                                .await;
+                        } else if lower_clean.contains("checking for file conflicts") {
+                            let _ = tx_out
+                                .send(TuiEvent::UpdateAction(
+                                    "checking for file conflicts...".into(),
+                                ))
+                                .await;
+                        } else if lower_clean.contains("checking available disk space") {
+                            let _ = tx_out
+                                .send(TuiEvent::UpdateAction(
+                                    "checking available disk space...".into(),
+                                ))
+                                .await;
+                        } else if lower_clean.contains("retrieving packages") {
+                            let _ = tx_out
+                                .send(TuiEvent::UpdateAction("downloading packages...".into()))
+                                .await;
+                        } else if lower_clean.contains("processing package changes") {
+                            let _ = tx_out
+                                .send(TuiEvent::UpdateAction(
+                                    "processing package changes...".into(),
+                                ))
+                                .await;
+                        } else if clean.starts_with('(')
+                            && (lower_clean.contains(") upgrading")
+                                || lower_clean.contains(") installing")
+                                || lower_clean.contains(") removing"))
+                        {
+                            if let Some(idx_end) = clean.find(')') {
+                                let counter = &clean[..=idx_end];
+                                let action = if lower_clean.contains("installing") {
+                                    "installing"
+                                } else if lower_clean.contains("removing") {
+                                    "removing"
+                                } else {
+                                    "upgrading"
+                                };
+                                let _ = tx_out
+                                    .send(TuiEvent::UpdateAction(format!(
+                                        "{} packages {}...",
+                                        counter, action
+                                    )))
+                                    .await;
+                            }
+                        } else if lower_clean.contains("running pre-transaction hooks") {
+                            in_hook_phase = true;
+                            let _ = tx_out
+                                .send(TuiEvent::UpdateAction(
+                                    "running pre-transaction hooks...".into(),
+                                ))
+                                .await;
+                        } else if lower_clean.contains("running post-transaction hooks") {
+                            in_hook_phase = true;
+                            let _ = tx_out
+                                .send(TuiEvent::UpdateAction(
+                                    "running post-transaction hooks...".into(),
+                                ))
+                                .await;
+                        } else if in_hook_phase
+                            && (clean.starts_with("==> Building image")
+                                || clean.starts_with("==> Install DKMS")
+                                || clean.starts_with("==> Generating"))
+                        {
+                            let _ = tx_out.send(TuiEvent::UpdateAction(clean.to_string())).await;
                         }
 
-                        let _ = tx_channel
-                            .send(TuiEvent::PacmanLog(clean.to_string()))
-                            .await;
+                        if lower_clean.contains("error:")
+                            || lower_clean.contains("warning:")
+                            || lower_clean.contains("failed")
+                            || (in_hook_phase
+                                && (lower_clean.contains("missing")
+                                    || lower_clean.contains("not found")))
+                        {
+                            let _ = tx_out.send(TuiEvent::PacmanLog(clean.to_string())).await;
+                        }
 
                         if clean.contains('%') {
                             let parts: Vec<&str> = clean.split('%').collect();
                             if !parts.is_empty() {
                                 let num_str = parts[0].split_whitespace().last().unwrap_or("0");
                                 if let Ok(val) = num_str.parse::<u16>() {
-                                    let _ = tx_channel.send(TuiEvent::PacmanProgress(val)).await;
+                                    let _ = tx_out.send(TuiEvent::PacmanProgress(val)).await;
                                 }
                             }
                         }
                     }
-                }
+                });
 
-                let _ = child.wait().await;
+                let tx_err = tx_channel.clone();
+                let err_task = tokio::spawn(async move {
+                    let mut reader = tokio::io::BufReader::new(stderr).lines();
+                    while let Ok(Some(line)) = reader.next_line().await {
+                        let clean = line.trim();
+                        if clean.is_empty() {
+                            continue;
+                        }
+                        let _ = tx_err
+                            .send(TuiEvent::PacmanLog(format!("error: {}", clean)))
+                            .await;
+                    }
+                });
+
+                let _ = tokio::join!(out_task, err_task);
+
+                let status = child
+                    .wait()
+                    .await
+                    .unwrap_or_else(|_| std::os::unix::process::ExitStatusExt::from_raw(1));
+
+                abort_task.abort();
+
                 let _ = tx_channel.send(TuiEvent::PacmanProgress(100)).await;
-                let _ = tx_channel.send(TuiEvent::TransactionComplete).await;
 
-                // Wait 2 seconds so the user can read the success message, then close popup
-                tokio::time::sleep(Duration::from_secs(2)).await;
-                let _ = tx_channel.send(TuiEvent::CloseTransaction).await;
-            });
-        };
+                if status.success() {
+                    let _ = tx_channel.send(TuiEvent::TransactionComplete).await;
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                } else {
+                    let _ = tx_channel.send(TuiEvent::TransactionFailed).await;
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                }
+            } else {
+                let _ = tx_channel.send(TuiEvent::TransactionFailed).await;
+                let _ = tx_channel
+                    .send(TuiEvent::PacmanLog(
+                        "fatal: failed to spawn sudo process".into(),
+                    ))
+                    .await;
+                tokio::time::sleep(Duration::from_secs(4)).await;
+            }
+
+            let _ = tx_channel.send(TuiEvent::CloseTransaction).await;
+        });
+    };
 
     loop {
         terminal.draw(|f| {
             match app.screen {
                 CurrentScreen::Dashboard => dashboard::render(f, app),
                 CurrentScreen::Browser => browser::render(f, app),
+                CurrentScreen::News => news::render(f, app),
+                CurrentScreen::Stats => stats::render(f, app),
+                CurrentScreen::History => history::render(f, app),
+                CurrentScreen::Groups => groups::render(f, app),
             }
             transaction::render_popup(f, app);
+            transaction::render_confirm_popup(f, app);
+
+            if app.show_help {
+                help::render_popup(f);
+            }
         })?;
 
         if let Some(event) = rx.recv().await {
             match event {
-                TuiEvent::DashboardArtFrame(text) => {
-                    app.dashboard_art = text;
+                TuiEvent::_Tick => {
+                    if app.screen == CurrentScreen::Dashboard
+                        && app.active_widget != DashboardWidget::Blahaj
+                    {
+                        if app.last_activity.elapsed() > Duration::from_secs(10) {
+                            let unread_news = app
+                                .news_items
+                                .iter()
+                                .filter(|n| !app.read_news.contains(&n.link))
+                                .count();
+                            let updates =
+                                app.package_list.iter().filter(|p| p.is_upgradable).count();
+                            if unread_news == 0 && updates == 0 {
+                                app.active_widget = DashboardWidget::Blahaj;
+                            }
+                        }
+                    }
                 }
+
+                TuiEvent::DashboardArtFrame(text) => app.dashboard_art = text,
                 TuiEvent::PacmanLog(log) => {
                     app.transaction_logs.push(log);
                     if app.transaction_logs.len() > 30 {
                         app.transaction_logs.remove(0);
                     }
                 }
-                TuiEvent::PacmanProgress(val) => {
-                    app.progress = val.min(100);
-                }
+                TuiEvent::UpdateAction(action) => app.current_action = action,
+                TuiEvent::PacmanProgress(val) => app.progress = val.min(100),
                 TuiEvent::TransactionComplete => {
-                    app.current_action = "changes complete ✓".to_string();
+                    app.current_action = "changes complete ✓".to_string()
                 }
+                TuiEvent::TransactionFailed => app.current_action = "changes failed X".to_string(),
                 TuiEvent::CloseTransaction => {
                     app.is_installing = false;
                     app.progress = 0;
+                    app.refresh_state();
+                }
 
-                    if let Ok(output) = std::process::Command::new("pacman").arg("-Qdtq").output() {
-                        app.orphan_count = String::from_utf8_lossy(&output.stdout)
-                            .split_whitespace()
-                            .count();
-                    }
+                TuiEvent::NewsFetched(items, time) => {
+                    app.is_fetching_news = false;
+                    app.news_error.clear();
+                    app.news_items = items;
+                    app.news_last_updated = time;
+                    app.update_news_search();
+                }
+                TuiEvent::NewsFetchFailed(err) => {
+                    app.is_fetching_news = false;
+                    app.news_error = err;
+                }
 
-                    if let Ok(alpm) = crate::core::alpm_init::init_alpm() {
-                        let local_db = alpm.localdb();
-                        for pkg in &mut app.package_list {
-                            pkg.is_installed = local_db.pkg(pkg.name.as_str()).is_ok();
-                        }
-                        app.update_search();
+                TuiEvent::BrowserInfoLoaded(pkg, info, deps) => {
+                    if let Some(cache) = app.browser_caches.get_mut(&pkg) {
+                        cache.info = info;
+                        cache.dependencies = deps;
+                        cache.loading_info = false;
                     }
                 }
-                TuiEvent::Key(key) => match app.screen {
-                    CurrentScreen::Dashboard => match key.code {
-                        KeyCode::Char('q') => app.should_quit = true,
-                        KeyCode::Char('/') | KeyCode::Char('f') => {
-                            app.screen = CurrentScreen::Browser;
-                            app.input_mode = InputMode::Editing;
-                        }
-                        KeyCode::Char('u') => {
-                            app.is_installing = true;
-                            app.current_action = "syncing & updating system...".to_string();
-                            app.transaction_logs.clear();
-                            app.progress = 0;
-                            spawn_pacman(
-                                tx.clone(),
-                                vec!["pacman".into(), "-Syu".into(), "--noconfirm".into()],
-                                "updating system".into(),
-                            );
-                        }
-                        KeyCode::Char('c') => {
-                            if let Ok(output) =
-                                std::process::Command::new("pacman").arg("-Qdtq").output()
-                            {
-                                let stdout = String::from_utf8_lossy(&output.stdout);
-                                let orphans: Vec<String> =
-                                    stdout.split_whitespace().map(|s| s.to_string()).collect();
+                TuiEvent::BrowserFilesLoaded(pkg, files) => {
+                    if let Some(cache) = app.browser_caches.get_mut(&pkg) {
+                        cache.files = files;
+                        cache.loading_files = false;
+                    }
+                }
 
+                TuiEvent::Key(key) => {
+                    let prev_pkg = app.browser_pkg_name.clone();
+                    let prev_tab = app.browser_tab;
+                    app.last_activity = Instant::now();
+
+                    if app.show_help {
+                        match key.code {
+                            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') => {
+                                app.show_help = false;
+                            }
+                            _ => {}
+                        }
+                        continue;
+                    }
+
+                    if let KeyCode::Char('?') = key.code {
+                        app.show_help = true;
+                        continue;
+                    }
+
+                    if app.is_installing {
+                        if let KeyCode::Char('q') = key.code {
+                            if let Some(tx_abort) = app.abort_tx.take() {
+                                let _ = tx_abort.try_send(());
+                                app.current_action = "aborting safely...".to_string();
+                                app.transaction_logs.push("".into());
+                                app.transaction_logs.push(
+                                    "==> user triggered abort. sending sigint to pacman...".into(),
+                                );
+                            }
+                        }
+                        continue;
+                    }
+
+                    if app.show_prompt {
+                        match key.code {
+                            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                                app.show_prompt = false;
                                 app.is_installing = true;
                                 app.transaction_logs.clear();
                                 app.progress = 0;
 
-                                if orphans.is_empty() {
-                                    app.current_action = "system clean ✓".to_string();
-                                    app.progress = 100;
-                                    app.transaction_logs
-                                        .push("no orphaned packages to remove.".to_string());
-
-                                    let tx_clone = tx.clone();
-                                    tokio::spawn(async move {
-                                        tokio::time::sleep(Duration::from_secs(2)).await;
-                                        let _ = tx_clone.send(TuiEvent::CloseTransaction).await;
-                                    });
+                                app.current_action = if app.prompt_targets.len() > 1 {
+                                    format!(
+                                        "{}ing {} packages...",
+                                        app.prompt_type,
+                                        app.prompt_targets.len()
+                                    )
                                 } else {
-                                    app.current_action =
-                                        format!("sweeping {} orphans...", orphans.len());
-                                    let mut args =
-                                        vec!["pacman".into(), "-Rns".into(), "--noconfirm".into()];
-                                    args.extend(orphans);
-                                    spawn_pacman(tx.clone(), args, "cleaning orphans".into());
-                                }
-                            }
-                        }
-                        _ => {}
-                    },
-                    CurrentScreen::Browser => match app.input_mode {
-                        InputMode::Normal => match key.code {
-                            KeyCode::Char('x') => {
-                                app.search_query.pop();
-                                app.update_search();
-                            }
-                            KeyCode::Tab => {
-                                app.filter = match app.filter {
-                                    PackageFilter::All => PackageFilter::Installed,
-                                    PackageFilter::Installed => PackageFilter::NotInstalled,
-                                    PackageFilter::NotInstalled => PackageFilter::All,
+                                    format!("{}ing {}...", app.prompt_type, app.prompt_targets[0])
                                 };
-                                app.update_search();
-                            }
-                            KeyCode::Char('q') => app.should_quit = true,
-                            KeyCode::Esc => app.screen = CurrentScreen::Dashboard,
 
-                            KeyCode::Char('/') | KeyCode::Char('s') | KeyCode::Char('f') => {
-                                app.input_mode = InputMode::Editing
-                            }
-
-                            KeyCode::Down | KeyCode::Char('j') => {
-                                app.next_item();
-                                app.pending_g = false;
-                            }
-                            KeyCode::Up | KeyCode::Char('k') => {
-                                app.previous_item();
-                                app.pending_g = false;
-                            }
-                            KeyCode::Char('g') => {
-                                if app.pending_g {
-                                    app.go_to_top();
-                                    app.pending_g = false;
+                                let mut args = vec!["pacman".into()];
+                                if app.prompt_type == "install" {
+                                    args.extend(vec!["-S".into(), "--noconfirm".into()]);
                                 } else {
-                                    app.pending_g = true;
+                                    args.extend(vec!["-Rs".into(), "--noconfirm".into()]);
                                 }
-                            }
-                            KeyCode::Char('G') => {
-                                app.go_to_bottom();
-                                app.pending_g = false;
-                            }
+                                args.extend(app.prompt_targets.clone());
 
-                            KeyCode::Char('i') => {
-                                if let Some(idx) = app.list_state.selected()
-                                    && let Some(pkg) = app.filtered_packages.get(idx)
-                                {
-                                    app.is_installing = true;
-                                    app.current_action = format!("installing {}...", pkg.name);
-                                    app.transaction_logs.clear();
-                                    app.progress = 0;
-                                    spawn_pacman(
-                                        tx.clone(),
-                                        vec![
-                                            "pacman".into(),
-                                            "-S".into(),
-                                            "--noconfirm".into(),
-                                            pkg.name.clone(),
-                                        ],
-                                        "installing".into(),
-                                    );
-                                }
-                            }
+                                let (abort_tx, abort_rx) = mpsc::channel(1);
+                                app.abort_tx = Some(abort_tx);
+                                spawn_pacman(tx.clone(), args, app.prompt_type.clone(), abort_rx);
 
-                            KeyCode::Char('r') => {
-                                if let Some(idx) = app.list_state.selected()
-                                    && let Some(pkg) = app.filtered_packages.get(idx)
-                                {
-                                    app.is_installing = true;
-                                    app.current_action = format!("tossing {}...", pkg.name);
-                                    app.transaction_logs.clear();
-                                    app.progress = 0;
-                                    spawn_pacman(
-                                        tx.clone(),
-                                        vec![
-                                            "pacman".into(),
-                                            "-Rs".into(),
-                                            "--noconfirm".into(),
-                                            pkg.name.clone(),
-                                        ],
-                                        "removing".into(),
-                                    );
-                                }
+                                app.selected_packages.clear();
+                                app.prompt_targets.clear();
+                            }
+                            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                                app.show_prompt = false;
+                                app.prompt_targets.clear();
+                            }
+                            _ => {}
+                        }
+                        continue;
+                    }
+
+                    match app.screen {
+                        CurrentScreen::Dashboard => match key.code {
+                            KeyCode::Char('q') => app.should_quit = true,
+                            KeyCode::Char('/') | KeyCode::Char('f') => {
+                                app.screen = CurrentScreen::Browser;
+                                app.input_mode = InputMode::Editing;
                             }
 
                             KeyCode::Char('u') => {
-                                if let Some(idx) = app.list_state.selected()
-                                    && let Some(pkg) = app.filtered_packages.get(idx)
+                                app.is_installing = true;
+                                app.current_action = "syncing repositories...".to_string();
+                                app.transaction_logs.clear();
+                                app.progress = 0;
+
+                                let (abort_tx, abort_rx) = mpsc::channel(1);
+                                app.abort_tx = Some(abort_tx);
+                                spawn_pacman(
+                                    tx.clone(),
+                                    vec!["pacman".into(), "-Sy".into(), "--noconfirm".into()],
+                                    "syncing repositories".into(),
+                                    abort_rx,
+                                );
+                            }
+
+                            KeyCode::Char('o') => {
+                                if let Ok(output) =
+                                    std::process::Command::new("pacman").arg("-Qdtq").output()
                                 {
+                                    let stdout = String::from_utf8_lossy(&output.stdout);
+                                    let orphans: Vec<String> =
+                                        stdout.split_whitespace().map(|s| s.to_string()).collect();
+
                                     app.is_installing = true;
-                                    app.current_action = format!("updating {}...", pkg.name);
                                     app.transaction_logs.clear();
                                     app.progress = 0;
-                                    spawn_pacman(
-                                        tx.clone(),
-                                        vec![
+
+                                    if orphans.is_empty() {
+                                        app.current_action = "system clean ✓".to_string();
+                                        app.progress = 100;
+                                        app.transaction_logs
+                                            .push("no orphaned packages to remove.".to_string());
+
+                                        let tx_clone = tx.clone();
+                                        tokio::spawn(async move {
+                                            tokio::time::sleep(Duration::from_secs(2)).await;
+                                            let _ = tx_clone.send(TuiEvent::CloseTransaction).await;
+                                        });
+                                    } else {
+                                        app.current_action =
+                                            format!("sweeping {} orphans...", orphans.len());
+                                        let mut args = vec![
                                             "pacman".into(),
-                                            "-S".into(),
+                                            "-Rns".into(),
                                             "--noconfirm".into(),
-                                            pkg.name.clone(),
-                                        ],
-                                        "updating".into(),
-                                    );
+                                        ];
+                                        args.extend(orphans);
+
+                                        let (abort_tx, abort_rx) = mpsc::channel(1);
+                                        app.abort_tx = Some(abort_tx);
+                                        spawn_pacman(
+                                            tx.clone(),
+                                            args,
+                                            "cleaning orphans".into(),
+                                            abort_rx,
+                                        );
+                                    }
                                 }
                             }
-                            _ => {
-                                app.pending_g = false;
-                            }
-                        },
+                            KeyCode::Char('c') => {
+                                app.is_installing = true;
+                                app.current_action = "cleaning package cache...".to_string();
+                                app.transaction_logs.clear();
+                                app.progress = 0;
 
-                        InputMode::Editing => match key.code {
-                            KeyCode::Esc | KeyCode::Enter => app.input_mode = InputMode::Normal,
-                            KeyCode::Backspace | KeyCode::Delete => {
-                                app.search_query.pop();
-                                app.update_search();
+                                let (abort_tx, abort_rx) = mpsc::channel(1);
+                                app.abort_tx = Some(abort_tx);
+                                spawn_pacman(
+                                    tx.clone(),
+                                    vec!["pacman".into(), "-Sc".into(), "--noconfirm".into()],
+                                    "cleaning cache".into(),
+                                    abort_rx,
+                                );
                             }
-                            KeyCode::Char(c) => {
-                                app.search_query.push(c);
-                                app.update_search();
+
+                            KeyCode::Char('n') => {
+                                if app.active_widget == DashboardWidget::News {
+                                    app.screen = CurrentScreen::News;
+                                } else {
+                                    app.active_widget = DashboardWidget::News;
+                                }
+                            }
+                            KeyCode::Char('t') => app.screen = CurrentScreen::Stats,
+                            KeyCode::Char('h') => app.screen = CurrentScreen::History,
+                            KeyCode::Char('g') => app.screen = CurrentScreen::Groups,
+                            KeyCode::Char('b') => {
+                                app.active_widget = DashboardWidget::Blahaj;
+                            }
+                            KeyCode::Enter => match app.active_widget {
+                                DashboardWidget::News => app.screen = CurrentScreen::News,
+                                DashboardWidget::Blahaj => app.screen = CurrentScreen::Browser,
+                            },
+                            KeyCode::Tab => {
+                                app.active_widget = match app.active_widget {
+                                    DashboardWidget::Blahaj => DashboardWidget::News,
+                                    DashboardWidget::News => DashboardWidget::Blahaj,
+                                };
+                            }
+                            KeyCode::BackTab => {
+                                app.active_widget = match app.active_widget {
+                                    DashboardWidget::Blahaj => DashboardWidget::News,
+                                    DashboardWidget::News => DashboardWidget::Blahaj,
+                                };
                             }
                             _ => {}
                         },
-                    },
-                },
-                _ => {}
+
+                        CurrentScreen::News => match app.input_mode {
+                            InputMode::Normal => match key.code {
+                                KeyCode::Esc => app.screen = CurrentScreen::Dashboard,
+                                KeyCode::Char('q') => app.should_quit = true,
+                                KeyCode::Char('/') | KeyCode::Char('f') | KeyCode::Char('s') => {
+                                    app.input_mode = InputMode::Editing
+                                }
+                                KeyCode::Char('r') => {
+                                    app.is_fetching_news = true;
+                                    fetch_arch_news(tx.clone());
+                                }
+                                KeyCode::Tab | KeyCode::Enter => {
+                                    app.news_focus = if app.news_focus == NewsFocus::List {
+                                        NewsFocus::Article
+                                    } else {
+                                        NewsFocus::List
+                                    };
+                                }
+                                KeyCode::Char('o') => {
+                                    if let Some(idx) = app.news_list_state.selected() {
+                                        if let Some(item) = app.filtered_news.get(idx) {
+                                            let url = item.link.clone();
+                                            tokio::spawn(async move {
+                                                let _ = tokio::process::Command::new("xdg-open")
+                                                    .arg(&url)
+                                                    .output()
+                                                    .await;
+                                            });
+                                        }
+                                    }
+                                }
+                                KeyCode::Char('y') => {
+                                    if let Some(idx) = app.news_list_state.selected() {
+                                        if let Some(item) = app.filtered_news.get(idx) {
+                                            let link = item.link.clone();
+                                            tokio::spawn(async move {
+                                                if std::process::Command::new("wl-copy")
+                                                    .arg(&link)
+                                                    .output()
+                                                    .is_err()
+                                                {
+                                                    let mut child =
+                                                        std::process::Command::new("xclip")
+                                                            .args(["-selection", "clipboard"])
+                                                            .stdin(std::process::Stdio::piped())
+                                                            .spawn()
+                                                            .unwrap();
+                                                    if let Some(mut stdin) = child.stdin.take() {
+                                                        use std::io::Write;
+                                                        let _ = stdin.write_all(link.as_bytes());
+                                                    }
+                                                    let _ = child.wait();
+                                                }
+                                            });
+                                        }
+                                    }
+                                }
+                                KeyCode::Char('c') => {
+                                    if let Some(idx) = app.news_list_state.selected() {
+                                        if let Some(item) = app.filtered_news.get(idx) {
+                                            let mut cmd_to_copy = String::new();
+                                            for line in item.description.lines() {
+                                                let l = line.trim();
+                                                if l.starts_with("pacman ")
+                                                    || l.starts_with("systemctl ")
+                                                    || l.starts_with("mkinitcpio ")
+                                                    || l.starts_with("grub-install ")
+                                                {
+                                                    cmd_to_copy = l.to_string();
+                                                    break;
+                                                }
+                                            }
+                                            if !cmd_to_copy.is_empty() {
+                                                tokio::spawn(async move {
+                                                    if std::process::Command::new("wl-copy")
+                                                        .arg(&cmd_to_copy)
+                                                        .output()
+                                                        .is_err()
+                                                    {
+                                                        let mut child =
+                                                            std::process::Command::new("xclip")
+                                                                .args(["-selection", "clipboard"])
+                                                                .stdin(std::process::Stdio::piped())
+                                                                .spawn()
+                                                                .unwrap();
+                                                        if let Some(mut stdin) = child.stdin.take()
+                                                        {
+                                                            use std::io::Write;
+                                                            let _ = stdin
+                                                                .write_all(cmd_to_copy.as_bytes());
+                                                        }
+                                                        let _ = child.wait();
+                                                    }
+                                                });
+                                                app.current_action =
+                                                    "copied command to clipboard ✓".to_string();
+                                            }
+                                        }
+                                    }
+                                }
+                                KeyCode::Down | KeyCode::Char('j') => {
+                                    if app.news_focus == NewsFocus::List {
+                                        let i = match app.news_list_state.selected() {
+                                            Some(i) => {
+                                                if i >= app.filtered_news.len().saturating_sub(1) {
+                                                    0
+                                                } else {
+                                                    i + 1
+                                                }
+                                            }
+                                            None => 0,
+                                        };
+                                        app.news_list_state.select(Some(i));
+                                        app.news_scroll = 0;
+                                        if let Some(item) = app.filtered_news.get(i) {
+                                            let link = item.link.clone();
+                                            app.mark_news_read(link);
+                                        }
+                                    } else {
+                                        app.news_scroll = app.news_scroll.saturating_add(1);
+                                    }
+                                }
+                                KeyCode::Up | KeyCode::Char('k') => {
+                                    if app.news_focus == NewsFocus::List {
+                                        let i = match app.news_list_state.selected() {
+                                            Some(i) => {
+                                                if i == 0 {
+                                                    app.filtered_news.len().saturating_sub(1)
+                                                } else {
+                                                    i - 1
+                                                }
+                                            }
+                                            None => 0,
+                                        };
+                                        app.news_list_state.select(Some(i));
+                                        app.news_scroll = 0;
+                                        if let Some(item) = app.filtered_news.get(i) {
+                                            let link = item.link.clone();
+                                            app.mark_news_read(link);
+                                        }
+                                    } else {
+                                        app.news_scroll = app.news_scroll.saturating_sub(1);
+                                    }
+                                }
+                                KeyCode::PageDown => {
+                                    if app.news_focus == NewsFocus::Article {
+                                        app.news_scroll = app.news_scroll.saturating_add(15);
+                                    }
+                                }
+                                KeyCode::PageUp => {
+                                    if app.news_focus == NewsFocus::Article {
+                                        app.news_scroll = app.news_scroll.saturating_sub(15);
+                                    }
+                                }
+                                KeyCode::Home => {
+                                    if app.news_focus == NewsFocus::Article {
+                                        app.news_scroll = 0;
+                                    }
+                                }
+                                KeyCode::End => {
+                                    if app.news_focus == NewsFocus::Article {
+                                        app.news_scroll = 999;
+                                    }
+                                }
+                                _ => {}
+                            },
+                            InputMode::Editing => match key.code {
+                                KeyCode::Esc | KeyCode::Enter => app.input_mode = InputMode::Normal,
+                                KeyCode::Char('l')
+                                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                                {
+                                    app.news_search_query.clear();
+                                    app.update_news_search();
+                                }
+                                KeyCode::Backspace | KeyCode::Delete => {
+                                    app.news_search_query.pop();
+                                    app.update_news_search();
+                                }
+                                KeyCode::Char(c) => {
+                                    app.news_search_query.push(c);
+                                    app.update_news_search();
+                                }
+                                _ => {}
+                            },
+                        },
+                        CurrentScreen::Stats => match key.code {
+                            KeyCode::Esc => app.screen = CurrentScreen::Dashboard,
+                            KeyCode::Char('q') => app.should_quit = true,
+                            KeyCode::Char('r') => {
+                                app.refresh_state();
+                            }
+                            KeyCode::Char('h') => app.screen = CurrentScreen::History,
+                            _ => {}
+                        },
+                        CurrentScreen::History => history::handle_key(key, app),
+
+                        CurrentScreen::Groups => match app.group_input_mode {
+                            InputMode::Normal => match key.code {
+                                KeyCode::Esc => app.screen = CurrentScreen::Dashboard,
+                                KeyCode::Char('q') => app.should_quit = true,
+                                KeyCode::Char('/') => app.group_input_mode = InputMode::Editing,
+                                KeyCode::Char(' ') => {
+                                    if let Some(idx) = app.group_state.selected() {
+                                        if let Some(selected_group) = app.filtered_groups.get(idx) {
+                                            let name = selected_group.name.clone();
+                                            if let Some(g) =
+                                                app.groups.iter_mut().find(|x| x.name == name)
+                                            {
+                                                g.is_favorite = !g.is_favorite;
+                                            }
+                                            app.update_group_filter();
+                                        }
+                                    }
+                                }
+                                KeyCode::Char('S') => {
+                                    app.group_sort_mode = match app.group_sort_mode {
+                                        GroupSortMode::Alphabetical => GroupSortMode::PackageCount,
+                                        GroupSortMode::PackageCount => {
+                                            GroupSortMode::InstallCompletion
+                                        }
+                                        GroupSortMode::InstallCompletion => {
+                                            GroupSortMode::Alphabetical
+                                        }
+                                    };
+                                    app.update_group_filter();
+                                }
+                                KeyCode::Char('i') => {
+                                    if let Some(idx) = app.group_state.selected() {
+                                        if let Some(selected_group) = app.filtered_groups.get(idx) {
+                                            app.prompt_targets = selected_group
+                                                .packages
+                                                .iter()
+                                                .map(|p| p.0.clone())
+                                                .collect();
+                                            if !app.prompt_targets.is_empty() {
+                                                app.prompt_type = "install".to_string();
+                                                app.show_prompt = true;
+                                            }
+                                        }
+                                    }
+                                }
+                                KeyCode::Char('r') => {
+                                    if let Some(idx) = app.group_state.selected() {
+                                        if let Some(selected_group) = app.filtered_groups.get(idx) {
+                                            let installed_pkgs: Vec<String> = selected_group
+                                                .packages
+                                                .iter()
+                                                .filter(|p| p.1)
+                                                .map(|p| p.0.clone())
+                                                .collect();
+                                            if !installed_pkgs.is_empty() {
+                                                app.prompt_targets = installed_pkgs;
+                                                app.prompt_type = "remove".to_string();
+                                                app.show_prompt = true;
+                                            }
+                                        }
+                                    }
+                                }
+                                KeyCode::Enter => {
+                                    if let Some(idx) = app.group_state.selected() {
+                                        if let Some(selected_group) = app.filtered_groups.get(idx) {
+                                            let gname = selected_group.name.clone();
+                                            if let Some(pos) = app.filters.iter().position(|f| {
+                                                *f == PackageFilter::Group(gname.clone())
+                                            }) {
+                                                app.filter_idx = pos;
+                                            } else {
+                                                app.filters
+                                                    .push(PackageFilter::Group(gname.clone()));
+                                                app.filter_idx = app.filters.len() - 1;
+                                            }
+                                            app.screen = CurrentScreen::Browser;
+                                            app.update_search();
+                                        }
+                                    }
+                                }
+                                KeyCode::Down | KeyCode::Char('j') => {
+                                    if !app.filtered_groups.is_empty() {
+                                        let i = match app.group_state.selected() {
+                                            Some(i) => {
+                                                if i >= app.filtered_groups.len() - 1 {
+                                                    0
+                                                } else {
+                                                    i + 1
+                                                }
+                                            }
+                                            None => 0,
+                                        };
+                                        app.group_state.select(Some(i));
+                                    }
+                                }
+                                KeyCode::Up | KeyCode::Char('k') => {
+                                    if !app.filtered_groups.is_empty() {
+                                        let i = match app.group_state.selected() {
+                                            Some(i) => {
+                                                if i == 0 {
+                                                    app.filtered_groups.len() - 1
+                                                } else {
+                                                    i - 1
+                                                }
+                                            }
+                                            None => 0,
+                                        };
+                                        app.group_state.select(Some(i));
+                                    }
+                                }
+                                _ => {}
+                            },
+                            InputMode::Editing => match key.code {
+                                KeyCode::Esc | KeyCode::Enter => {
+                                    app.group_input_mode = InputMode::Normal
+                                }
+                                KeyCode::Backspace | KeyCode::Delete => {
+                                    app.group_search_query.pop();
+                                    app.update_group_filter();
+                                }
+                                KeyCode::Char('l')
+                                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                                {
+                                    app.group_search_query.clear();
+                                    app.update_group_filter();
+                                }
+                                KeyCode::Char(c) => {
+                                    app.group_search_query.push(c);
+                                    app.update_group_filter();
+                                }
+                                _ => {}
+                            },
+                        },
+
+                        CurrentScreen::Browser => match app.input_mode {
+                            InputMode::Normal => match key.code {
+                                KeyCode::Char('1') => app.browser_tab = BrowserTab::Overview,
+                                KeyCode::Char('2') => app.browser_tab = BrowserTab::Dependencies,
+                                KeyCode::Char('3') => app.browser_tab = BrowserTab::Files,
+                                KeyCode::Char('4') => app.browser_tab = BrowserTab::Queue,
+                                KeyCode::Char('a') => {
+                                    app.selection_mode = match app.selection_mode {
+                                        SelectionMode::Explicit => SelectionMode::AllVisible,
+                                        SelectionMode::AllVisible => SelectionMode::Explicit,
+                                    };
+                                    app.selected_packages.clear();
+                                    app.deselected_packages.clear();
+                                }
+                                KeyCode::Char('A') | KeyCode::Char('c') => {
+                                    app.selection_mode = SelectionMode::Explicit;
+                                    app.selected_packages.clear();
+                                    app.deselected_packages.clear();
+                                }
+                                KeyCode::PageDown => {
+                                    for _ in 0..15 {
+                                        app.next_item();
+                                    }
+                                }
+                                KeyCode::PageUp => {
+                                    for _ in 0..15 {
+                                        app.previous_item();
+                                    }
+                                }
+                                KeyCode::Char('d')
+                                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                                {
+                                    app.browser_scroll = app.browser_scroll.saturating_add(15);
+                                }
+                                KeyCode::Char('u')
+                                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                                {
+                                    app.browser_scroll = app.browser_scroll.saturating_sub(15);
+                                }
+                                KeyCode::Char('x') => {
+                                    app.search_query.pop();
+                                    app.update_search();
+                                }
+                                KeyCode::Tab => {
+                                    app.filter_idx = (app.filter_idx + 1) % app.filters.len();
+                                    app.update_search();
+                                }
+                                KeyCode::BackTab => {
+                                    app.filter_idx = if app.filter_idx == 0 {
+                                        app.filters.len() - 1
+                                    } else {
+                                        app.filter_idx - 1
+                                    };
+                                    app.update_search();
+                                }
+                                KeyCode::Char('S') => {
+                                    app.sort_mode = match app.sort_mode {
+                                        SortMode::Alphabetical => SortMode::Installed,
+                                        SortMode::Installed => SortMode::Repository,
+                                        SortMode::Repository => SortMode::Relevance,
+                                        SortMode::Relevance => SortMode::Alphabetical,
+                                    };
+                                    app.update_search();
+                                }
+                                KeyCode::Char('q') => app.should_quit = true,
+                                KeyCode::Esc => app.screen = CurrentScreen::Dashboard,
+
+                                KeyCode::Char('/') | KeyCode::Char('s') | KeyCode::Char('f') => {
+                                    app.input_mode = InputMode::Editing
+                                }
+
+                                KeyCode::Down | KeyCode::Char('j') => {
+                                    app.next_item();
+                                    app.pending_g = false;
+                                }
+                                KeyCode::Up | KeyCode::Char('k') => {
+                                    app.previous_item();
+                                    app.pending_g = false;
+                                }
+                                KeyCode::Char('g') => {
+                                    if app.pending_g {
+                                        app.go_to_top();
+                                        app.pending_g = false;
+                                    } else {
+                                        app.pending_g = true;
+                                    }
+                                }
+                                KeyCode::Char('G') => {
+                                    app.go_to_bottom();
+                                    app.pending_g = false;
+                                }
+
+                                KeyCode::Char(' ') => {
+                                    if let Some(idx) = app.list_state.selected() {
+                                        if let Some(pkg) = app.filtered_packages.get(idx) {
+                                            let name = pkg.name.clone();
+                                            match app.selection_mode {
+                                                SelectionMode::Explicit => {
+                                                    if !app.selected_packages.remove(&name) {
+                                                        app.selected_packages.insert(name);
+                                                    }
+                                                }
+                                                SelectionMode::AllVisible => {
+                                                    if !app.deselected_packages.remove(&name) {
+                                                        app.deselected_packages.insert(name);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                KeyCode::Char('i') => {
+                                    let targets: Vec<String> = match app.selection_mode {
+                                        SelectionMode::Explicit => {
+                                            if !app.selected_packages.is_empty() {
+                                                app.selected_packages.iter().cloned().collect()
+                                            } else if let Some(idx) = app.list_state.selected() {
+                                                if let Some(pkg) = app.filtered_packages.get(idx) {
+                                                    vec![pkg.name.clone()]
+                                                } else {
+                                                    vec![]
+                                                }
+                                            } else {
+                                                vec![]
+                                            }
+                                        }
+                                        SelectionMode::AllVisible => app
+                                            .filtered_packages
+                                            .iter()
+                                            .filter(|p| !app.deselected_packages.contains(&p.name))
+                                            .map(|p| p.name.clone())
+                                            .collect(),
+                                    };
+
+                                    if !targets.is_empty() {
+                                        app.prompt_targets = targets;
+                                        app.prompt_type = "install".to_string();
+                                        app.show_prompt = true;
+                                    }
+                                }
+
+                                KeyCode::Char('r') => {
+                                    let targets: Vec<String> = match app.selection_mode {
+                                        SelectionMode::Explicit => {
+                                            if !app.selected_packages.is_empty() {
+                                                app.selected_packages.iter().cloned().collect()
+                                            } else if let Some(idx) = app.list_state.selected() {
+                                                if let Some(pkg) = app.filtered_packages.get(idx) {
+                                                    vec![pkg.name.clone()]
+                                                } else {
+                                                    vec![]
+                                                }
+                                            } else {
+                                                vec![]
+                                            }
+                                        }
+                                        SelectionMode::AllVisible => app
+                                            .filtered_packages
+                                            .iter()
+                                            .filter(|p| !app.deselected_packages.contains(&p.name))
+                                            .map(|p| p.name.clone())
+                                            .collect(),
+                                    };
+
+                                    if !targets.is_empty() {
+                                        app.prompt_targets = targets;
+                                        app.prompt_type = "remove".to_string();
+                                        app.show_prompt = true;
+                                    }
+                                }
+                                _ => {
+                                    app.pending_g = false;
+                                }
+                            },
+
+                            InputMode::Editing => match key.code {
+                                KeyCode::Esc | KeyCode::Enter => app.input_mode = InputMode::Normal,
+                                KeyCode::Backspace | KeyCode::Delete => {
+                                    app.search_query.pop();
+                                    app.update_search();
+                                }
+                                KeyCode::Char(c) => {
+                                    app.search_query.push(c);
+                                    app.update_search();
+                                }
+                                _ => {}
+                            },
+                        },
+                    }
+
+                    if app.screen == CurrentScreen::Browser {
+                        if let Some(idx) = app.list_state.selected() {
+                            if let Some(pkg) = app.filtered_packages.get(idx) {
+                                let new_pkg = pkg.name.clone();
+                                let tab_changed = prev_tab != app.browser_tab;
+
+                                if prev_pkg != new_pkg
+                                    || (tab_changed && app.browser_tab == BrowserTab::Files)
+                                {
+                                    if prev_pkg != new_pkg {
+                                        app.browser_pkg_name = new_pkg.clone();
+                                        app.browser_scroll = 0;
+                                    }
+
+                                    if app.browser_caches.len() > 64 {
+                                        app.browser_caches.clear();
+                                    }
+
+                                    let cache = app
+                                        .browser_caches
+                                        .entry(new_pkg.clone())
+                                        .or_insert_with(|| BrowserCache {
+                                            package: new_pkg.clone(),
+                                            info: String::new(),
+                                            files: Vec::new(),
+                                            dependencies: Vec::new(),
+                                            loading_info: false,
+                                            loading_files: false,
+                                        });
+
+                                    if cache.info.is_empty() && !cache.loading_info {
+                                        cache.loading_info = true;
+                                        let tx_clone = tx.clone();
+                                        let pkg_name = new_pkg.clone();
+                                        tokio::spawn(async move {
+                                            let mut cmd = tokio::process::Command::new("pacman");
+                                            cmd.arg("-Qi").arg(&pkg_name);
+                                            let mut info = String::new();
+                                            if let Ok(res) = cmd.output().await {
+                                                if res.status.success() {
+                                                    info = String::from_utf8_lossy(&res.stdout)
+                                                        .to_string();
+                                                } else {
+                                                    let mut cmd2 =
+                                                        tokio::process::Command::new("pacman");
+                                                    cmd2.arg("-Si").arg(&pkg_name);
+                                                    if let Ok(res2) = cmd2.output().await {
+                                                        info =
+                                                            String::from_utf8_lossy(&res2.stdout)
+                                                                .to_string();
+                                                    }
+                                                }
+                                            }
+
+                                            let mut deps = Vec::new();
+                                            for line in info.lines() {
+                                                if line.starts_with("Depends On")
+                                                    || line.starts_with("Optional Deps")
+                                                    || line.starts_with("Required By")
+                                                {
+                                                    if let Some((_, val)) = line.split_once(":") {
+                                                        for dep in val.split_whitespace() {
+                                                            if dep != "None" {
+                                                                deps.push(dep.to_string());
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            let _ = tx_clone
+                                                .send(TuiEvent::BrowserInfoLoaded(
+                                                    pkg_name, info, deps,
+                                                ))
+                                                .await;
+                                        });
+                                    }
+
+                                    if app.browser_tab == BrowserTab::Files
+                                        && cache.files.is_empty()
+                                        && !cache.loading_files
+                                    {
+                                        cache.loading_files = true;
+                                        let tx_clone = tx.clone();
+                                        let pkg_name = new_pkg.clone();
+                                        tokio::spawn(async move {
+                                            let mut cmd = tokio::process::Command::new("pacman");
+                                            cmd.arg("-Ql").arg(&pkg_name);
+                                            let mut files = Vec::new();
+                                            if let Ok(res) = cmd.output().await {
+                                                if res.status.success() {
+                                                    files = String::from_utf8_lossy(&res.stdout)
+                                                        .lines()
+                                                        .map(|l| {
+                                                            l.replace(&pkg_name, "")
+                                                                .trim()
+                                                                .to_string()
+                                                        })
+                                                        .collect();
+                                                } else {
+                                                    files.push("no files available (package might not be installed).".to_string());
+                                                }
+                                            }
+                                            let _ = tx_clone
+                                                .send(TuiEvent::BrowserFilesLoaded(pkg_name, files))
+                                                .await;
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
-
         if app.should_quit {
             return Ok(());
         }

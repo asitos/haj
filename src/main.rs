@@ -13,7 +13,6 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 
-// helper function for Y/n prompt
 fn prompt_confirm(msg: &str) -> bool {
     print!("{} {} ", "?".magenta().bold(), msg.bold());
     let _ = std::io::stdout().flush();
@@ -70,7 +69,9 @@ fn prompt_install(msg: &str) -> InstallChoice {
         let result;
         loop {
             if let Ok(crossterm::event::Event::Key(key)) = crossterm::event::read() {
-                if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL)
+                if key
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::CONTROL)
                     && key.code == crossterm::event::KeyCode::Char('c')
                 {
                     result = InstallChoice::No;
@@ -83,13 +84,11 @@ fn prompt_install(msg: &str) -> InstallChoice {
                         result = InstallChoice::Yes;
                         break;
                     }
-                    crossterm::event::KeyCode::Char('n')
-                    | crossterm::event::KeyCode::Char('N') => {
+                    crossterm::event::KeyCode::Char('n') | crossterm::event::KeyCode::Char('N') => {
                         result = InstallChoice::No;
                         break;
                     }
-                    crossterm::event::KeyCode::Char('v')
-                    | crossterm::event::KeyCode::Char('V') => {
+                    crossterm::event::KeyCode::Char('v') | crossterm::event::KeyCode::Char('V') => {
                         result = InstallChoice::View;
                         break;
                     }
@@ -126,19 +125,27 @@ async fn display_arch_news() {
     if let Ok(response) = reqwest::get(url).await {
         if let Ok(xml) = response.text().await {
             spinner.finish_and_clear();
-            
+
             if let Some(item_start) = xml.find("<item>") {
                 let item_str = &xml[item_start..];
-                
-                if let (Some(t_start), Some(t_end)) = (item_str.find("<title>"), item_str.find("</title>")) {
+
+                if let (Some(t_start), Some(t_end)) =
+                    (item_str.find("<title>"), item_str.find("</title>"))
+                {
                     let title = &item_str[t_start + 7..t_end];
-                    
-                    if let (Some(d_start), Some(d_end)) = (item_str.find("<pubDate>"), item_str.find("</pubDate>")) {
+
+                    if let (Some(d_start), Some(d_end)) =
+                        (item_str.find("<pubDate>"), item_str.find("</pubDate>"))
+                    {
                         let date_str = &item_str[d_start + 9..d_end];
-                        
+
                         if let Ok(pub_date) = chrono::DateTime::parse_from_rfc2822(date_str) {
                             let now = chrono::Utc::now();
-                            if now.signed_duration_since(pub_date.with_timezone(&chrono::Utc)).num_days() <= 7 {
+                            if now
+                                .signed_duration_since(pub_date.with_timezone(&chrono::Utc))
+                                .num_days()
+                                <= 7
+                            {
                                 println!(
                                     "\n{} {}\n  {} {}\n  {}\n",
                                     "!!!".red().bold(),
@@ -162,7 +169,11 @@ async fn display_arch_news() {
 
 async fn view_pkgbuilds(pkgs: &[String]) {
     let pager = std::env::var("PAGER").unwrap_or_else(|_| {
-        if std::process::Command::new("bat").arg("--version").output().is_ok() {
+        if std::process::Command::new("bat")
+            .arg("--version")
+            .output()
+            .is_ok()
+        {
             "bat".to_string()
         } else {
             "less".to_string()
@@ -189,27 +200,39 @@ async fn view_pkgbuilds(pkgs: &[String]) {
 
         if clone_status.is_ok_and(|s| s.success()) {
             let pkgbuild_path = format!("{}/PKGBUILD", tmp_dir);
-            
+
             if std::path::Path::new(&pkgbuild_path).exists() {
                 let mut cmd = std::process::Command::new(&pager);
                 if pager.contains("bat") {
-                    cmd.args(["--style=plain", "--paging=always", "--language=bash", &pkgbuild_path]);
+                    cmd.args([
+                        "--style=plain",
+                        "--paging=always",
+                        "--language=bash",
+                        &pkgbuild_path,
+                    ]);
                 } else {
                     cmd.arg(&pkgbuild_path);
                 }
 
                 let _ = cmd.status();
             } else {
-                println!("{} PKGBUILD not found in repository for {}.", "✗".red(), pkg.bold());
+                println!(
+                    "{} PKGBUILD not found in repository for {}.",
+                    "✗".red(),
+                    pkg.bold()
+                );
             }
         } else {
-            println!("{} failed to fetch repository for {}.", "✗".red(), pkg.bold());
+            println!(
+                "{} failed to fetch repository for {}.",
+                "✗".red(),
+                pkg.bold()
+            );
         }
 
         let _ = std::fs::remove_dir_all(&tmp_dir);
     }
 }
-
 
 async fn run_pacman(
     args: &[&str],
@@ -226,7 +249,9 @@ async fn run_pacman(
         );
         let arrow = "→".cyan();
         let cmd = args.join(" ");
-        let root_arg = root.as_ref().map_or(String::new(), |r| format!("--root {} ", r));
+        let root_arg = root
+            .as_ref()
+            .map_or(String::new(), |r| format!("--root {} ", r));
         println!("{arrow} would execute: sudo pacman {root_arg}{cmd}");
         return;
     }
@@ -536,11 +561,7 @@ async fn run_pacman(
     spinner.finish_with_message(format!("{} {}", "✓".green(), success_msg));
 }
 
-async fn process_installation(
-    packages: Vec<String>,
-    alpm_handle: alpm::Alpm,
-    cli: &Cli,
-) {
+async fn process_installation(packages: Vec<String>, alpm_handle: alpm::Alpm, cli: &Cli) {
     let mut native_pkgs = Vec::new();
     let mut aur_pkgs = Vec::new();
 
@@ -584,7 +605,7 @@ async fn process_installation(
             }
             Err(e) => {
                 println!("{} {}", "✗".red(), e);
-                native_pkgs.clear(); 
+                native_pkgs.clear();
             }
         }
     }
@@ -605,14 +626,22 @@ async fn process_installation(
             check_spinner.finish_and_clear();
 
             for (pkg, local_ver) in aur_pkgs {
-                if let Some(result) = results.iter().find(|r| r.get("Name").and_then(|n| n.as_str()) == Some(&pkg)) {
+                if let Some(result) = results
+                    .iter()
+                    .find(|r| r.get("Name").and_then(|n| n.as_str()) == Some(&pkg))
+                {
                     if let Some(aur_ver) = result.get("Version").and_then(|v| v.as_str()) {
                         let mut is_update = false;
                         let mut skip = false;
 
                         if let Some(lv) = &local_ver {
                             if lv == aur_ver {
-                                println!("{} {} is up to date ({}).", "✓".green(), pkg.magenta().bold(), aur_ver.dimmed());
+                                println!(
+                                    "{} {} is up to date ({}).",
+                                    "✓".green(),
+                                    pkg.magenta().bold(),
+                                    aur_ver.dimmed()
+                                );
                                 skip = true;
                             } else {
                                 is_update = true;
@@ -620,11 +649,20 @@ async fn process_installation(
                         }
 
                         if !skip {
-                            resolved_aur_pkgs.push((pkg.clone(), aur_ver.to_string(), is_update, local_ver.clone()));
+                            resolved_aur_pkgs.push((
+                                pkg.clone(),
+                                aur_ver.to_string(),
+                                is_update,
+                                local_ver.clone(),
+                            ));
                         }
                     }
                 } else {
-                    println!("{} package '{}' not found on the aur.", "✗".red(), pkg.bold());
+                    println!(
+                        "{} package '{}' not found on the aur.",
+                        "✗".red(),
+                        pkg.bold()
+                    );
                 }
             }
         } else {
@@ -645,7 +683,11 @@ async fn process_installation(
     if !native_summaries.is_empty() {
         println!("  {}", "native repositories:".dimmed());
         for sum in &native_summaries {
-            println!("    {:<25} {}", sum.name.cyan().bold(), sum.version.dimmed());
+            println!(
+                "    {:<25} {}",
+                sum.name.cyan().bold(),
+                sum.version.dimmed()
+            );
         }
     }
 
@@ -669,7 +711,7 @@ async fn process_installation(
         println!("\n{:<15} {:.2} MB", "download:", total_dl);
         println!("{:<15} {:.2} MB", "disk usage:", total_inst);
     } else {
-        println!(); 
+        println!();
     }
 
     if !cli.noconfirm {
@@ -684,20 +726,27 @@ async fn process_installation(
             let choice = if has_aur {
                 prompt_install(&prompt_msg)
             } else {
-                if prompt_confirm(&prompt_msg) { InstallChoice::Yes } else { InstallChoice::No }
+                if prompt_confirm(&prompt_msg) {
+                    InstallChoice::Yes
+                } else {
+                    InstallChoice::No
+                }
             };
 
             match choice {
-                InstallChoice::Yes => break, 
+                InstallChoice::Yes => break,
                 InstallChoice::No => {
                     println!("{} aborted.", "✗".red());
                     return;
                 }
                 InstallChoice::View => {
-                    let aur_names: Vec<String> = resolved_aur_pkgs.iter().map(|(pkg, _, _, _)| pkg.clone()).collect();
+                    let aur_names: Vec<String> = resolved_aur_pkgs
+                        .iter()
+                        .map(|(pkg, _, _, _)| pkg.clone())
+                        .collect();
                     view_pkgbuilds(&aur_names).await;
-                    
-                    prompt_msg = "Proceed with installation? [Y/n]".to_string(); 
+
+                    prompt_msg = "proceed with installation? [Y/n]".to_string();
                 }
             }
         }
@@ -758,8 +807,7 @@ async fn process_installation(
                         )
                     };
 
-                    let pacman_args =
-                        vec!["-U", pkg_path.to_str().unwrap(), "--noconfirm"];
+                    let pacman_args = vec!["-U", pkg_path.to_str().unwrap(), "--noconfirm"];
 
                     run_pacman(
                         &pacman_args,
@@ -816,11 +864,10 @@ async fn main() -> anyhow::Result<()> {
 
     let mut cli = Cli::parse();
     let config = config::load_config();
-    cli.aur = cli.aur || config.aur_only;
-    cli.repo = cli.repo || config.repo_only;
-    cli.verbose = cli.verbose || config.verbose;
+    cli.aur = cli.aur || config.general.aur_only;
+    cli.repo = cli.repo || config.general.repo_only;
+    cli.verbose = cli.verbose || config.general.verbose;
 
-   
     let active_command = cli.command.clone().unwrap_or_else(|| {
         use clap::CommandFactory;
         let _ = Cli::command().print_help();
@@ -868,10 +915,18 @@ async fn main() -> anyhow::Result<()> {
                     if !cli.aur {
                         for db in alpm_handle.syncdbs() {
                             for pkg in db.pkgs() {
-                                if pkg.name().to_lowercase().contains(&query_str.to_lowercase()) {
+                                if pkg
+                                    .name()
+                                    .to_lowercase()
+                                    .contains(&query_str.to_lowercase())
+                                {
                                     let is_installed = local_db.pkg(pkg.name()).is_ok();
                                     let status = if is_installed {
-                                        format!("{} {}", db.name().blue(), "[installed]".cyan().bold())
+                                        format!(
+                                            "{} {}",
+                                            db.name().blue(),
+                                            "[installed]".cyan().bold()
+                                        )
                                     } else {
                                         db.name().blue().to_string()
                                     };
@@ -879,7 +934,9 @@ async fn main() -> anyhow::Result<()> {
                                         pkg.name().to_string(),
                                         pkg.version().to_string(),
                                         status,
-                                        pkg.desc().unwrap_or("no description provided.").to_string(),
+                                        pkg.desc()
+                                            .unwrap_or("no description provided.")
+                                            .to_string(),
                                     ));
                                 }
                             }
@@ -887,23 +944,40 @@ async fn main() -> anyhow::Result<()> {
                     }
 
                     if !cli.repo {
-                        let aur_url = format!("https://aur.archlinux.org/rpc/v5/search/{}?by=name", query_str);
+                        let aur_url = format!(
+                            "https://aur.archlinux.org/rpc/v5/search/{}?by=name",
+                            query_str
+                        );
                         let check_spinner = ui::progress::spinner("querying aur...");
-                        
+
                         if let Ok(response) = reqwest::get(&aur_url).await
                             && let Ok(json) = response.json::<serde_json::Value>().await
-                            && let Some(aur_results) = json.get("results").and_then(|r| r.as_array())
+                            && let Some(aur_results) =
+                                json.get("results").and_then(|r| r.as_array())
                         {
                             check_spinner.finish_and_clear();
                             for pkg in aur_results {
-                                let name = pkg.get("Name").and_then(|n| n.as_str()).unwrap_or("unknown");
-                                let version = pkg.get("Version").and_then(|v| v.as_str()).unwrap_or("");
-                                let desc = pkg.get("Description").and_then(|d| d.as_str()).unwrap_or("no description provided.");
-                                let votes = pkg.get("NumVotes").and_then(|v| v.as_u64()).unwrap_or(0);
+                                let name = pkg
+                                    .get("Name")
+                                    .and_then(|n| n.as_str())
+                                    .unwrap_or("unknown");
+                                let version =
+                                    pkg.get("Version").and_then(|v| v.as_str()).unwrap_or("");
+                                let desc = pkg
+                                    .get("Description")
+                                    .and_then(|d| d.as_str())
+                                    .unwrap_or("no description provided.");
+                                let votes =
+                                    pkg.get("NumVotes").and_then(|v| v.as_u64()).unwrap_or(0);
 
                                 let is_installed = local_db.pkg(name).is_ok();
                                 let status = if is_installed {
-                                    format!("{} (+{}) {}", "aur".magenta(), votes, "[installed]".cyan().bold())
+                                    format!(
+                                        "{} (+{}) {}",
+                                        "aur".magenta(),
+                                        votes,
+                                        "[installed]".cyan().bold()
+                                    )
                                 } else {
                                     format!("{} (+{})", "aur".magenta(), votes)
                                 };
@@ -921,7 +995,11 @@ async fn main() -> anyhow::Result<()> {
                     }
 
                     if results.is_empty() {
-                        println!("{} no packages found matching '{}'.", "✗".red(), query_str.bold());
+                        println!(
+                            "{} no packages found matching '{}'.",
+                            "✗".red(),
+                            query_str.bold()
+                        );
                         return Ok(());
                     }
 
@@ -951,7 +1029,10 @@ async fn main() -> anyhow::Result<()> {
                         println!("       {}\n", desc.dimmed());
                     }
 
-                    print!("{} enter packages to install (e.g., 1 2 3) [leave blank to abort]: ", "?".magenta().bold());
+                    print!(
+                        "{} enter packages to install (e.g., 1 2 3) [leave blank to abort]: ",
+                        "?".magenta().bold()
+                    );
                     let _ = std::io::stdout().flush();
                     let mut input = String::new();
                     std::io::stdin().read_line(&mut input).unwrap();
@@ -972,8 +1053,12 @@ async fn main() -> anyhow::Result<()> {
                         pkgs_to_install.push(results[idx - 1].0.clone());
                     }
 
-                    println!("{} queueing {} for installation...\n", "✓".green(), pkgs_to_install.join(", ").cyan());
-                    
+                    println!(
+                        "{} queueing {} for installation...\n",
+                        "✓".green(),
+                        pkgs_to_install.join(", ").cyan()
+                    );
+
                     process_installation(pkgs_to_install, alpm_handle, &cli).await;
                 }
 
@@ -1022,7 +1107,7 @@ async fn main() -> anyhow::Result<()> {
 
                     if !cli.noconfirm {
                         println!();
-                        if !prompt_confirm("Proceed with removal? [Y/n]") {
+                        if !prompt_confirm("proceed with removal? [Y/n]") {
                             println!("{} aborted.", "✗".red());
                             return Ok(());
                         }
@@ -1163,7 +1248,7 @@ async fn main() -> anyhow::Result<()> {
                     println!("\n{:<15} {}", "total:", total_upgrades.to_string().cyan());
                     display_arch_news().await;
 
-                    if !cli.noconfirm && !prompt_confirm("Proceed with upgrade? [Y/n]") {
+                    if !cli.noconfirm && !prompt_confirm("proceed with upgrade? [Y/n]") {
                         println!("{} aborted.", "✗".red());
                         return Ok(());
                     }
@@ -1280,7 +1365,7 @@ async fn main() -> anyhow::Result<()> {
                         target_msg.white().bold(),
                         query.cyan()
                     );
-                    
+
                     let mut found = false;
                     let mut header_printed = false;
 
@@ -1305,21 +1390,25 @@ async fn main() -> anyhow::Result<()> {
                                 if pkg.name().to_lowercase().contains(&query_lower) {
                                     found = true;
                                     print_header();
-                                    
+
                                     let is_installed = local_db.pkg(pkg.name()).is_ok();
                                     let status = if is_installed {
-                                        format!("{} {}", db.name().blue(), "[installed]".cyan().bold())
+                                        format!(
+                                            "{} {}",
+                                            db.name().blue(),
+                                            "[installed]".cyan().bold()
+                                        )
                                     } else {
                                         db.name().blue().to_string()
                                     };
-                                    
+
                                     println!(
                                         "  {:<35} {:<20} {}",
                                         pkg.name().cyan().bold(),
                                         pkg.version().dimmed(),
                                         status
                                     );
-                                    
+
                                     let desc = pkg.desc().unwrap_or("no description provided.");
                                     println!("      {}\n", desc.dimmed());
                                 }
@@ -1328,7 +1417,8 @@ async fn main() -> anyhow::Result<()> {
                     }
 
                     if search_aur {
-                        let aur_url = format!("https://aur.archlinux.org/rpc/v5/search/{}?by=name", query);
+                        let aur_url =
+                            format!("https://aur.archlinux.org/rpc/v5/search/{}?by=name", query);
 
                         if let Ok(response) = reqwest::get(&aur_url).await
                             && let Ok(json) = response.json::<serde_json::Value>().await
@@ -1339,14 +1429,27 @@ async fn main() -> anyhow::Result<()> {
                             print_header();
 
                             for pkg in results {
-                                let name = pkg.get("Name").and_then(|n| n.as_str()).unwrap_or("unknown");
-                                let version = pkg.get("Version").and_then(|v| v.as_str()).unwrap_or("");
-                                let desc = pkg.get("Description").and_then(|d| d.as_str()).unwrap_or("no description provided.");
-                                let votes = pkg.get("NumVotes").and_then(|v| v.as_u64()).unwrap_or(0);
+                                let name = pkg
+                                    .get("Name")
+                                    .and_then(|n| n.as_str())
+                                    .unwrap_or("unknown");
+                                let version =
+                                    pkg.get("Version").and_then(|v| v.as_str()).unwrap_or("");
+                                let desc = pkg
+                                    .get("Description")
+                                    .and_then(|d| d.as_str())
+                                    .unwrap_or("no description provided.");
+                                let votes =
+                                    pkg.get("NumVotes").and_then(|v| v.as_u64()).unwrap_or(0);
 
                                 let is_installed = local_db.pkg(name).is_ok();
                                 let status = if is_installed {
-                                    format!("{} (+{}) {}", "aur".magenta(), votes, "[installed]".cyan().bold())
+                                    format!(
+                                        "{} (+{}) {}",
+                                        "aur".magenta(),
+                                        votes,
+                                        "[installed]".cyan().bold()
+                                    )
                                 } else {
                                     format!("{} (+{})", "aur".magenta(), votes)
                                 };
@@ -1388,7 +1491,7 @@ async fn main() -> anyhow::Result<()> {
                             format!("{:.2} MB", bytes as f64 / 1_048_576.0)
                         };
                         println!("\n   {:<15} {}", "size:", format_mb(pkg.isize()).green());
-                        
+
                         let reason = match pkg.reason() {
                             alpm::PackageReason::Explicit => "explicitly installed",
                             alpm::PackageReason::Depend => "installed as a dependency",
@@ -1419,7 +1522,7 @@ async fn main() -> anyhow::Result<()> {
                                 println!("  {} {}", prefix.dimmed(), req.cyan());
                             }
                         }
-                        println!(); 
+                        println!();
                     }
                     Err(_) => {
                         println!(
@@ -1538,7 +1641,7 @@ async fn main() -> anyhow::Result<()> {
                     foreign,
                 } => {
                     let mut count = 0;
-                    
+
                     println!(
                         "\n  {:<35} {:<25} {}",
                         "package".white().bold(),
@@ -1550,8 +1653,12 @@ async fn main() -> anyhow::Result<()> {
                     for pkg in local_db.pkgs() {
                         let is_explicit = pkg.reason() == alpm::PackageReason::Explicit;
 
-                        if explicit && !is_explicit { continue; }
-                        if deps && is_explicit { continue; }
+                        if explicit && !is_explicit {
+                            continue;
+                        }
+                        if deps && is_explicit {
+                            continue;
+                        }
 
                         let mut found_in_repo = false;
                         for db in alpm_handle.syncdbs() {
@@ -1561,7 +1668,9 @@ async fn main() -> anyhow::Result<()> {
                             }
                         }
 
-                        if foreign && found_in_repo { continue; }
+                        if foreign && found_in_repo {
+                            continue;
+                        }
 
                         if found_in_repo {
                             println!(
@@ -1671,9 +1780,7 @@ async fn main() -> anyhow::Result<()> {
                         }
                     }
 
-                    let qu_output = std::process::Command::new("pacman")
-                        .arg("-Qu")
-                        .output();
+                    let qu_output = std::process::Command::new("pacman").arg("-Qu").output();
                     let updates = if let Ok(out) = qu_output {
                         String::from_utf8_lossy(&out.stdout).lines().count()
                     } else {
@@ -1692,7 +1799,10 @@ async fn main() -> anyhow::Result<()> {
                     let health_status = if health_issues.is_empty() {
                         "excellent ✓".green().bold().to_string()
                     } else {
-                        format!("!!! {}", health_issues.join(", ")).red().bold().to_string()
+                        format!("!!! {}", health_issues.join(", "))
+                            .red()
+                            .bold()
+                            .to_string()
                     };
 
                     let format_gb = |bytes: f64| -> String {
@@ -1709,10 +1819,15 @@ async fn main() -> anyhow::Result<()> {
                         .map(|t| {
                             if let Ok(dur) = t.elapsed() {
                                 let secs = dur.as_secs();
-                                if secs < 60 { format!("{}s ago", secs) }
-                                else if secs < 3600 { format!("{}m ago", secs / 60) }
-                                else if secs < 86400 { format!("{}h ago", secs / 3600) }
-                                else { format!("{}d ago", secs / 86400) }
+                                if secs < 60 {
+                                    format!("{}s ago", secs)
+                                } else if secs < 3600 {
+                                    format!("{}m ago", secs / 60)
+                                } else if secs < 86400 {
+                                    format!("{}h ago", secs / 3600)
+                                } else {
+                                    format!("{}d ago", secs / 86400)
+                                }
                             } else {
                                 "unknown".to_string()
                             }
@@ -1738,14 +1853,36 @@ async fn main() -> anyhow::Result<()> {
                     println!("\n{}", "✓ system overview".bold().white());
                     println!();
                     println!("  {:<15} {}", "os:".bold(), os_name.cyan());
-                    println!("  {:<15} {} {}", "packages:".bold(), total_pkgs.to_string().cyan().bold(), format!("({} explicit, {} dependencies)", explicit_pkgs, dep_pkgs).dimmed());
+                    println!(
+                        "  {:<15} {} {}",
+                        "packages:".bold(),
+                        total_pkgs.to_string().cyan().bold(),
+                        format!("({} explicit, {} dependencies)", explicit_pkgs, dep_pkgs).dimmed()
+                    );
                     println!("  {:<15} {}", "aur:".bold(), aur_pkgs.to_string().magenta());
                     println!("  {:<15} {}", "updates:".bold(), update_str);
-                    println!("  {:<15} {}", "installed:".bold(), format_gb(installed_size as f64).green());
-                    println!("  {:<15} {}", "cache:".bold(), format!("{} (pacman) / {} (aur)", format_gb(pacman_cache as f64), format_gb(aur_cache as f64)).dimmed());
+                    println!(
+                        "  {:<15} {}",
+                        "installed:".bold(),
+                        format_gb(installed_size as f64).green()
+                    );
+                    println!(
+                        "  {:<15} {}",
+                        "cache:".bold(),
+                        format!(
+                            "{} (pacman) / {} (aur)",
+                            format_gb(pacman_cache as f64),
+                            format_gb(aur_cache as f64)
+                        )
+                        .dimmed()
+                    );
                     println!("  {:<15} {}", "health:".bold(), health_status);
                     println!("  {:<15} {}", "last sync:".bold(), sync_time.cyan());
-                    println!("  {:<15} {}", "activity:".bold(), format!("{} (newest), {} (oldest)", newest_pkg, oldest_pkg).dimmed());
+                    println!(
+                        "  {:<15} {}",
+                        "activity:".bold(),
+                        format!("{} (newest), {} (oldest)", newest_pkg, oldest_pkg).dimmed()
+                    );
                     println!();
                 }
 
