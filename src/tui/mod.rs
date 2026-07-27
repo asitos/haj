@@ -1388,11 +1388,13 @@ where
 
                         if lower_clean.contains("error:")
                             || lower_clean.contains("warning:")
-                                || lower_clean.contains("failed")
-                                || (in_hook_phase && (lower_clean.contains("missing") || lower_clean.contains("not found")))
+                            || lower_clean.contains("failed")
+                            || (in_hook_phase
+                                && (lower_clean.contains("missing")
+                                    || lower_clean.contains("not found")))
                         {
                             let _ = tx_out.send(TuiEvent::PacmanLog(clean.to_string())).await;
-                        } 
+                        }
 
                         if clean.contains('%') {
                             let parts: Vec<&str> = clean.split('%').collect();
@@ -1820,8 +1822,6 @@ where
                                                                 .write_all(cmd_to_copy.as_bytes());
                                                         }
                                                         let _ = child.wait();
-
-                                                        
                                                     }
                                                 });
                                                 app.current_action =

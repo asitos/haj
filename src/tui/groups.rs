@@ -300,4 +300,3 @@ fn draw_bar(pct: f64, width: usize) -> String {
     let empty = width.saturating_sub(filled);
     format!("{}{}", "█".repeat(filled), "░".repeat(empty))
 }
-
