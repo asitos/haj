@@ -21,13 +21,13 @@ use ansi_to_tui::IntoText;
 pub mod browser;
 pub mod dashboard;
 pub mod transaction;
-pub mod news; // NEW: The news UI module
+pub mod news; 
 
 #[derive(PartialEq)]
 pub enum CurrentScreen {
     Dashboard,
     Browser,
-    News, // NEW: News screen state
+    News, 
 }
 
 #[derive(PartialEq)]
@@ -83,7 +83,6 @@ pub struct PackageInfo {
     pub is_installed: bool, pub is_upgradable: bool, pub size_mb: f64,
 }
 
-// ---> NEW: News Data Structures <---
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NewsItem {
     pub title: String,
@@ -103,8 +102,8 @@ pub enum TuiEvent {
     TransactionFailed,
     CloseTransaction,
     DashboardArtFrame(Text<'static>),
-    NewsFetched(Vec<NewsItem>, String), // NEW: Fetched articles and last updated string
-    NewsFetchFailed(String),            // NEW: Fetch error
+    NewsFetched(Vec<NewsItem>, String), 
+    NewsFetchFailed(String),            
 }
 
 pub struct App {
@@ -112,7 +111,6 @@ pub struct App {
     pub screen: CurrentScreen,
     pub input_mode: InputMode,
     
-    // Package Browser State
     pub filters: Vec<PackageFilter>,
     pub filter_idx: usize,
     pub sort_mode: SortMode,
@@ -124,7 +122,6 @@ pub struct App {
     pub list_state: ListState,
     pub selected_packages: HashSet<String>,
 
-    // Transaction State
     pub show_prompt: bool,
     pub prompt_type: String,
     pub prompt_targets: Vec<String>,
@@ -135,7 +132,6 @@ pub struct App {
     pub dashboard_art: Text<'static>,
     pub abort_tx: Option<mpsc::Sender<()>>,
 
-    // ---> NEW: News Browser State <---
     pub news_items: Vec<NewsItem>,
     pub filtered_news: Vec<NewsItem>,
     pub read_news: HashSet<String>,
@@ -158,7 +154,6 @@ impl App {
             for db in alpm.syncdbs() { dynamic_filters.push(PackageFilter::Repo(db.name().to_string())); }
         }
 
-        // Load read articles from disk
         let home = dirs::home_dir().unwrap_or_default();
         let cache_path = home.join(".cache/haj/read_news.json");
         let read_news: HashSet<String> = std::fs::read_to_string(cache_path)
@@ -177,7 +172,6 @@ impl App {
             is_installing: false, current_action: String::from("idle"), progress: 0,
             transaction_logs: Vec::new(), dashboard_art: Text::raw(" loading art... "), abort_tx: None,
             
-            // Initialize News State
             news_items: Vec::new(), filtered_news: Vec::new(), read_news,
             news_list_state: ListState::default(), news_scroll: 0, news_search_query: String::new(),
             news_focus: NewsFocus::List, is_fetching_news: true, news_last_updated: "checking...".to_string(),
@@ -391,18 +385,22 @@ pub fn fetch_arch_news(tx: mpsc::Sender<TuiEvent>) {
                                 } else { String::new() }
                             };
 
-                            let title = extract("<title>", "</title>");
+                            let title_raw = extract("<title>", "</title>");
                             let link = extract("<link>", "</link>");
                             let pub_date = extract("<pubDate>", "</pubDate>");
-                            let desc = extract("<description>", "</description>");
+                            let desc_raw = extract("<description>", "</description>");
 
-                            // Strip CDATA and basic HTML for searching
+                            let decode_html = |s: &str| s.replace("&gt;", ">").replace("&lt;", "<").replace("&quot;", "\"").replace("&amp;", "&").replace("&#39;", "'");
+                            let title = decode_html(&title_raw);
+                            let desc = decode_html(&desc_raw);
+
                             let clean_desc = desc.replace("<![CDATA[", "").replace("]]>", "");
                             let is_crit = critical_words.iter().any(|&w| title.to_lowercase().contains(w) || clean_desc.to_lowercase().contains(w));
 
                             if !title.is_empty() {
                                 items.push(NewsItem { title, link, pub_date, description: clean_desc, is_critical: is_crit });
                             }
+
                             search_idx = absolute_start + item_end;
                         } else { break; }
                     }
@@ -833,7 +831,6 @@ where
                                 KeyCode::Char('y') => {
                                     if let Some(idx) = app.news_list_state.selected() {
                                         if let Some(item) = app.filtered_news.get(idx) {
-                                            // Fallback clipboard logic using xclip/wl-copy
                                             if std::process::Command::new("wl-copy").arg(&item.link).output().is_err() {
                                                 let mut child = std::process::Command::new("xclip").args(["-selection", "clipboard"]).stdin(std::process::Stdio::piped()).spawn().unwrap();
                                                 if let Some(mut stdin) = child.stdin.take() {
@@ -852,7 +849,6 @@ where
                                         };
                                         app.news_list_state.select(Some(i));
                                         app.news_scroll = 0;
-                                        // Mark read when navigating
                                         if let Some(item) = app.filtered_news.get(i) {
                                             let link = item.link.clone();
                                             app.mark_news_read(link);
@@ -880,7 +876,7 @@ where
                                 KeyCode::PageDown => if app.news_focus == NewsFocus::Article { app.news_scroll = app.news_scroll.saturating_add(15); }
                                 KeyCode::PageUp => if app.news_focus == NewsFocus::Article { app.news_scroll = app.news_scroll.saturating_sub(15); }
                                 KeyCode::Home => if app.news_focus == NewsFocus::Article { app.news_scroll = 0; }
-                                KeyCode::End => if app.news_focus == NewsFocus::Article { app.news_scroll = 999; } // Max clamp in render
+                                KeyCode::End => if app.news_focus == NewsFocus::Article { app.news_scroll = 999; } 
                                 _ => {}
                             },
                             InputMode::Editing => match key.code {
