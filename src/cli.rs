@@ -44,8 +44,11 @@ Commands (alias):
 Options:
 {options}"
 )]
-
-#[command(name = "haj", version, about = "fast, quiet, beautiful package manager for blahArch.")]
+#[command(
+    name = "haj",
+    version,
+    about = "fast, quiet, beautiful package manager for blahArch."
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,

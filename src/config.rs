@@ -49,18 +49,18 @@ pub fn load_config() -> HajConfig {
             eprintln!("\x1b[31m✗ failed to create config directory: {}\x1b[0m", e);
             return HajConfig::default();
         }
-        
+
         let default_config = HajConfig::default();
-        
+
         let toml_string = format!(
             "# haj package manager configuration\n\n{}",
             toml::to_string_pretty(&default_config).unwrap_or_default()
         );
-        
+
         if let Err(e) = fs::write(&config_path, toml_string) {
             eprintln!("\x1b[31m✗ failed to write config.toml: {}\x1b[0m", e);
         }
-        
+
         return default_config;
     }
 
@@ -71,13 +71,13 @@ pub fn load_config() -> HajConfig {
                     "# haj package manager configuration\n\n{}",
                     toml::to_string_pretty(&config).unwrap_or_default()
                 );
-                
+
                 if contents != updated_toml {
                     if let Err(e) = fs::write(&config_path, &updated_toml) {
                         eprintln!("\x1b[31m✗ failed to update config.toml: {}\x1b[0m", e);
                     }
                 }
-                
+
                 config
             }
             Err(e) => {

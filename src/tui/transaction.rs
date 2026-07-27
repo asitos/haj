@@ -83,8 +83,12 @@ pub fn render_confirm_popup(f: &mut Frame, app: &App) {
     let area = centered_rect(40, 20, f.area());
     f.render_widget(Clear, area);
 
-    let action_color = if app.prompt_type == "install" { Color::Green } else { Color::Red };
-    
+    let action_color = if app.prompt_type == "install" {
+        Color::Green
+    } else {
+        Color::Red
+    };
+
     let block = Block::default()
         .title(" confirm transaction ")
         .borders(Borders::ALL)
@@ -94,11 +98,17 @@ pub fn render_confirm_popup(f: &mut Frame, app: &App) {
         Line::from(""),
         Line::from(vec![
             Span::raw(format!("Proceed to {} ", app.prompt_type)),
-            Span::styled(format!("{}", app.prompt_targets.len()), Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!("{}", app.prompt_targets.len()),
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
             Span::raw(" package(s)?"),
         ]),
         Line::from(""),
-        Line::from(Span::styled(" [Y]es   [N]o ", Style::default().fg(Color::DarkGray))),
+        Line::from(Span::styled(
+            " [Y]es   [N]o ",
+            Style::default().fg(Color::DarkGray),
+        )),
     ];
 
     let paragraph = Paragraph::new(text)

@@ -29,7 +29,10 @@ pub fn render(f: &mut Frame, app: &mut App) {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(border_color))
-                .title_bottom(format!(" [sort: {} (S)] [filter: {} (tab)] ", sort_display, filter_display))
+                .title_bottom(format!(
+                    " [sort: {} (S)] [filter: {} (tab)] ",
+                    sort_display, filter_display
+                ))
                 .title_alignment(Alignment::Right),
         );
     f.render_widget(search_bar, chunks[0]);
@@ -42,7 +45,11 @@ pub fn render(f: &mut Frame, app: &mut App) {
     let items = app.filtered_packages.iter().map(|pkg| {
         let is_queued = app.selected_packages.contains(&pkg.name);
         let queue_icon = if is_queued { "[x] " } else { "[ ] " };
-        let queue_color = if is_queued { Color::Yellow } else { Color::DarkGray };
+        let queue_color = if is_queued {
+            Color::Yellow
+        } else {
+            Color::DarkGray
+        };
 
         let (icon, color) = if pkg.is_upgradable {
             ("↑ ", Color::Cyan)
@@ -54,7 +61,10 @@ pub fn render(f: &mut Frame, app: &mut App) {
 
         ListItem::new(Line::from(vec![
             Span::styled(queue_icon, Style::default().fg(queue_color)),
-            Span::styled(icon, Style::default().fg(color).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                icon,
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ),
             Span::styled(pkg.name.as_str(), Style::default().fg(color)),
         ]))
     });
@@ -75,7 +85,6 @@ pub fn render(f: &mut Frame, app: &mut App) {
 
     if let Some(selected_idx) = app.list_state.selected() {
         if let Some(selected_pkg) = app.filtered_packages.get(selected_idx) {
-            
             let mut details_text = vec![
                 Line::from(vec![
                     Span::styled(
@@ -88,31 +97,53 @@ pub fn render(f: &mut Frame, app: &mut App) {
                 ]),
                 Line::from(""),
                 Line::from(vec![
-                    Span::styled(format!("{:<15}", "repository:"), Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        format!("{:<15}", "repository:"),
+                        Style::default().fg(Color::DarkGray),
+                    ),
                     Span::raw(selected_pkg.repo.clone()),
                 ]),
                 Line::from(vec![
-                    Span::styled(format!("{:<15}", "size:"), Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        format!("{:<15}", "size:"),
+                        Style::default().fg(Color::DarkGray),
+                    ),
                     Span::raw(format!("{:.2} MB", selected_pkg.size_mb)),
                 ]),
             ];
 
             if selected_pkg.is_upgradable {
                 details_text.push(Line::from(vec![
-                    Span::styled(format!("{:<15}", "status:"), Style::default().fg(Color::DarkGray)),
-                    Span::styled("update available ↑", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        format!("{:<15}", "status:"),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                    Span::styled(
+                        "update available ↑",
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                 ]));
             }
 
             details_text.push(Line::from(""));
-            details_text.push(Line::from(Span::styled("description:", Style::default().fg(Color::DarkGray))));
+            details_text.push(Line::from(Span::styled(
+                "description:",
+                Style::default().fg(Color::DarkGray),
+            )));
             details_text.push(Line::from(selected_pkg.desc.clone()));
             details_text.push(Line::from(""));
 
             if !app.selected_packages.is_empty() {
                 details_text.push(Line::from(Span::styled(
-                    format!("queued for transaction: {} packages", app.selected_packages.len()),
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    format!(
+                        "queued for transaction: {} packages",
+                        app.selected_packages.len()
+                    ),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
                 )));
                 details_text.push(Line::from(""));
             }
