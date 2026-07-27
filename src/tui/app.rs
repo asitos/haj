@@ -202,7 +202,6 @@ impl SharedState {
             for line in stdout.lines().rev() { self.history_items.push(line.to_string()); }
         }
 
-        // Populate Group Info
         let mut groups_map: std::collections::BTreeMap<String, Vec<(String, bool)>> = std::collections::BTreeMap::new();
         if let Ok(output) = std::process::Command::new("pacman").arg("-Sg").output() {
             let stdout = String::from_utf8_lossy(&output.stdout);
@@ -219,7 +218,7 @@ impl SharedState {
         self.groups = groups_map.into_iter().map(|(name, pkgs)| GroupInfo {
             name,
             packages: pkgs,
-            description: "Package group".to_string(),
+            description: "package group".to_string(),
             repo: "extra".to_string(),
             is_favorite: false,
         }).collect();
@@ -228,7 +227,7 @@ impl SharedState {
 
         self.cache_size = if let Ok(output) = std::process::Command::new("sh").arg("-c").arg("du -sh /var/cache/pacman/pkg | cut -f1").output() {
             String::from_utf8_lossy(&output.stdout).trim().to_string()
-        } else { "Unknown".to_string() };
+        } else { "unknown".to_string() };
 
         if !self.history_items.is_empty() { self.history_state.select(Some(0)); }
         if !self.groups.is_empty() { self.group_state.select(Some(0)); }

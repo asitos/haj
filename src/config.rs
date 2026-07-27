@@ -1,3 +1,4 @@
+#![allow(clippy::collapsible_if)]
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;

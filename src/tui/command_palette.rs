@@ -14,7 +14,7 @@ pub fn render_popup(f: &mut Frame, buffer: &str) {
 
     let display_text = format!("> {}█", buffer);
     let block = Block::default()
-        .title(" Run Command ")
+        .title(" run command ")
         .title_alignment(Alignment::Left)
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Magenta));

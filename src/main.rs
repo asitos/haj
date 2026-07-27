@@ -13,7 +13,6 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 
-// helper function for Y/n prompt
 fn prompt_confirm(msg: &str) -> bool {
     print!("{} {} ", "?".magenta().bold(), msg.bold());
     let _ = std::io::stdout().flush();
