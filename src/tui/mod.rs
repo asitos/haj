@@ -151,6 +151,31 @@ pub enum TuiEvent {
     NewsFetchFailed(String),
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum TxAction { Install, Upgrade, Remove, Reinstall, Unknown }
+
+#[derive(Clone, Debug)]
+pub struct PkgChange {
+    pub name: String,
+    pub old_version: Option<String>,
+    pub new_version: String,
+    pub action: TxAction,
+}
+
+#[derive(Clone, Debug)]
+pub struct Transaction {
+    pub timestamp: String,
+    pub is_success: bool,
+    pub primary_action: TxAction,
+    pub packages: Vec<PkgChange>,
+    pub hooks: Vec<String>,
+    pub warnings: Vec<String>,
+    pub raw_log: Vec<String>,
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub enum HistoryFilter { All, Installs, Upgrades, Removals, Failures }
+
 pub struct App {
     pub should_quit: bool,
     pub screen: CurrentScreen,
@@ -195,8 +220,14 @@ pub struct App {
     pub news_last_updated: String,
     pub news_error: String,
 
-    pub history_items: Vec<String>,
+    pub transactions: Vec<Transaction>,
+    pub filtered_transactions: Vec<Transaction>,
     pub history_state: ListState,
+    pub history_search_query: String,
+    pub history_filter: HistoryFilter,
+    pub history_expanded: bool,
+    pub history_input_mode: InputMode,
+
     pub group_items: Vec<String>,
     pub group_state: ListState,
     pub cache_size: String,
@@ -289,8 +320,14 @@ impl App {
             news_last_updated: "checking...".to_string(),
             news_error: String::new(),
 
-            history_items: Vec::new(),
+            transactions: Vec::new(),
+            filtered_transactions: Vec::new(),
             history_state: ListState::default(),
+            history_search_query: String::new(),
+            history_filter: HistoryFilter::All,
+            history_expanded: false,
+            history_input_mode: InputMode::Normal,
+
             group_items: Vec::new(),
             cache_size: "Unknown".into(),
             explicit_count: 0,
@@ -313,6 +350,32 @@ impl App {
 
         app.refresh_state();
         app
+    }
+
+    pub fn update_history_filter(&mut self) {
+        let query = self.history_search_query.to_lowercase();
+        self.filtered_transactions = self.transactions.iter().filter(|tx| {
+            let matches_query = query.is_empty() || 
+                tx.timestamp.to_lowercase().contains(&query) || 
+                tx.packages.iter().any(|p| p.name.to_lowercase().contains(&query));
+
+            let matches_filter = match self.history_filter {
+                HistoryFilter::All => true,
+                HistoryFilter::Installs => tx.primary_action == TxAction::Install,
+                HistoryFilter::Upgrades => tx.primary_action == TxAction::Upgrade,
+                HistoryFilter::Removals => tx.primary_action == TxAction::Remove,
+                HistoryFilter::Failures => !tx.is_success,
+            };
+
+            matches_query && matches_filter
+        }).cloned().collect();
+
+        if self.filtered_transactions.is_empty() {
+            self.history_state.select(None);
+        } else {
+            let idx = self.history_state.selected().unwrap_or(0).min(self.filtered_transactions.len() - 1);
+            self.history_state.select(Some(idx));
+        }
     }
 
     pub fn update_group_filter(&mut self) {
@@ -440,16 +503,73 @@ impl App {
             self.updates_count = updates_count;
         }
 
-        // 1. History log loading with sudo privileges
-        self.history_items.clear();
-        if let Ok(output) = std::process::Command::new("sh").arg("-c").arg("sudo grep '\\[ALPM\\]' /var/log/pacman.log | tail -n 100").output() {
+        self.transactions.clear();
+        if let Ok(output) = std::process::Command::new("sh").arg("-c").arg("sudo tail -n 5000 /var/log/pacman.log").output() {
             let stdout = String::from_utf8_lossy(&output.stdout);
-            for line in stdout.lines().rev() {
-                self.history_items.push(line.to_string());
-            }
-        }
+            let mut current_tx: Option<Transaction> = None;
 
-        // 2. Groups population with fallback and sudo
+            for line in stdout.lines() {
+                let ts = if line.starts_with('[') && line.len() > 18 {
+                    line[1..17].to_string() 
+                } else {
+                    "Unknown".to_string()
+                };
+
+                if line.contains("transaction started") {
+                    current_tx = Some(Transaction {
+                        timestamp: ts,
+                        is_success: false,
+                        primary_action: TxAction::Unknown,
+                        packages: Vec::new(),
+                        hooks: Vec::new(),
+                        warnings: Vec::new(),
+                        raw_log: vec![line.to_string()],
+                    });
+                } else if line.contains("transaction completed") || line.contains("transaction failed") {
+                    if let Some(mut tx) = current_tx.take() {
+                        tx.raw_log.push(line.to_string());
+                        tx.is_success = line.contains("transaction completed");
+                        
+                        let installs = tx.packages.iter().filter(|p| p.action == TxAction::Install).count();
+                        let upgrades = tx.packages.iter().filter(|p| p.action == TxAction::Upgrade).count();
+                        let removals = tx.packages.iter().filter(|p| p.action == TxAction::Remove).count();
+                        
+                        tx.primary_action = if upgrades > installs && upgrades > removals { TxAction::Upgrade }
+                                            else if removals > installs && removals > upgrades { TxAction::Remove }
+                                            else if installs > 0 { TxAction::Install }
+                                            else { TxAction::Unknown };
+                        
+                        self.transactions.push(tx);
+                    }
+                } else if let Some(ref mut tx) = current_tx {
+                    tx.raw_log.push(line.to_string());
+                    
+                    if line.contains("[ALPM] installed") {
+                        let parts: Vec<&str> = line.split_whitespace().collect();
+                        if parts.len() >= 5 {
+                            tx.packages.push(PkgChange { name: parts[3].to_string(), old_version: None, new_version: parts[4].replace("(", "").replace(")", ""), action: TxAction::Install });
+                        }
+                    } else if line.contains("[ALPM] upgraded") {
+                        let parts: Vec<&str> = line.split_whitespace().collect();
+                        if parts.len() >= 7 {
+                            tx.packages.push(PkgChange { name: parts[3].to_string(), old_version: Some(parts[4].replace("(", "")), new_version: parts[6].replace(")", ""), action: TxAction::Upgrade });
+                        }
+                    } else if line.contains("[ALPM] removed") {
+                        let parts: Vec<&str> = line.split_whitespace().collect();
+                        if parts.len() >= 5 {
+                            tx.packages.push(PkgChange { name: parts[3].to_string(), old_version: None, new_version: parts[4].replace("(", "").replace(")", ""), action: TxAction::Remove });
+                        }
+                    } else if line.contains("warning:") {
+                        tx.warnings.push(line.split("warning:").last().unwrap_or("").trim().to_string());
+                    } else if line.contains("Running") && line.contains("hook") {
+                        tx.hooks.push(line.split("Running").last().unwrap_or("").replace("hook...", "").trim().to_string());
+                    }
+                }
+            }
+            self.transactions.reverse(); 
+        }
+        self.update_history_filter();
+
         let mut groups_map: std::collections::BTreeMap<String, Vec<(String, bool)>> = std::collections::BTreeMap::new();
         if let Ok(output) = std::process::Command::new("sudo").args(["pacman", "-Sg"]).output() {
             let stdout = String::from_utf8_lossy(&output.stdout);
@@ -493,17 +613,15 @@ impl App {
 
         self.group_items = self.groups.iter().map(|g| g.name.clone()).collect();
 
-        // 3. Cache Size calculation with sudo
         self.cache_size = if let Ok(output) = std::process::Command::new("sh").arg("-c").arg("sudo du -sh /var/cache/pacman/pkg | cut -f1").output() {
             String::from_utf8_lossy(&output.stdout).trim().to_string()
         } else {
             "Unknown".to_string()
         };
 
-        if !self.history_items.is_empty() { self.history_state.select(Some(0)); }
+        if !self.transactions.is_empty() { self.history_state.select(Some(0)); }
         if !self.groups.is_empty() { self.group_state.select(Some(0)); }
 
-        // System Health / Stats metrics
         if let Ok(output) = std::process::Command::new("sh").arg("-c").arg("sudo pacman -Qeq | wc -l").output() {
             self.explicit_count = String::from_utf8_lossy(&output.stdout).trim().parse().unwrap_or(0);
         }
@@ -1559,30 +1677,9 @@ where
                             KeyCode::Char('h') => app.screen = CurrentScreen::History,
                             _ => {}
                         },
-                        CurrentScreen::History => match key.code {
-                            KeyCode::Esc => app.screen = CurrentScreen::Dashboard,
-                            KeyCode::Char('q') => app.should_quit = true,
-                            KeyCode::Down | KeyCode::Char('j') => {
-                                if !app.history_items.is_empty() {
-                                    let i = match app.history_state.selected() {
-                                        Some(i) => if i >= app.history_items.len() - 1 { 0 } else { i + 1 },
-                                        None => 0,
-                                    };
-                                    app.history_state.select(Some(i));
-                                }
-                            }
-                            KeyCode::Up | KeyCode::Char('k') => {
-                                if !app.history_items.is_empty() {
-                                    let i = match app.history_state.selected() {
-                                        Some(i) => if i == 0 { app.history_items.len() - 1 } else { i - 1 },
-                                        None => 0,
-                                    };
-                                    app.history_state.select(Some(i));
-                                }
-                            }
-                            _ => {}
-                        },
-                                                CurrentScreen::Groups => match app.group_input_mode {
+                        CurrentScreen::History => history::handle_key(key, app),
+
+                        CurrentScreen::Groups => match app.group_input_mode {
                             InputMode::Normal => match key.code {
                                 KeyCode::Esc => app.screen = CurrentScreen::Dashboard,
                                 KeyCode::Char('q') => app.should_quit = true,
