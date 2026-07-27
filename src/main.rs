@@ -697,7 +697,7 @@ async fn process_installation(
                     let aur_names: Vec<String> = resolved_aur_pkgs.iter().map(|(pkg, _, _, _)| pkg.clone()).collect();
                     view_pkgbuilds(&aur_names).await;
                     
-                    prompt_msg = "Proceed with installation? [Y/n]".to_string(); 
+                    prompt_msg = "proceed with installation? [Y/n]".to_string(); 
                 }
             }
         }
@@ -816,10 +816,9 @@ async fn main() -> anyhow::Result<()> {
 
     let mut cli = Cli::parse();
     let config = config::load_config();
-    cli.aur = cli.aur || config.aur_only;
-    cli.repo = cli.repo || config.repo_only;
-    cli.verbose = cli.verbose || config.verbose;
-
+    cli.aur = cli.aur || config.general.aur_only;
+    cli.repo = cli.repo || config.general.repo_only;
+    cli.verbose = cli.verbose || config.general.verbose;
    
     let active_command = cli.command.clone().unwrap_or_else(|| {
         use clap::CommandFactory;
@@ -1022,7 +1021,7 @@ async fn main() -> anyhow::Result<()> {
 
                     if !cli.noconfirm {
                         println!();
-                        if !prompt_confirm("Proceed with removal? [Y/n]") {
+                        if !prompt_confirm("proceed with removal? [Y/n]") {
                             println!("{} aborted.", "✗".red());
                             return Ok(());
                         }
@@ -1163,7 +1162,7 @@ async fn main() -> anyhow::Result<()> {
                     println!("\n{:<15} {}", "total:", total_upgrades.to_string().cyan());
                     display_arch_news().await;
 
-                    if !cli.noconfirm && !prompt_confirm("Proceed with upgrade? [Y/n]") {
+                    if !cli.noconfirm && !prompt_confirm("proceed with upgrade? [Y/n]") {
                         println!("{} aborted.", "✗".red());
                         return Ok(());
                     }
