@@ -126,6 +126,8 @@ pub struct App {
     pub progress: u16,
     pub transaction_logs: Vec<String>,
     pub dashboard_art: Text<'static>,
+
+    pub abort_tx: Option<mpsc::Sender<()>>,
 }
 
 impl App {
@@ -167,6 +169,7 @@ impl App {
             progress: 0,
             transaction_logs: Vec::new(),
             dashboard_art: Text::raw(" loading art... "),
+            abort_tx: None,
         };
 
         app.refresh_state();
@@ -444,7 +447,7 @@ where
     });
 
     let spawn_pacman =
-        |tx_channel: mpsc::Sender<TuiEvent>, mut args: Vec<String>, _action_name: String| {
+        |tx_channel: mpsc::Sender<TuiEvent>, mut args: Vec<String>, _action_name: String, mut abort_rx: mpsc::Receiver<()>| {
             tokio::spawn(async move {
                 if !args.contains(&"--color=never".to_string()) {
                     args.push("--color=never".into());
@@ -458,8 +461,20 @@ where
                     .spawn();
 
                 if let Ok(mut child) = child_res {
+                    let pid = child.id();
                     let stdout = child.stdout.take().unwrap();
                     let stderr = child.stderr.take().unwrap();
+
+                    let abort_task = tokio::spawn(async move {
+                        if let Some(()) = abort_rx.recv().await {
+                            if let Some(p) = pid {
+                                let _ = tokio::process::Command::new("sudo")
+                                    .args(["kill", "-INT", &p.to_string()])
+                                    .status()
+                                    .await;
+                            }
+                        }
+                    });
 
                     let tx_out = tx_channel.clone();
                     let out_task = tokio::spawn(async move {
@@ -536,6 +551,8 @@ where
                     let status = child.wait().await.unwrap_or_else(|_| {
                         std::os::unix::process::ExitStatusExt::from_raw(1)
                     });
+                    
+                    abort_task.abort();
 
                     let _ = tx_channel.send(TuiEvent::PacmanProgress(100)).await;
                     
@@ -573,11 +590,9 @@ where
                     app.transaction_logs.push(log);
                     if app.transaction_logs.len() > 30 { app.transaction_logs.remove(0); }
                 }
-                
                 TuiEvent::UpdateAction(action) => {
                     app.current_action = action;
                 }
-
                 TuiEvent::PacmanProgress(val) => app.progress = val.min(100),
                 TuiEvent::TransactionComplete => app.current_action = "changes complete ✓".to_string(),
                 TuiEvent::TransactionFailed => app.current_action = "transaction failed ❌".to_string(),
@@ -588,6 +603,18 @@ where
                     app.refresh_state();
                 }
                 TuiEvent::Key(key) => {
+                    if app.is_installing {
+                        if let KeyCode::Char('q') = key.code {
+                            if let Some(tx_abort) = app.abort_tx.take() {
+                                let _ = tx_abort.try_send(());
+                                app.current_action = "aborting safely...".to_string();
+                                app.transaction_logs.push("".into());
+                                app.transaction_logs.push("==> user triggered abort. sending SIGINT to pacman...".into());
+                            }
+                        }
+                        continue;
+                    }
+
                     if app.show_prompt {
                         match key.code {
                             KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
@@ -610,7 +637,10 @@ where
                                 }
                                 args.extend(app.prompt_targets.clone());
                                 
-                                spawn_pacman(tx.clone(), args, app.prompt_type.clone());
+                                let (abort_tx, abort_rx) = mpsc::channel(1);
+                                app.abort_tx = Some(abort_tx);
+                                spawn_pacman(tx.clone(), args, app.prompt_type.clone(), abort_rx);
+                                
                                 app.selected_packages.clear();
                                 app.prompt_targets.clear();
                             }
@@ -635,10 +665,14 @@ where
                                 app.current_action = "syncing & updating system...".to_string();
                                 app.transaction_logs.clear();
                                 app.progress = 0;
+                                
+                                let (abort_tx, abort_rx) = mpsc::channel(1);
+                                app.abort_tx = Some(abort_tx);
                                 spawn_pacman(
                                     tx.clone(),
                                     vec!["pacman".into(), "-Syu".into(), "--noconfirm".into()],
                                     "updating system".into(),
+                                    abort_rx
                                 );
                             }
                             KeyCode::Char('c') => {
@@ -664,7 +698,10 @@ where
                                         app.current_action = format!("sweeping {} orphans...", orphans.len());
                                         let mut args = vec!["pacman".into(), "-Rns".into(), "--noconfirm".into()];
                                         args.extend(orphans);
-                                        spawn_pacman(tx.clone(), args, "cleaning orphans".into());
+                                        
+                                        let (abort_tx, abort_rx) = mpsc::channel(1);
+                                        app.abort_tx = Some(abort_tx);
+                                        spawn_pacman(tx.clone(), args, "cleaning orphans".into(), abort_rx);
                                     }
                                 }
                             }
@@ -693,7 +730,7 @@ where
                                     };
                                     app.update_search();
                                 }
-                                KeyCode::Char('q') => app.should_quit = true,
+                                KeyCode::Char('q') => app.should_quit = true, 
                                 KeyCode::Esc => app.screen = CurrentScreen::Dashboard,
 
                                 KeyCode::Char('/') | KeyCode::Char('s') | KeyCode::Char('f') => {

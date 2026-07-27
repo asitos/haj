@@ -13,11 +13,11 @@ pub fn render_popup(f: &mut Frame, app: &App) {
         return;
     }
 
-    let area = centered_rect(65, 45, f.area());
+    let area = centered_rect(55, 35, f.area());
     f.render_widget(Clear, area);
 
     let block = Block::default()
-        .title(" active command ")
+        .title(" active command [q to abort] ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
 
@@ -69,7 +69,7 @@ pub fn render_popup(f: &mut Frame, app: &App) {
 
     let logs_paragraph = Paragraph::new(log_lines)
         .style(Style::default().fg(Color::DarkGray))
-        .wrap(Wrap { trim: false }) 
+        .wrap(Wrap { trim: false })
         .block(Block::default().borders(Borders::NONE));
 
     f.render_widget(logs_paragraph, chunks[4]);
