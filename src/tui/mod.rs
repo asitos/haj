@@ -1266,8 +1266,16 @@ where
                 args.push("--color=never".into());
             }
 
-            let child_res = tokio::process::Command::new("sudo")
-                .args(args)
+            let is_root = unsafe { libc::geteuid() == 0 };
+            let (cmd_name, final_args) = if is_root {
+                ("pacman".to_string(), args[1..].to_vec())
+            } else {
+                ("sudo".to_string(), args)
+            };
+
+            let child_res = tokio::process::Command::new(cmd_name)
+                .args(final_args)
+                .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .kill_on_drop(true)
@@ -1277,17 +1285,6 @@ where
                 let pid = child.id();
                 let stdout = child.stdout.take().unwrap();
                 let stderr = child.stderr.take().unwrap();
-
-                let abort_task = tokio::spawn(async move {
-                    if let Some(()) = abort_rx.recv().await {
-                        if let Some(p) = pid {
-                            let _ = tokio::process::Command::new("sudo")
-                                .args(["kill", "-INT", &p.to_string()])
-                                .status()
-                                .await;
-                        }
-                    }
-                });
 
                 let tx_out = tx_channel.clone();
                 let out_task = tokio::spawn(async move {
@@ -1389,6 +1386,9 @@ where
                         if lower_clean.contains("error:")
                             || lower_clean.contains("warning:")
                             || lower_clean.contains("failed")
+                            || clean.starts_with("::")
+                            || lower_clean.contains("up to date")
+                            || lower_clean.contains("downloading")
                             || (in_hook_phase
                                 && (lower_clean.contains("missing")
                                     || lower_clean.contains("not found")))
@@ -1422,23 +1422,53 @@ where
                     }
                 });
 
-                let _ = tokio::join!(out_task, err_task);
+                let mut status = None;
+                let mut aborted = false;
 
-                let status = child
-                    .wait()
-                    .await
-                    .unwrap_or_else(|_| std::os::unix::process::ExitStatusExt::from_raw(1));
+                tokio::select! {
+                    _ = async {
+                        let _ = tokio::join!(out_task, err_task);
+                    } => {
+                        status = Some(child.wait().await.unwrap_or_else(|_| std::os::unix::process::ExitStatusExt::from_raw(1)));
+                    }
+                    Some(()) = abort_rx.recv() => {
+                        aborted = true;
+                        if let Some(p) = pid {
+                            let _ = tokio::process::Command::new("sudo")
+                                .args(["-n", "kill", "-INT", &p.to_string()])
+                                .status()
+                                .await;
 
-                abort_task.abort();
+                            tokio::select! {
+                                s = child.wait() => {
+                                    status = s.ok();
+                                }
+                                _ = tokio::time::sleep(Duration::from_millis(500)) => {
+                                    let _ = tokio::process::Command::new("sudo")
+                                        .args(["-n", "kill", "-KILL", &p.to_string()])
+                                        .status()
+                                        .await;
+                                    tokio::select! {
+                                        s = child.wait() => {
+                                            status = s.ok();
+                                        }
+                                        _ = tokio::time::sleep(Duration::from_millis(200)) => {}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
 
                 let _ = tx_channel.send(TuiEvent::PacmanProgress(100)).await;
 
-                if status.success() {
+                let success = status.is_some_and(|s| s.success());
+                if success && !aborted {
                     let _ = tx_channel.send(TuiEvent::TransactionComplete).await;
                     tokio::time::sleep(Duration::from_secs(2)).await;
                 } else {
                     let _ = tx_channel.send(TuiEvent::TransactionFailed).await;
-                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    tokio::time::sleep(Duration::from_secs(2)).await;
                 }
             } else {
                 let _ = tx_channel.send(TuiEvent::TransactionFailed).await;
