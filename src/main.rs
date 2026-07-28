@@ -168,17 +168,31 @@ async fn display_arch_news() {
 }
 
 async fn view_pkgbuilds(pkgs: &[String]) {
-    let pager = std::env::var("PAGER").unwrap_or_else(|_| {
-        if std::process::Command::new("bat")
-            .arg("--version")
-            .output()
-            .is_ok()
-        {
-            "bat".to_string()
-        } else {
-            "less".to_string()
-        }
-    });
+    let editor = std::env::var("VISUAL")
+        .or_else(|_| std::env::var("EDITOR"))
+        .unwrap_or_else(|_| {
+            if std::process::Command::new("nvim")
+                .arg("--version")
+                .output()
+                .is_ok()
+            {
+                "nvim".to_string()
+            } else if std::process::Command::new("vim")
+                .arg("--version")
+                .output()
+                .is_ok()
+            {
+                "vim".to_string()
+            } else if std::process::Command::new("nano")
+                .arg("--version")
+                .output()
+                .is_ok()
+            {
+                "nano".to_string()
+            } else {
+                "less".to_string()
+            }
+        });
 
     for pkg in pkgs {
         let spinner = ui::progress::spinner(&format!("fetching PKGBUILD for {}...", pkg.magenta()));
@@ -202,19 +216,25 @@ async fn view_pkgbuilds(pkgs: &[String]) {
             let pkgbuild_path = format!("{}/PKGBUILD", tmp_dir);
 
             if std::path::Path::new(&pkgbuild_path).exists() {
-                let mut cmd = std::process::Command::new(&pager);
-                if pager.contains("bat") {
-                    cmd.args([
-                        "--style=plain",
-                        "--paging=always",
-                        "--language=bash",
-                        &pkgbuild_path,
-                    ]);
-                } else {
-                    cmd.arg(&pkgbuild_path);
-                }
+                let parts: Vec<String> = editor.split_whitespace().map(|s| s.to_string()).collect();
+                if !parts.is_empty() {
+                    let exec = &parts[0];
+                    let mut cmd = std::process::Command::new(exec);
+                    
+                    if parts.len() > 1 {
+                        cmd.args(&parts[1..]);
+                    }
 
-                let _ = cmd.status();
+                    let exec_lower = exec.to_lowercase();
+                    if exec_lower.contains("nvim") || exec_lower.contains("vim") || exec_lower.contains("vi") {
+                        cmd.arg("-R");
+                    } else if exec_lower.contains("nano") {
+                        cmd.arg("-v");
+                    }
+
+                    cmd.arg(&pkgbuild_path);
+                    let _ = cmd.status();
+                }
             } else {
                 println!(
                     "{} PKGBUILD not found in repository for {}.",

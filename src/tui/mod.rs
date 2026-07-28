@@ -178,6 +178,7 @@ pub enum TuiEvent {
     DashboardArtFrame(Text<'static>),
     NewsFetched(Vec<NewsItem>, String),
     NewsFetchFailed(String),
+    NewsBodyFetched(String, String),
     BrowserInfoLoaded(String, String, Vec<String>),
     BrowserFilesLoaded(String, Vec<String>),
 }
@@ -1093,6 +1094,75 @@ fn parse_arch_xml(xml: &str) -> Vec<NewsItem> {
     items
 }
 
+pub fn fetch_article_body(tx: mpsc::Sender<TuiEvent>, link: String) {
+    tokio::spawn(async move {
+        let client = reqwest::Client::builder()
+            .user_agent("haj/0.2.5 (https://github.com/asitos/haj)")
+            .timeout(Duration::from_secs(10))
+            .build()
+            .unwrap();
+
+        if let Ok(resp) = client.get(&link).send().await {
+            if resp.status().is_success() {
+                if let Ok(html) = resp.text().await {
+                    let desc = {
+                        let doc = scraper::Html::parse_document(&html);
+                        let body_selector = scraper::Selector::parse(".article-content").unwrap();
+                        doc.select(&body_selector).next().map(|body_elem| {
+                            let mut desc = body_elem.html();
+                            desc = desc
+                                .replace("<p>", "")
+                                .replace("</p>", "\n\n")
+                                .replace("<li>", "• ")
+                                .replace("</li>", "\n")
+                                .replace("<ul>", "")
+                                .replace("</ul>", "\n")
+                                .replace("<br>", "\n")
+                                .replace("<br/>", "\n")
+                                .replace("<br />", "\n");
+
+                            while let Some(start) = desc.find('<') {
+                                if let Some(end) = desc[start..].find('>') {
+                                    let tag = &desc[start..=start + end];
+                                    if tag == "<code>" || tag == "</code>" {
+                                        desc.replace_range(
+                                            start..=start + end,
+                                            if tag == "<code>" {
+                                                "[[CODE_START]]"
+                                            } else {
+                                                "[[CODE_END]]"
+                                            },
+                                        );
+                                    } else {
+                                        desc.replace_range(start..=start + end, "");
+                                    }
+                                } else {
+                                    break;
+                                }
+                            }
+                            desc = desc
+                                .replace("[[CODE_START]]", "<code>")
+                                .replace("[[CODE_END]]", "</code>");
+
+                            desc = desc
+                                .replace("&gt;", ">")
+                                .replace("&lt;", "<")
+                                .replace("&quot;", "\"")
+                                .replace("&amp;", "&")
+                                .replace("&#39;", "'");
+                            desc
+                        })
+                    };
+
+                    if let Some(d) = desc {
+                        let _ = tx.send(TuiEvent::NewsBodyFetched(link, d)).await;
+                    }
+                }
+            }
+        }
+    });
+}
+
 pub fn fetch_arch_news(tx: mpsc::Sender<TuiEvent>) {
     tokio::spawn(async move {
         let client = reqwest::Client::builder()
@@ -1107,13 +1177,105 @@ pub fn fetch_arch_news(tx: mpsc::Sender<TuiEvent>) {
         match client.get("https://archlinux.org/feeds/news/").send().await {
             Ok(resp) if resp.status().is_success() => {
                 if let Ok(xml) = resp.text().await {
-                    let items = parse_arch_xml(&xml);
+                    let mut items = parse_arch_xml(&xml);
+                    
+                    let html_idx_opt = if let Ok(resp_idx) = client.get("https://archlinux.org/news/").send().await {
+                        if resp_idx.status().is_success() {
+                            resp_idx.text().await.ok()
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
+                    if let Some(html_idx) = html_idx_opt {
+                        let doc = scraper::Html::parse_document(&html_idx);
+                        let row_selector = scraper::Selector::parse("#article-list tbody tr").unwrap();
+                        let td_selector = scraper::Selector::parse("td").unwrap();
+                        let a_selector = scraper::Selector::parse("a").unwrap();
+                        
+                        for row in doc.select(&row_selector) {
+                            let tds: Vec<_> = row.select(&td_selector).collect();
+                            if tds.len() >= 2 {
+                                let date_str = tds[0].text().collect::<String>().trim().to_string();
+                                if let Some(a) = tds[1].select(&a_selector).next() {
+                                    let title = a.text().collect::<String>().trim().to_string();
+                                    let path = a.value().attr("href").unwrap_or_default().to_string();
+                                    let link = format!("https://archlinux.org{}", path);
+                                    
+                                    if !items.iter().any(|item| item.link == link) {
+                                        let pub_date = if let Ok(dt) = chrono::NaiveDate::parse_from_str(&date_str, "%Y-%m-%d") {
+                                            dt.and_hms_opt(0, 0, 0)
+                                              .map(|dt_time| dt_time.format("%a, %d %b %Y 00:00:00 +0000").to_string())
+                                              .unwrap_or_else(|| date_str.clone())
+                                        } else {
+                                            date_str.clone()
+                                        };
+                                        
+                                        let critical_words = [
+                                            "manual intervention",
+                                            "requires intervention",
+                                            "breaking change",
+                                            "filesystem",
+                                            "pacman",
+                                            "keyring",
+                                            "glibc",
+                                        ];
+                                        
+                                        let is_crit = critical_words
+                                            .iter()
+                                            .any(|&w| title.to_lowercase().contains(w));
+                                        
+                                        items.push(NewsItem {
+                                            title,
+                                            link,
+                                            pub_date,
+                                            description: "Loading article content...".to_string(),
+                                            is_critical: is_crit,
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     if !items.is_empty() {
-                        if let Ok(cache_data) = serde_json::to_string(&items) {
+                        let mut cached_items = Vec::new();
+                        if let Ok(data) = std::fs::read_to_string(&cache_path) {
+                            if let Ok(parsed) = serde_json::from_str::<Vec<NewsItem>>(&data) {
+                                cached_items = parsed;
+                            }
+                        }
+
+                        for fetched_item in items {
+                            if let Some(pos) = cached_items.iter().position(|x| x.link == fetched_item.link) {
+                                let mut cached_item = cached_items[pos].clone();
+                                if fetched_item.description != "Loading article content..." {
+                                    cached_item.description = fetched_item.description;
+                                }
+                                cached_items[pos] = cached_item;
+                            } else {
+                                cached_items.push(fetched_item);
+                            }
+                        }
+
+                        cached_items.sort_by(|a, b| {
+                            let da = chrono::DateTime::parse_from_rfc2822(&a.pub_date);
+                            let db = chrono::DateTime::parse_from_rfc2822(&b.pub_date);
+                            match (da, db) {
+                                (Ok(ta), Ok(tb)) => tb.cmp(&ta),
+                                _ => b.pub_date.cmp(&a.pub_date),
+                            }
+                        });
+
+                        cached_items.truncate(100);
+
+                        if let Ok(cache_data) = serde_json::to_string(&cached_items) {
                             let _ = tokio::fs::write(&cache_path, cache_data).await;
                         }
                         let _ = tx
-                            .send(TuiEvent::NewsFetched(items, "just now".into()))
+                            .send(TuiEvent::NewsFetched(cached_items, "just now".into()))
                             .await;
                         return;
                     }
@@ -1266,8 +1428,16 @@ where
                 args.push("--color=never".into());
             }
 
-            let child_res = tokio::process::Command::new("sudo")
-                .args(args)
+            let is_root = unsafe { libc::geteuid() == 0 };
+            let (cmd_name, final_args) = if is_root {
+                ("pacman".to_string(), args[1..].to_vec())
+            } else {
+                ("sudo".to_string(), args)
+            };
+
+            let child_res = tokio::process::Command::new(cmd_name)
+                .args(final_args)
+                .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .kill_on_drop(true)
@@ -1277,17 +1447,6 @@ where
                 let pid = child.id();
                 let stdout = child.stdout.take().unwrap();
                 let stderr = child.stderr.take().unwrap();
-
-                let abort_task = tokio::spawn(async move {
-                    if let Some(()) = abort_rx.recv().await {
-                        if let Some(p) = pid {
-                            let _ = tokio::process::Command::new("sudo")
-                                .args(["kill", "-INT", &p.to_string()])
-                                .status()
-                                .await;
-                        }
-                    }
-                });
 
                 let tx_out = tx_channel.clone();
                 let out_task = tokio::spawn(async move {
@@ -1389,6 +1548,9 @@ where
                         if lower_clean.contains("error:")
                             || lower_clean.contains("warning:")
                             || lower_clean.contains("failed")
+                            || clean.starts_with("::")
+                            || lower_clean.contains("up to date")
+                            || lower_clean.contains("downloading")
                             || (in_hook_phase
                                 && (lower_clean.contains("missing")
                                     || lower_clean.contains("not found")))
@@ -1422,23 +1584,53 @@ where
                     }
                 });
 
-                let _ = tokio::join!(out_task, err_task);
+                let mut status = None;
+                let mut aborted = false;
 
-                let status = child
-                    .wait()
-                    .await
-                    .unwrap_or_else(|_| std::os::unix::process::ExitStatusExt::from_raw(1));
+                tokio::select! {
+                    _ = async {
+                        let _ = tokio::join!(out_task, err_task);
+                    } => {
+                        status = Some(child.wait().await.unwrap_or_else(|_| std::os::unix::process::ExitStatusExt::from_raw(1)));
+                    }
+                    Some(()) = abort_rx.recv() => {
+                        aborted = true;
+                        if let Some(p) = pid {
+                            let _ = tokio::process::Command::new("sudo")
+                                .args(["-n", "kill", "-INT", &p.to_string()])
+                                .status()
+                                .await;
 
-                abort_task.abort();
+                            tokio::select! {
+                                s = child.wait() => {
+                                    status = s.ok();
+                                }
+                                _ = tokio::time::sleep(Duration::from_millis(500)) => {
+                                    let _ = tokio::process::Command::new("sudo")
+                                        .args(["-n", "kill", "-KILL", &p.to_string()])
+                                        .status()
+                                        .await;
+                                    tokio::select! {
+                                        s = child.wait() => {
+                                            status = s.ok();
+                                        }
+                                        _ = tokio::time::sleep(Duration::from_millis(200)) => {}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
 
                 let _ = tx_channel.send(TuiEvent::PacmanProgress(100)).await;
 
-                if status.success() {
+                let success = status.is_some_and(|s| s.success());
+                if success && !aborted {
                     let _ = tx_channel.send(TuiEvent::TransactionComplete).await;
                     tokio::time::sleep(Duration::from_secs(2)).await;
                 } else {
                     let _ = tx_channel.send(TuiEvent::TransactionFailed).await;
-                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    tokio::time::sleep(Duration::from_secs(2)).await;
                 }
             } else {
                 let _ = tx_channel.send(TuiEvent::TransactionFailed).await;
@@ -1518,10 +1710,31 @@ where
                     app.news_items = items;
                     app.news_last_updated = time;
                     app.update_news_search();
+
+                    if let Some(idx) = app.news_list_state.selected() {
+                        if let Some(item) = app.filtered_news.get(idx) {
+                            if item.description == "Loading article content..." || item.description.is_empty() {
+                                fetch_article_body(tx.clone(), item.link.clone());
+                            }
+                        }
+                    }
                 }
                 TuiEvent::NewsFetchFailed(err) => {
                     app.is_fetching_news = false;
                     app.news_error = err;
+                }
+                TuiEvent::NewsBodyFetched(link, description) => {
+                    if let Some(item) = app.news_items.iter_mut().find(|n| n.link == link) {
+                        item.description = description.clone();
+                    }
+                    if let Some(item) = app.filtered_news.iter_mut().find(|n| n.link == link) {
+                        item.description = description.clone();
+                    }
+                    let home = dirs::home_dir().unwrap_or_default();
+                    let cache_path = home.join(".cache/haj/news.json");
+                    if let Ok(cache_data) = serde_json::to_string(&app.news_items) {
+                        let _ = std::fs::write(cache_path, cache_data);
+                    }
                 }
 
                 TuiEvent::BrowserInfoLoaded(pkg, info, deps) => {
@@ -1701,6 +1914,13 @@ where
                             KeyCode::Char('n') => {
                                 if app.active_widget == DashboardWidget::News {
                                     app.screen = CurrentScreen::News;
+                                    if let Some(idx) = app.news_list_state.selected() {
+                                        if let Some(item) = app.filtered_news.get(idx) {
+                                            if item.description == "Loading article content..." || item.description.is_empty() {
+                                                fetch_article_body(tx.clone(), item.link.clone());
+                                            }
+                                        }
+                                    }
                                 } else {
                                     app.active_widget = DashboardWidget::News;
                                 }
@@ -1712,7 +1932,16 @@ where
                                 app.active_widget = DashboardWidget::Blahaj;
                             }
                             KeyCode::Enter => match app.active_widget {
-                                DashboardWidget::News => app.screen = CurrentScreen::News,
+                                DashboardWidget::News => {
+                                    app.screen = CurrentScreen::News;
+                                    if let Some(idx) = app.news_list_state.selected() {
+                                        if let Some(item) = app.filtered_news.get(idx) {
+                                            if item.description == "Loading article content..." || item.description.is_empty() {
+                                                fetch_article_body(tx.clone(), item.link.clone());
+                                            }
+                                        }
+                                    }
+                                }
                                 DashboardWidget::Blahaj => app.screen = CurrentScreen::Browser,
                             },
                             KeyCode::Tab => {
@@ -1844,9 +2073,17 @@ where
                                         };
                                         app.news_list_state.select(Some(i));
                                         app.news_scroll = 0;
+                                        
+                                        let mut link_and_should_fetch = None;
                                         if let Some(item) = app.filtered_news.get(i) {
-                                            let link = item.link.clone();
-                                            app.mark_news_read(link);
+                                            let is_loading = item.description == "Loading article content..." || item.description.is_empty();
+                                            link_and_should_fetch = Some((item.link.clone(), is_loading));
+                                        }
+                                        if let Some((link, is_loading)) = link_and_should_fetch {
+                                            app.mark_news_read(link.clone());
+                                            if is_loading {
+                                                fetch_article_body(tx.clone(), link);
+                                            }
                                         }
                                     } else {
                                         app.news_scroll = app.news_scroll.saturating_add(1);
@@ -1866,9 +2103,17 @@ where
                                         };
                                         app.news_list_state.select(Some(i));
                                         app.news_scroll = 0;
+                                        
+                                        let mut link_and_should_fetch = None;
                                         if let Some(item) = app.filtered_news.get(i) {
-                                            let link = item.link.clone();
-                                            app.mark_news_read(link);
+                                            let is_loading = item.description == "Loading article content..." || item.description.is_empty();
+                                            link_and_should_fetch = Some((item.link.clone(), is_loading));
+                                        }
+                                        if let Some((link, is_loading)) = link_and_should_fetch {
+                                            app.mark_news_read(link.clone());
+                                            if is_loading {
+                                                fetch_article_body(tx.clone(), link);
+                                            }
                                         }
                                     } else {
                                         app.news_scroll = app.news_scroll.saturating_sub(1);
