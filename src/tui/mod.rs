@@ -23,6 +23,8 @@ use tokio::sync::mpsc;
 use crate::core;
 use ansi_to_tui::IntoText;
 
+pub const NEWS_PAGE_SIZE: usize = 25;
+
 pub mod browser;
 pub mod dashboard;
 pub mod groups;
@@ -179,6 +181,7 @@ pub enum TuiEvent {
     NewsFetched(Vec<NewsItem>, String),
     NewsFetchFailed(String),
     NewsBodyFetched(String, String),
+    NewsTotalCount(usize),
     BrowserInfoLoaded(String, String, Vec<String>),
     BrowserFilesLoaded(String, Vec<String>),
 }
@@ -263,6 +266,8 @@ pub struct App {
     pub is_fetching_news: bool,
     pub news_last_updated: String,
     pub news_error: String,
+    pub news_page: usize,
+    pub news_total_count: usize,
 
     pub transactions: Vec<Transaction>,
     pub filtered_transactions: Vec<Transaction>,
@@ -372,6 +377,8 @@ impl App {
             is_fetching_news: true,
             news_last_updated: "checking...".to_string(),
             news_error: String::new(),
+            news_page: 1,
+            news_total_count: 50,
 
             transactions: Vec::new(),
             filtered_transactions: Vec::new(),
@@ -519,7 +526,7 @@ impl App {
         }
     }
 
-    pub fn update_news_search(&mut self) {
+    pub fn update_news_search(&mut self, reset_page: bool) {
         let query = self.news_search_query.to_lowercase();
         self.filtered_news = self
             .news_items
@@ -531,13 +538,32 @@ impl App {
             })
             .cloned()
             .collect();
-        self.news_list_state
-            .select(if self.filtered_news.is_empty() {
-                None
-            } else {
-                Some(0)
-            });
-        self.news_scroll = 0;
+        if reset_page {
+            self.news_page = 1;
+            self.news_list_state
+                .select(if self.filtered_news.is_empty() {
+                    None
+                } else {
+                    Some(0)
+                });
+            self.news_scroll = 0;
+        } else {
+            if let Some(idx) = self.news_list_state.selected() {
+                let page_size = NEWS_PAGE_SIZE;
+                let start_idx = (self.news_page.saturating_sub(1)) * page_size;
+                let end_idx = (start_idx + page_size).min(self.filtered_news.len());
+                let displayed_count = end_idx.saturating_sub(start_idx);
+                if idx >= displayed_count {
+                    self.news_list_state.select(if displayed_count > 0 {
+                        Some(displayed_count - 1)
+                    } else {
+                        None
+                    });
+                }
+            } else if !self.filtered_news.is_empty() {
+                self.news_list_state.select(Some(0));
+            }
+        }
     }
 
     pub fn refresh_state(&mut self) {
@@ -1163,7 +1189,7 @@ pub fn fetch_article_body(tx: mpsc::Sender<TuiEvent>, link: String) {
     });
 }
 
-pub fn fetch_arch_news(tx: mpsc::Sender<TuiEvent>) {
+pub fn fetch_arch_news(tx: mpsc::Sender<TuiEvent>, page: usize) {
     tokio::spawn(async move {
         let client = reqwest::Client::builder()
             .user_agent("haj/0.2.5 (https://github.com/asitos/haj)")
@@ -1174,30 +1200,43 @@ pub fn fetch_arch_news(tx: mpsc::Sender<TuiEvent>) {
         let home = dirs::home_dir().unwrap_or_default();
         let cache_path = home.join(".cache/haj/news.json");
 
-        match client.get("https://archlinux.org/feeds/news/").send().await {
-            Ok(resp) if resp.status().is_success() => {
-                if let Ok(xml) = resp.text().await {
-                    let mut items = parse_arch_xml(&xml);
+        let mut items = Vec::new();
+        if page == 1 {
+            if let Ok(resp) = client.get("https://archlinux.org/feeds/news/").send().await {
+                if resp.status().is_success() {
+                    if let Ok(xml) = resp.text().await {
+                        items = parse_arch_xml(&xml);
+                    }
+                }
+            }
+        }
 
-                    let html_idx_opt = if let Ok(resp_idx) =
-                        client.get("https://archlinux.org/news/").send().await
-                    {
-                        if resp_idx.status().is_success() {
-                            resp_idx.text().await.ok()
-                        } else {
-                            None
+        let url = format!("https://archlinux.org/news/?page={}", page);
+        match client.get(&url).send().await {
+            Ok(resp_idx) if resp_idx.status().is_success() => {
+                if let Ok(html_idx) = resp_idx.text().await {
+                    let mut parsed_total = None;
+                    if let Some(idx) = html_idx.find(" news items") {
+                        let slice = &html_idx[..idx];
+                        let num_str: String = slice
+                            .chars()
+                            .rev()
+                            .take_while(|c| c.is_ascii_digit())
+                            .collect();
+                        let num_str: String = num_str.chars().rev().collect();
+                        if let Ok(total) = num_str.parse::<usize>() {
+                            parsed_total = Some(total);
                         }
-                    } else {
-                        None
-                    };
+                    }
 
-                    if let Some(html_idx) = html_idx_opt {
+                    let new_items = {
                         let doc = scraper::Html::parse_document(&html_idx);
                         let row_selector =
                             scraper::Selector::parse("#article-list tbody tr").unwrap();
                         let td_selector = scraper::Selector::parse("td").unwrap();
                         let a_selector = scraper::Selector::parse("a").unwrap();
 
+                        let mut parsed_items = Vec::new();
                         for row in doc.select(&row_selector) {
                             let tds: Vec<_> = row.select(&td_selector).collect();
                             if tds.len() >= 2 {
@@ -1237,83 +1276,85 @@ pub fn fetch_arch_news(tx: mpsc::Sender<TuiEvent>) {
                                             .iter()
                                             .any(|&w| title.to_lowercase().contains(w));
 
-                                        items.push(NewsItem {
+                                        parsed_items.push(NewsItem {
                                             title,
                                             link,
                                             pub_date,
-                                            description: "Loading article content...".to_string(),
+                                            description: "loading article content...".to_string(),
                                             is_critical: is_crit,
                                         });
                                     }
                                 }
                             }
                         }
+                        parsed_items
+                    };
+
+                    for fetched_item in new_items {
+                        if !items.iter().any(|item| item.link == fetched_item.link) {
+                            items.push(fetched_item);
+                        }
                     }
 
-                    if !items.is_empty() {
-                        let mut cached_items = Vec::new();
-                        if let Ok(data) = std::fs::read_to_string(&cache_path) {
-                            if let Ok(parsed) = serde_json::from_str::<Vec<NewsItem>>(&data) {
-                                cached_items = parsed;
-                            }
+                    let mut cached_items = Vec::new();
+                    if let Ok(data) = std::fs::read_to_string(&cache_path) {
+                        if let Ok(parsed) = serde_json::from_str::<Vec<NewsItem>>(&data) {
+                            cached_items = parsed;
                         }
-
-                        for fetched_item in items {
-                            if let Some(pos) = cached_items
-                                .iter()
-                                .position(|x| x.link == fetched_item.link)
-                            {
-                                let mut cached_item = cached_items[pos].clone();
-                                if fetched_item.description != "Loading article content..." {
-                                    cached_item.description = fetched_item.description;
-                                }
-                                cached_items[pos] = cached_item;
-                            } else {
-                                cached_items.push(fetched_item);
-                            }
-                        }
-
-                        cached_items.sort_by(|a, b| {
-                            let da = chrono::DateTime::parse_from_rfc2822(&a.pub_date);
-                            let db = chrono::DateTime::parse_from_rfc2822(&b.pub_date);
-                            match (da, db) {
-                                (Ok(ta), Ok(tb)) => tb.cmp(&ta),
-                                _ => b.pub_date.cmp(&a.pub_date),
-                            }
-                        });
-
-                        cached_items.truncate(100);
-
-                        if let Ok(cache_data) = serde_json::to_string(&cached_items) {
-                            let _ = tokio::fs::write(&cache_path, cache_data).await;
-                        }
-                        let _ = tx
-                            .send(TuiEvent::NewsFetched(cached_items, "just now".into()))
-                            .await;
-                        return;
                     }
+
+                    for fetched_item in items {
+                        if let Some(pos) = cached_items
+                            .iter()
+                            .position(|x| x.link == fetched_item.link)
+                        {
+                            let mut cached_item = cached_items[pos].clone();
+                            if fetched_item.description != "loading article content..." {
+                                cached_item.description = fetched_item.description;
+                            }
+                            cached_items[pos] = cached_item;
+                        } else {
+                            cached_items.push(fetched_item);
+                        }
+                    }
+
+                    cached_items.sort_by(|a, b| {
+                        let da = chrono::DateTime::parse_from_rfc2822(&a.pub_date);
+                        let db = chrono::DateTime::parse_from_rfc2822(&b.pub_date);
+                        match (da, db) {
+                            (Ok(ta), Ok(tb)) => tb.cmp(&ta),
+                            _ => b.pub_date.cmp(&a.pub_date),
+                        }
+                    });
+
+                    cached_items.truncate(1000);
+
+                    if let Ok(cache_data) = serde_json::to_string(&cached_items) {
+                        let _ = tokio::fs::write(&cache_path, cache_data).await;
+                    }
+                    let _ = tx
+                        .send(TuiEvent::NewsFetched(cached_items, "just now".into()))
+                        .await;
+                    if let Some(total) = parsed_total {
+                        let _ = tx.send(TuiEvent::NewsTotalCount(total)).await;
+                    }
+                    return;
                 }
-                let _ = tx
-                    .send(TuiEvent::NewsFetchFailed(
-                        "Failed to parse Arch news".into(),
-                    ))
-                    .await;
             }
-            Ok(resp) => {
-                let _ = tx
-                    .send(TuiEvent::NewsFetchFailed(format!("HTTP {}", resp.status())))
-                    .await;
-            }
-            Err(e) => {
-                if let Ok(data) = std::fs::read_to_string(&cache_path) {
-                    if let Ok(items) = serde_json::from_str::<Vec<NewsItem>>(&data) {
-                        let _ = tx.send(TuiEvent::NewsFetched(items, "cached".into())).await;
-                        return;
-                    }
-                }
-                let _ = tx.send(TuiEvent::NewsFetchFailed(e.to_string())).await;
+            _ => {}
+        }
+
+        if let Ok(data) = std::fs::read_to_string(&cache_path) {
+            if let Ok(items) = serde_json::from_str::<Vec<NewsItem>>(&data) {
+                let _ = tx.send(TuiEvent::NewsFetched(items, "cached".into())).await;
+                return;
             }
         }
+        let _ = tx
+            .send(TuiEvent::NewsFetchFailed(
+                "Failed to fetch Arch news".into(),
+            ))
+            .await;
     });
 }
 
@@ -1348,7 +1389,7 @@ where
     let config = crate::config::load_config();
     let (tx, mut rx) = mpsc::channel::<TuiEvent>(100);
 
-    fetch_arch_news(tx.clone());
+    fetch_arch_news(tx.clone(), 1);
 
     let tx_input = tx.clone();
     tokio::spawn(async move {
@@ -1722,11 +1763,13 @@ where
                     app.news_error.clear();
                     app.news_items = items;
                     app.news_last_updated = time;
-                    app.update_news_search();
+                    app.update_news_search(false);
 
                     if let Some(idx) = app.news_list_state.selected() {
-                        if let Some(item) = app.filtered_news.get(idx) {
-                            if item.description == "Loading article content..."
+                        let page_size = NEWS_PAGE_SIZE;
+                        let actual_idx = (app.news_page.saturating_sub(1)) * page_size + idx;
+                        if let Some(item) = app.filtered_news.get(actual_idx) {
+                            if item.description == "loading article content..."
                                 || item.description.is_empty()
                             {
                                 fetch_article_body(tx.clone(), item.link.clone());
@@ -1750,6 +1793,9 @@ where
                     if let Ok(cache_data) = serde_json::to_string(&app.news_items) {
                         let _ = std::fs::write(cache_path, cache_data);
                     }
+                }
+                TuiEvent::NewsTotalCount(total) => {
+                    app.news_total_count = total;
                 }
 
                 TuiEvent::BrowserInfoLoaded(pkg, info, deps) => {
@@ -1930,8 +1976,11 @@ where
                                 if app.active_widget == DashboardWidget::News {
                                     app.screen = CurrentScreen::News;
                                     if let Some(idx) = app.news_list_state.selected() {
-                                        if let Some(item) = app.filtered_news.get(idx) {
-                                            if item.description == "Loading article content..."
+                                        let page_size = NEWS_PAGE_SIZE;
+                                        let actual_idx =
+                                            (app.news_page.saturating_sub(1)) * page_size + idx;
+                                        if let Some(item) = app.filtered_news.get(actual_idx) {
+                                            if item.description == "loading article content..."
                                                 || item.description.is_empty()
                                             {
                                                 fetch_article_body(tx.clone(), item.link.clone());
@@ -1952,8 +2001,11 @@ where
                                 DashboardWidget::News => {
                                     app.screen = CurrentScreen::News;
                                     if let Some(idx) = app.news_list_state.selected() {
-                                        if let Some(item) = app.filtered_news.get(idx) {
-                                            if item.description == "Loading article content..."
+                                        let page_size = NEWS_PAGE_SIZE;
+                                        let actual_idx =
+                                            (app.news_page.saturating_sub(1)) * page_size + idx;
+                                        if let Some(item) = app.filtered_news.get(actual_idx) {
+                                            if item.description == "loading article content..."
                                                 || item.description.is_empty()
                                             {
                                                 fetch_article_body(tx.clone(), item.link.clone());
@@ -1987,7 +2039,8 @@ where
                                 }
                                 KeyCode::Char('r') => {
                                     app.is_fetching_news = true;
-                                    fetch_arch_news(tx.clone());
+                                    app.news_page = 1;
+                                    fetch_arch_news(tx.clone(), 1);
                                 }
                                 KeyCode::Tab | KeyCode::Enter => {
                                     app.news_focus = if app.news_focus == NewsFocus::List {
@@ -1996,9 +2049,74 @@ where
                                         NewsFocus::List
                                     };
                                 }
+                                KeyCode::Char(']') => {
+                                    let page_size = NEWS_PAGE_SIZE;
+                                    let total_count = if app.news_search_query.is_empty() {
+                                        app.news_total_count
+                                    } else {
+                                        app.filtered_news.len()
+                                    };
+                                    let max_pages = total_count.div_ceil(page_size);
+                                    if app.news_page < max_pages {
+                                        app.news_page += 1;
+                                        app.news_list_state.select(Some(0));
+                                        app.news_scroll = 0;
+
+                                        let needed_index = app.news_page * page_size;
+                                        if needed_index > app.news_items.len()
+                                            && app.news_items.len() < app.news_total_count
+                                        {
+                                            let next_web_page = (app.news_items.len() / 50) + 1;
+                                            app.is_fetching_news = true;
+                                            fetch_arch_news(tx.clone(), next_web_page);
+                                        } else {
+                                            if let Some(idx) = app.news_list_state.selected() {
+                                                let actual_idx =
+                                                    (app.news_page - 1) * page_size + idx;
+                                                if let Some(item) =
+                                                    app.filtered_news.get(actual_idx)
+                                                {
+                                                    if item.description
+                                                        == "loading article content..."
+                                                        || item.description.is_empty()
+                                                    {
+                                                        fetch_article_body(
+                                                            tx.clone(),
+                                                            item.link.clone(),
+                                                        );
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                KeyCode::Char('[') => {
+                                    if app.news_page > 1 {
+                                        app.news_page -= 1;
+                                        app.news_list_state.select(Some(0));
+                                        app.news_scroll = 0;
+
+                                        let page_size = NEWS_PAGE_SIZE;
+                                        if let Some(idx) = app.news_list_state.selected() {
+                                            let actual_idx = (app.news_page - 1) * page_size + idx;
+                                            if let Some(item) = app.filtered_news.get(actual_idx) {
+                                                if item.description == "loading article content..."
+                                                    || item.description.is_empty()
+                                                {
+                                                    fetch_article_body(
+                                                        tx.clone(),
+                                                        item.link.clone(),
+                                                    );
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                                 KeyCode::Char('o') => {
                                     if let Some(idx) = app.news_list_state.selected() {
-                                        if let Some(item) = app.filtered_news.get(idx) {
+                                        let page_size = NEWS_PAGE_SIZE;
+                                        let actual_idx = (app.news_page - 1) * page_size + idx;
+                                        if let Some(item) = app.filtered_news.get(actual_idx) {
                                             let url = item.link.clone();
                                             tokio::spawn(async move {
                                                 let _ = tokio::process::Command::new("xdg-open")
@@ -2011,7 +2129,9 @@ where
                                 }
                                 KeyCode::Char('y') => {
                                     if let Some(idx) = app.news_list_state.selected() {
-                                        if let Some(item) = app.filtered_news.get(idx) {
+                                        let page_size = NEWS_PAGE_SIZE;
+                                        let actual_idx = (app.news_page - 1) * page_size + idx;
+                                        if let Some(item) = app.filtered_news.get(actual_idx) {
                                             let link = item.link.clone();
                                             tokio::spawn(async move {
                                                 if std::process::Command::new("wl-copy")
@@ -2037,7 +2157,9 @@ where
                                 }
                                 KeyCode::Char('c') => {
                                     if let Some(idx) = app.news_list_state.selected() {
-                                        if let Some(item) = app.filtered_news.get(idx) {
+                                        let page_size = NEWS_PAGE_SIZE;
+                                        let actual_idx = (app.news_page - 1) * page_size + idx;
+                                        if let Some(item) = app.filtered_news.get(actual_idx) {
                                             let mut cmd_to_copy = String::new();
                                             for line in item.description.lines() {
                                                 let l = line.trim();
@@ -2080,9 +2202,16 @@ where
                                 }
                                 KeyCode::Down | KeyCode::Char('j') => {
                                     if app.news_focus == NewsFocus::List {
+                                        let page_size = NEWS_PAGE_SIZE;
+                                        let start_idx =
+                                            (app.news_page.saturating_sub(1)) * page_size;
+                                        let end_idx =
+                                            (start_idx + page_size).min(app.filtered_news.len());
+                                        let displayed_count = end_idx.saturating_sub(start_idx);
+
                                         let i = match app.news_list_state.selected() {
                                             Some(i) => {
-                                                if i >= app.filtered_news.len().saturating_sub(1) {
+                                                if i >= displayed_count.saturating_sub(1) {
                                                     0
                                                 } else {
                                                     i + 1
@@ -2094,9 +2223,10 @@ where
                                         app.news_scroll = 0;
 
                                         let mut link_and_should_fetch = None;
-                                        if let Some(item) = app.filtered_news.get(i) {
+                                        let actual_idx = start_idx + i;
+                                        if let Some(item) = app.filtered_news.get(actual_idx) {
                                             let is_loading = item.description
-                                                == "Loading article content..."
+                                                == "loading article content..."
                                                 || item.description.is_empty();
                                             link_and_should_fetch =
                                                 Some((item.link.clone(), is_loading));
@@ -2113,10 +2243,17 @@ where
                                 }
                                 KeyCode::Up | KeyCode::Char('k') => {
                                     if app.news_focus == NewsFocus::List {
+                                        let page_size = NEWS_PAGE_SIZE;
+                                        let start_idx =
+                                            (app.news_page.saturating_sub(1)) * page_size;
+                                        let end_idx =
+                                            (start_idx + page_size).min(app.filtered_news.len());
+                                        let displayed_count = end_idx.saturating_sub(start_idx);
+
                                         let i = match app.news_list_state.selected() {
                                             Some(i) => {
                                                 if i == 0 {
-                                                    app.filtered_news.len().saturating_sub(1)
+                                                    displayed_count.saturating_sub(1)
                                                 } else {
                                                     i - 1
                                                 }
@@ -2127,9 +2264,10 @@ where
                                         app.news_scroll = 0;
 
                                         let mut link_and_should_fetch = None;
-                                        if let Some(item) = app.filtered_news.get(i) {
+                                        let actual_idx = start_idx + i;
+                                        if let Some(item) = app.filtered_news.get(actual_idx) {
                                             let is_loading = item.description
-                                                == "Loading article content..."
+                                                == "loading article content..."
                                                 || item.description.is_empty();
                                             link_and_should_fetch =
                                                 Some((item.link.clone(), is_loading));
@@ -2172,15 +2310,15 @@ where
                                     if key.modifiers.contains(KeyModifiers::CONTROL) =>
                                 {
                                     app.news_search_query.clear();
-                                    app.update_news_search();
+                                    app.update_news_search(true);
                                 }
                                 KeyCode::Backspace | KeyCode::Delete => {
                                     app.news_search_query.pop();
-                                    app.update_news_search();
+                                    app.update_news_search(true);
                                 }
                                 KeyCode::Char(c) => {
                                     app.news_search_query.push(c);
-                                    app.update_news_search();
+                                    app.update_news_search(true);
                                 }
                                 _ => {}
                             },
