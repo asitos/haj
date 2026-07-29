@@ -1178,8 +1178,10 @@ pub fn fetch_arch_news(tx: mpsc::Sender<TuiEvent>) {
             Ok(resp) if resp.status().is_success() => {
                 if let Ok(xml) = resp.text().await {
                     let mut items = parse_arch_xml(&xml);
-                    
-                    let html_idx_opt = if let Ok(resp_idx) = client.get("https://archlinux.org/news/").send().await {
+
+                    let html_idx_opt = if let Ok(resp_idx) =
+                        client.get("https://archlinux.org/news/").send().await
+                    {
                         if resp_idx.status().is_success() {
                             resp_idx.text().await.ok()
                         } else {
@@ -1191,28 +1193,36 @@ pub fn fetch_arch_news(tx: mpsc::Sender<TuiEvent>) {
 
                     if let Some(html_idx) = html_idx_opt {
                         let doc = scraper::Html::parse_document(&html_idx);
-                        let row_selector = scraper::Selector::parse("#article-list tbody tr").unwrap();
+                        let row_selector =
+                            scraper::Selector::parse("#article-list tbody tr").unwrap();
                         let td_selector = scraper::Selector::parse("td").unwrap();
                         let a_selector = scraper::Selector::parse("a").unwrap();
-                        
+
                         for row in doc.select(&row_selector) {
                             let tds: Vec<_> = row.select(&td_selector).collect();
                             if tds.len() >= 2 {
                                 let date_str = tds[0].text().collect::<String>().trim().to_string();
                                 if let Some(a) = tds[1].select(&a_selector).next() {
                                     let title = a.text().collect::<String>().trim().to_string();
-                                    let path = a.value().attr("href").unwrap_or_default().to_string();
+                                    let path =
+                                        a.value().attr("href").unwrap_or_default().to_string();
                                     let link = format!("https://archlinux.org{}", path);
-                                    
+
                                     if !items.iter().any(|item| item.link == link) {
-                                        let pub_date = if let Ok(dt) = chrono::NaiveDate::parse_from_str(&date_str, "%Y-%m-%d") {
+                                        let pub_date = if let Ok(dt) =
+                                            chrono::NaiveDate::parse_from_str(&date_str, "%Y-%m-%d")
+                                        {
                                             dt.and_hms_opt(0, 0, 0)
-                                              .map(|dt_time| dt_time.format("%a, %d %b %Y 00:00:00 +0000").to_string())
-                                              .unwrap_or_else(|| date_str.clone())
+                                                .map(|dt_time| {
+                                                    dt_time
+                                                        .format("%a, %d %b %Y 00:00:00 +0000")
+                                                        .to_string()
+                                                })
+                                                .unwrap_or_else(|| date_str.clone())
                                         } else {
                                             date_str.clone()
                                         };
-                                        
+
                                         let critical_words = [
                                             "manual intervention",
                                             "requires intervention",
@@ -1222,11 +1232,11 @@ pub fn fetch_arch_news(tx: mpsc::Sender<TuiEvent>) {
                                             "keyring",
                                             "glibc",
                                         ];
-                                        
+
                                         let is_crit = critical_words
                                             .iter()
                                             .any(|&w| title.to_lowercase().contains(w));
-                                        
+
                                         items.push(NewsItem {
                                             title,
                                             link,
@@ -1249,7 +1259,10 @@ pub fn fetch_arch_news(tx: mpsc::Sender<TuiEvent>) {
                         }
 
                         for fetched_item in items {
-                            if let Some(pos) = cached_items.iter().position(|x| x.link == fetched_item.link) {
+                            if let Some(pos) = cached_items
+                                .iter()
+                                .position(|x| x.link == fetched_item.link)
+                            {
                                 let mut cached_item = cached_items[pos].clone();
                                 if fetched_item.description != "Loading article content..." {
                                     cached_item.description = fetched_item.description;
@@ -1713,7 +1726,9 @@ where
 
                     if let Some(idx) = app.news_list_state.selected() {
                         if let Some(item) = app.filtered_news.get(idx) {
-                            if item.description == "Loading article content..." || item.description.is_empty() {
+                            if item.description == "Loading article content..."
+                                || item.description.is_empty()
+                            {
                                 fetch_article_body(tx.clone(), item.link.clone());
                             }
                         }
@@ -1916,7 +1931,9 @@ where
                                     app.screen = CurrentScreen::News;
                                     if let Some(idx) = app.news_list_state.selected() {
                                         if let Some(item) = app.filtered_news.get(idx) {
-                                            if item.description == "Loading article content..." || item.description.is_empty() {
+                                            if item.description == "Loading article content..."
+                                                || item.description.is_empty()
+                                            {
                                                 fetch_article_body(tx.clone(), item.link.clone());
                                             }
                                         }
@@ -1936,7 +1953,9 @@ where
                                     app.screen = CurrentScreen::News;
                                     if let Some(idx) = app.news_list_state.selected() {
                                         if let Some(item) = app.filtered_news.get(idx) {
-                                            if item.description == "Loading article content..." || item.description.is_empty() {
+                                            if item.description == "Loading article content..."
+                                                || item.description.is_empty()
+                                            {
                                                 fetch_article_body(tx.clone(), item.link.clone());
                                             }
                                         }
@@ -2073,11 +2092,14 @@ where
                                         };
                                         app.news_list_state.select(Some(i));
                                         app.news_scroll = 0;
-                                        
+
                                         let mut link_and_should_fetch = None;
                                         if let Some(item) = app.filtered_news.get(i) {
-                                            let is_loading = item.description == "Loading article content..." || item.description.is_empty();
-                                            link_and_should_fetch = Some((item.link.clone(), is_loading));
+                                            let is_loading = item.description
+                                                == "Loading article content..."
+                                                || item.description.is_empty();
+                                            link_and_should_fetch =
+                                                Some((item.link.clone(), is_loading));
                                         }
                                         if let Some((link, is_loading)) = link_and_should_fetch {
                                             app.mark_news_read(link.clone());
@@ -2103,11 +2125,14 @@ where
                                         };
                                         app.news_list_state.select(Some(i));
                                         app.news_scroll = 0;
-                                        
+
                                         let mut link_and_should_fetch = None;
                                         if let Some(item) = app.filtered_news.get(i) {
-                                            let is_loading = item.description == "Loading article content..." || item.description.is_empty();
-                                            link_and_should_fetch = Some((item.link.clone(), is_loading));
+                                            let is_loading = item.description
+                                                == "Loading article content..."
+                                                || item.description.is_empty();
+                                            link_and_should_fetch =
+                                                Some((item.link.clone(), is_loading));
                                         }
                                         if let Some((link, is_loading)) = link_and_should_fetch {
                                             app.mark_news_read(link.clone());
