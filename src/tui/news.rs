@@ -413,7 +413,7 @@ fn render_footer(f: &mut Frame, app: &App, area: Rect) {
         .filter(|n| !app.read_news.contains(&n.link))
         .count();
     let top_line = Line::from(Span::styled(
-        " j/k move • ] next page • [ prev page • / search • tab focus • r refresh • y copy link • c copy command • o browser • esc back ",
+        " j/k/g/G nav • ] next page • [ prev page • / search • tab focus • r refresh • y copy link • c copy command • o browser • esc back ",
         Style::default().fg(Color::DarkGray),
     ));
     let divider = Line::from(Span::styled(
