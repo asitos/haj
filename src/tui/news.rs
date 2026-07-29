@@ -56,8 +56,17 @@ fn render_search_bar(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_headlines(f: &mut Frame, app: &mut App, area: Rect) {
-    let items: Vec<ListItem> = app
-        .filtered_news
+    let page_size = super::NEWS_PAGE_SIZE;
+    let start_idx = (app.news_page.saturating_sub(1)) * page_size;
+    let end_idx = (start_idx + page_size).min(app.filtered_news.len());
+
+    let page_items = if start_idx < app.filtered_news.len() {
+        &app.filtered_news[start_idx..end_idx]
+    } else {
+        &[]
+    };
+
+    let items: Vec<ListItem> = page_items
         .iter()
         .map(|news| {
             let is_read = app.read_news.contains(&news.link);
@@ -166,12 +175,14 @@ fn render_article(f: &mut Frame, app: &mut App, area: Rect) {
     }
 
     if let Some(selected_idx) = app.news_list_state.selected() {
-        if let Some(article) = app.filtered_news.get(selected_idx) {
+        let page_size = super::NEWS_PAGE_SIZE;
+        let actual_idx = (app.news_page.saturating_sub(1)) * page_size + selected_idx;
+        if let Some(article) = app.filtered_news.get(actual_idx) {
             let total = app.filtered_news.len();
             let title = if is_focused {
-                format!(" reading ● {}/{} ", selected_idx + 1, total)
+                format!(" reading ● {}/{} ", actual_idx + 1, total)
             } else {
-                format!(" reading • {}/{} ", selected_idx + 1, total)
+                format!(" reading • {}/{} ", actual_idx + 1, total)
             };
 
             let query = app.news_search_query.clone();
@@ -402,7 +413,7 @@ fn render_footer(f: &mut Frame, app: &App, area: Rect) {
         .filter(|n| !app.read_news.contains(&n.link))
         .count();
     let top_line = Line::from(Span::styled(
-        " j/k move • / search • tab focus • r refresh • y copy link • c copy command • o browser • esc back ",
+        " j/k move • ] next page • [ prev page • / search • tab focus • r refresh • y copy link • c copy command • o browser • esc back ",
         Style::default().fg(Color::DarkGray),
     ));
     let divider = Line::from(Span::styled(
@@ -415,11 +426,36 @@ fn render_footer(f: &mut Frame, app: &App, area: Rect) {
     } else {
         &app.news_last_updated
     };
+
+    let page_size = super::NEWS_PAGE_SIZE;
+    let total_count = if app.news_search_query.is_empty() {
+        app.news_total_count
+    } else {
+        app.filtered_news.len()
+    };
+    let max_pages = total_count.div_ceil(page_size);
+    let start_idx = (app.news_page.saturating_sub(1)) * page_size + 1;
+    let end_idx = if app.news_search_query.is_empty() {
+        (start_idx + page_size - 1).min(app.news_total_count)
+    } else {
+        (start_idx + page_size - 1).min(app.filtered_news.len())
+    };
+
+    let page_info = if app.filtered_news.is_empty() && !app.news_search_query.is_empty() {
+        "0 articles".to_string()
+    } else {
+        format!(
+            "Page {}/{} ({}-{} of {})",
+            app.news_page,
+            max_pages.max(1),
+            start_idx,
+            end_idx,
+            total_count
+        )
+    };
+
     let bottom_line = Line::from(vec![
-        Span::styled(
-            format!(" {} articles", app.filtered_news.len()),
-            Style::default().fg(Color::White),
-        ),
+        Span::styled(page_info, Style::default().fg(Color::White)),
         Span::styled("    updated ", Style::default().fg(Color::DarkGray)),
         Span::styled(last_up, Style::default().fg(Color::White)),
         Span::styled(
