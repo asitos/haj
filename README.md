@@ -80,7 +80,7 @@ Server = https://asitos.github.io/blaharch-repo/$arch
 then just sync and install normally (or update `haj` if it is already installed):
 
 ```bash
-sudo pacman -Sy haj
+sudo pacman -Syu haj
 ```
 
 ### cargo
