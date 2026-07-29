@@ -220,13 +220,16 @@ async fn view_pkgbuilds(pkgs: &[String]) {
                 if !parts.is_empty() {
                     let exec = &parts[0];
                     let mut cmd = std::process::Command::new(exec);
-                    
+
                     if parts.len() > 1 {
                         cmd.args(&parts[1..]);
                     }
 
                     let exec_lower = exec.to_lowercase();
-                    if exec_lower.contains("nvim") || exec_lower.contains("vim") || exec_lower.contains("vi") {
+                    if exec_lower.contains("nvim")
+                        || exec_lower.contains("vim")
+                        || exec_lower.contains("vi")
+                    {
                         cmd.arg("-R");
                     } else if exec_lower.contains("nano") {
                         cmd.arg("-v");
