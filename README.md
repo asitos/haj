@@ -42,7 +42,7 @@ works on virtually every `pacman`-based distro — arch linux, blahArch, artix, 
 
 - **native package browser:** browse repositories, inspect dependencies, installed files, package metadata and groups entirely inside the tui with asynchronous lazy loading.
 - **interactive search-install:** type a naked query (e.g., `haj discord`) to display a numbered table of matching native and AUR packages. Select numbers (e.g., `1 3`) to queue them instantly.
-- **aur PKGBUILD auditing:** press `v` during the aur pre-transaction prompt to inspect the live `PKGBUILD` via a fast shallow clone, piped directly into `bat` or `less` right in your terminal.
+- **aur PKGBUILD auditing:** press `v` during the aur pre-transaction prompt to inspect the live `PKGBUILD` via a fast shallow clone, opens right inside your default text editor like neovim.
 - **arch news safety guard:** before running `haj jump`, the system pings the official Arch rss feed. If a post from the last 7 days requires manual intervention, `haj` displays an unmissable red warning banner with the headline.
 - **system overview (`stats`):** a clean status dashboard tracking package counts, explicit vs. dependency splits, cache sizes, update counts, and system health at a glance.
 - **the cargo/bun aesthetic:** no more jagged progress bars or walls of text. `haj` parses `pacman` output streams in real-time, displaying a single, elegant progress spinner and clean transaction summaries.
