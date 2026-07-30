@@ -2156,17 +2156,20 @@ where
                                                     .output()
                                                     .is_err()
                                                 {
-                                                    let mut child =
+                                                    if let Ok(mut child) =
                                                         std::process::Command::new("xclip")
                                                             .args(["-selection", "clipboard"])
                                                             .stdin(std::process::Stdio::piped())
                                                             .spawn()
-                                                            .unwrap();
-                                                    if let Some(mut stdin) = child.stdin.take() {
-                                                        use std::io::Write;
-                                                        let _ = stdin.write_all(link.as_bytes());
+                                                    {
+                                                        if let Some(mut stdin) = child.stdin.take()
+                                                        {
+                                                            use std::io::Write;
+                                                            let _ =
+                                                                stdin.write_all(link.as_bytes());
+                                                        }
+                                                        let _ = child.wait();
                                                     }
-                                                    let _ = child.wait();
                                                 }
                                             });
                                         }
@@ -2196,19 +2199,22 @@ where
                                                         .output()
                                                         .is_err()
                                                     {
-                                                        let mut child =
+                                                        if let Ok(mut child) =
                                                             std::process::Command::new("xclip")
                                                                 .args(["-selection", "clipboard"])
                                                                 .stdin(std::process::Stdio::piped())
                                                                 .spawn()
-                                                                .unwrap();
-                                                        if let Some(mut stdin) = child.stdin.take()
                                                         {
-                                                            use std::io::Write;
-                                                            let _ = stdin
-                                                                .write_all(cmd_to_copy.as_bytes());
+                                                            if let Some(mut stdin) =
+                                                                child.stdin.take()
+                                                            {
+                                                                use std::io::Write;
+                                                                let _ = stdin.write_all(
+                                                                    cmd_to_copy.as_bytes(),
+                                                                );
+                                                            }
+                                                            let _ = child.wait();
                                                         }
-                                                        let _ = child.wait();
                                                     }
                                                 });
                                                 app.current_action =
