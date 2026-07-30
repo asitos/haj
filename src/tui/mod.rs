@@ -1391,6 +1391,17 @@ where
 
     fetch_arch_news(tx.clone(), 1);
 
+    // Keep sudo timestamp alive in the background to prevent credential expiration
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(45)).await;
+            let _ = tokio::process::Command::new("sudo")
+                .args(["-n", "-v"])
+                .status()
+                .await;
+        }
+    });
+
     let tx_input = tx.clone();
     tokio::spawn(async move {
         loop {
@@ -1749,7 +1760,7 @@ where
                 TuiEvent::UpdateAction(action) => app.current_action = action,
                 TuiEvent::PacmanProgress(val) => app.progress = val.min(100),
                 TuiEvent::TransactionComplete => {
-                    app.current_action = "changes complete ✓".to_string()
+                    app.current_action = "changes complete".to_string()
                 }
                 TuiEvent::TransactionFailed => app.current_action = "changes failed X".to_string(),
                 TuiEvent::CloseTransaction => {
@@ -1925,7 +1936,7 @@ where
                                     app.progress = 0;
 
                                     if orphans.is_empty() {
-                                        app.current_action = "system clean ✓".to_string();
+                                        app.current_action = "system clean".to_string();
                                         app.progress = 100;
                                         app.transaction_logs
                                             .push("no orphaned packages to remove.".to_string());
@@ -1961,6 +1972,12 @@ where
                                 app.current_action = "cleaning package cache...".to_string();
                                 app.transaction_logs.clear();
                                 app.progress = 0;
+
+                                let _ = std::process::Command::new("sudo")
+                                    .args(["sh", "-c", "rm -rf /var/cache/pacman/pkg/download-*"])
+                                    .stdout(std::process::Stdio::null())
+                                    .stderr(std::process::Stdio::null())
+                                    .status();
 
                                 let (abort_tx, abort_rx) = mpsc::channel(1);
                                 app.abort_tx = Some(abort_tx);
@@ -2139,17 +2156,20 @@ where
                                                     .output()
                                                     .is_err()
                                                 {
-                                                    let mut child =
+                                                    if let Ok(mut child) =
                                                         std::process::Command::new("xclip")
                                                             .args(["-selection", "clipboard"])
                                                             .stdin(std::process::Stdio::piped())
                                                             .spawn()
-                                                            .unwrap();
-                                                    if let Some(mut stdin) = child.stdin.take() {
-                                                        use std::io::Write;
-                                                        let _ = stdin.write_all(link.as_bytes());
+                                                    {
+                                                        if let Some(mut stdin) = child.stdin.take()
+                                                        {
+                                                            use std::io::Write;
+                                                            let _ =
+                                                                stdin.write_all(link.as_bytes());
+                                                        }
+                                                        let _ = child.wait();
                                                     }
-                                                    let _ = child.wait();
                                                 }
                                             });
                                         }
@@ -2179,19 +2199,22 @@ where
                                                         .output()
                                                         .is_err()
                                                     {
-                                                        let mut child =
+                                                        if let Ok(mut child) =
                                                             std::process::Command::new("xclip")
                                                                 .args(["-selection", "clipboard"])
                                                                 .stdin(std::process::Stdio::piped())
                                                                 .spawn()
-                                                                .unwrap();
-                                                        if let Some(mut stdin) = child.stdin.take()
                                                         {
-                                                            use std::io::Write;
-                                                            let _ = stdin
-                                                                .write_all(cmd_to_copy.as_bytes());
+                                                            if let Some(mut stdin) =
+                                                                child.stdin.take()
+                                                            {
+                                                                use std::io::Write;
+                                                                let _ = stdin.write_all(
+                                                                    cmd_to_copy.as_bytes(),
+                                                                );
+                                                            }
+                                                            let _ = child.wait();
                                                         }
-                                                        let _ = child.wait();
                                                     }
                                                 });
                                                 app.current_action =
@@ -2299,6 +2322,64 @@ where
                                 }
                                 KeyCode::End => {
                                     if app.news_focus == NewsFocus::Article {
+                                        app.news_scroll = 999;
+                                    }
+                                }
+                                KeyCode::Char('g') => {
+                                    if app.news_focus == NewsFocus::List {
+                                        let page_size = NEWS_PAGE_SIZE;
+                                        let start_idx =
+                                            (app.news_page.saturating_sub(1)) * page_size;
+                                        app.news_list_state.select(Some(0));
+                                        app.news_scroll = 0;
+
+                                        let mut link_and_should_fetch = None;
+                                        let actual_idx = start_idx;
+                                        if let Some(item) = app.filtered_news.get(actual_idx) {
+                                            let is_loading = item.description
+                                                == "loading article content..."
+                                                || item.description.is_empty();
+                                            link_and_should_fetch =
+                                                Some((item.link.clone(), is_loading));
+                                        }
+                                        if let Some((link, is_loading)) = link_and_should_fetch {
+                                            app.mark_news_read(link.clone());
+                                            if is_loading {
+                                                fetch_article_body(tx.clone(), link);
+                                            }
+                                        }
+                                    } else {
+                                        app.news_scroll = 0;
+                                    }
+                                }
+                                KeyCode::Char('G') => {
+                                    if app.news_focus == NewsFocus::List {
+                                        let page_size = NEWS_PAGE_SIZE;
+                                        let start_idx =
+                                            (app.news_page.saturating_sub(1)) * page_size;
+                                        let end_idx =
+                                            (start_idx + page_size).min(app.filtered_news.len());
+                                        let displayed_count = end_idx.saturating_sub(start_idx);
+                                        let i = displayed_count.saturating_sub(1);
+                                        app.news_list_state.select(Some(i));
+                                        app.news_scroll = 0;
+
+                                        let mut link_and_should_fetch = None;
+                                        let actual_idx = start_idx + i;
+                                        if let Some(item) = app.filtered_news.get(actual_idx) {
+                                            let is_loading = item.description
+                                                == "loading article content..."
+                                                || item.description.is_empty();
+                                            link_and_should_fetch =
+                                                Some((item.link.clone(), is_loading));
+                                        }
+                                        if let Some((link, is_loading)) = link_and_should_fetch {
+                                            app.mark_news_read(link.clone());
+                                            if is_loading {
+                                                fetch_article_body(tx.clone(), link);
+                                            }
+                                        }
+                                    } else {
                                         app.news_scroll = 999;
                                     }
                                 }
@@ -2444,6 +2525,16 @@ where
                                         app.group_state.select(Some(i));
                                     }
                                 }
+                                KeyCode::Char('g') => {
+                                    if !app.filtered_groups.is_empty() {
+                                        app.group_state.select(Some(0));
+                                    }
+                                }
+                                KeyCode::Char('G') => {
+                                    if !app.filtered_groups.is_empty() {
+                                        app.group_state.select(Some(app.filtered_groups.len() - 1));
+                                    }
+                                }
                                 _ => {}
                             },
                             InputMode::Editing => match key.code {
@@ -2548,12 +2639,8 @@ where
                                     app.pending_g = false;
                                 }
                                 KeyCode::Char('g') => {
-                                    if app.pending_g {
-                                        app.go_to_top();
-                                        app.pending_g = false;
-                                    } else {
-                                        app.pending_g = true;
-                                    }
+                                    app.go_to_top();
+                                    app.pending_g = false;
                                 }
                                 KeyCode::Char('G') => {
                                     app.go_to_bottom();

@@ -39,27 +39,47 @@ pub fn render_popup(f: &mut Frame, app: &App) {
         )
         .split(inner_area);
 
-    let action_text = Paragraph::new(format!("{} {}", "✓".cyan(), app.current_action));
+    let spinner_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+    let time_ms = std::time::SystemTime::now()
+        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let spinner_idx = ((time_ms / 80) % spinner_chars.len() as u128) as usize;
+    let spinner = spinner_chars[spinner_idx];
+
+    let action_text = Paragraph::new(format!("{} {}", spinner.cyan(), app.current_action));
     f.render_widget(action_text, chunks[0]);
 
-    let ratio = f64::from(app.progress).clamp(0.0, 100.0) / 100.0;
+    if app.progress == 0 {
+        let width = (chunks[2].width as usize).max(4);
+        let pos = ((time_ms / 60) % width as u128) as usize;
+        let mut chars = vec!['─'; width];
+        for i in 0..4 {
+            let idx = (pos + i) % width;
+            chars[idx] = '━';
+        }
+        let anim_str: String = chars.into_iter().collect();
 
-    let gauge = LineGauge::default()
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Cyan))
-                .title(format!(" {} ", app.current_action)),
-        )
-        .filled_style(
+        let anim_text = Paragraph::new(Line::from(vec![Span::styled(
+            anim_str,
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
-        )
-        .filled_symbol("━")
-        .unfilled_symbol("─")
-        .ratio(ratio);
-    f.render_widget(gauge, chunks[2]);
+        )]));
+        f.render_widget(anim_text, chunks[2]);
+    } else {
+        let ratio = f64::from(app.progress).clamp(0.0, 100.0) / 100.0;
+        let gauge = LineGauge::default()
+            .filled_style(
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .filled_symbol("━")
+            .unfilled_symbol("─")
+            .ratio(ratio);
+        f.render_widget(gauge, chunks[2]);
+    }
 
     let log_lines: Vec<Line> = app
         .transaction_logs

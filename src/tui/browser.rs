@@ -477,7 +477,7 @@ fn render_footer(f: &mut Frame, app: &App, area: Rect) {
         app.get_selected_count(),
         app.updates_count
     );
-    let keys = " j/k/gg/G:nav • x:del • ctrl-u/d:scroll • space:toggle • a:all/none • i:install • r:remove ";
+    let keys = " j/k/g/G:nav • x:del • ctrl-u/d:scroll • space:toggle • a:all/none • i:install • r:remove ";
     let layout = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])

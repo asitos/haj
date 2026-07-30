@@ -287,7 +287,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
     }
 
     let footer = Paragraph::new(Span::styled(
-        " j/k move • enter browse • / search • i install • r remove • space favorite • esc back ",
+        " j/k/g/G nav • enter browse • / search • i install • r remove • space favorite • esc back ",
         Style::default().fg(Color::DarkGray),
     ))
     .alignment(Alignment::Center);

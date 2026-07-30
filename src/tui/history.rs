@@ -320,7 +320,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
     }
 
     let footer = Paragraph::new(Span::styled(
-        " j/k move • enter expand • / search • tab filter • r reload • esc back • q quit ",
+        " j/k/g/G nav • enter expand • / search • tab filter • r reload • esc back • q quit ",
         Style::default().fg(COLOR_GRAY),
     ))
     .alignment(Alignment::Center);
@@ -413,6 +413,17 @@ pub fn handle_key(key: crossterm::event::KeyEvent, app: &mut App) {
                         None => 0,
                     };
                     app.history_state.select(Some(i));
+                }
+            }
+            KeyCode::Char('g') => {
+                if !app.filtered_transactions.is_empty() {
+                    app.history_state.select(Some(0));
+                }
+            }
+            KeyCode::Char('G') => {
+                if !app.filtered_transactions.is_empty() {
+                    app.history_state
+                        .select(Some(app.filtered_transactions.len() - 1));
                 }
             }
             _ => {}
