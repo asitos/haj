@@ -3,16 +3,13 @@
 [![AUR](https://img.shields.io/aur/version/haj?logo=archlinux)](https://aur.archlinux.org/packages/haj)
 [![Crates.io](https://img.shields.io/crates/v/haj?logo=rust)](https://crates.io/crates/haj)
 [![Rust](https://img.shields.io/badge/built_with-Rust-dca282.svg?logo=rust)](https://www.rust-lang.org/)
-[![GitHub release](https://img.shields.io/github/v/release/asitos/haj)](https://github.com/asitos/haj/releases/tag/v0.2.5)
 
-fast, quiet, beautiful package manager for blahArch. 
+fast, quiet, beautiful package manager for blahArch Linux.
 *(and yes, it is named after the ikea shark. all hail blahaj. 🦈)*
-
-after weeks of polishing and refinement, **[v0.2.5 is finally here](https://github.com/asitos/haj/releases/tag/v0.2.5)** and ready for public testing! PRs and issues are welcome :3
 
 `haj` is a modern, memory-safe wrapper for `pacman` written in rust. It replaces arch's notoriously loud and verbose terminal output with the clean, minimalistic aesthetic of modern package managers like `cargo` and `bun`, without compromising on speed or safety. also comes with love from the supreme plushie shark.
 
-works on virtually every `pacman`-based distro — arch linux, blahArch, artix, endeavouros, garuda, manjaro, cachyos, and 25+ more.
+works on virtually every `pacman`-based distro: arch linux, blahArch, artix, endeavourOS, garuda, manjaro, cachyOS, and 25+ more.
 
 <img alt="haj demo" src="assets/cli-demo.gif" width="100%" />
 
@@ -38,7 +35,7 @@ works on virtually every `pacman`-based distro — arch linux, blahArch, artix, 
 
 * **3d rotating blahaj (best):** a fully 3D, spinning ascii art shark rendered natively via [display3d](https://github.com/renpenguin/display3d).
 
-### cli & v0.2.5 highlights
+### cli highlights
 
 - **native package browser:** browse repositories, inspect dependencies, installed files, package metadata and groups entirely inside the tui with asynchronous lazy loading.
 - **interactive search-install:** type a naked query (e.g., `haj discord`) to display a numbered table of matching native and AUR packages. Select numbers (e.g., `1 3`) to queue them instantly.
