@@ -9,7 +9,7 @@ fast, quiet, beautiful package manager for blahArch Linux.
 
 `haj` is a modern, memory-safe wrapper for `pacman` written in rust. It replaces arch's notoriously loud and verbose terminal output with the clean, minimalistic aesthetic of modern package managers like `cargo` and `bun`, without compromising on speed or safety. also comes with love from the supreme plushie shark.
 
-works on virtually every `pacman`-based distro: arch linux, blahArch, artix, endeavourOS, garuda, manjaro, cachyOS, and 25+ more.
+works on virtually every `pacman`-based distro: arch, blahArch, artix, endeavourOS, garuda, manjaro, cachyOS, and 25+ more.
 
 <img alt="haj demo" src="assets/cli-demo.gif" width="100%" />
 
