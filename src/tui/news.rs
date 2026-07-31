@@ -413,10 +413,24 @@ fn render_footer(f: &mut Frame, app: &App, area: Rect) {
         .iter()
         .filter(|n| !app.read_news.contains(&n.link))
         .count();
-    let top_line = Line::from(Span::styled(
-        " j/k/g/G nav • ] next page • [ prev page • / search • tab focus • r refresh • y copy link • c copy command • o browser • esc back ",
-        Style::default().fg(Color::DarkGray),
-    ));
+    let show_action =
+        app.current_action.starts_with("copied ") || app.current_action.starts_with("no command ");
+
+    let footer_spans = if show_action {
+        vec![Span::styled(
+            app.current_action.clone(),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )]
+    } else {
+        vec![Span::styled(
+            " j/k/g/G nav • ] next page • [ prev page • / search • tab focus • r refresh • y copy link • c copy command • o browser • esc back ",
+            Style::default().fg(Color::DarkGray),
+        )]
+    };
+    let top_line = Line::from(footer_spans);
+
     let divider = Line::from(Span::styled(
         "───────────────────────────────────────────────────────────────────────────────────────────────────",
         Style::default().fg(Color::DarkGray),

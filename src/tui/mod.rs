@@ -1828,6 +1828,14 @@ where
                     let prev_tab = app.browser_tab;
                     app.last_activity = Instant::now();
 
+                    if app.screen == CurrentScreen::News
+                        && key.code != KeyCode::Char('c')
+                        && (app.current_action.starts_with("copied ")
+                            || app.current_action.starts_with("no command "))
+                    {
+                        app.current_action.clear();
+                    }
+
                     if app.show_help {
                         match key.code {
                             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') => {
@@ -2150,9 +2158,10 @@ where
                                         let actual_idx = (app.news_page - 1) * page_size + idx;
                                         if let Some(item) = app.filtered_news.get(actual_idx) {
                                             let link = item.link.clone();
+                                            let link_clone = link.clone();
                                             tokio::spawn(async move {
                                                 if std::process::Command::new("wl-copy")
-                                                    .arg(&link)
+                                                    .arg(&link_clone)
                                                     .output()
                                                     .is_err()
                                                 {
@@ -2165,13 +2174,15 @@ where
                                                         if let Some(mut stdin) = child.stdin.take()
                                                         {
                                                             use std::io::Write;
-                                                            let _ =
-                                                                stdin.write_all(link.as_bytes());
+                                                            let _ = stdin
+                                                                .write_all(link_clone.as_bytes());
                                                         }
                                                         let _ = child.wait();
                                                     }
                                                 }
                                             });
+                                            app.current_action =
+                                                format!("copied \"{}\" to clipboard", link);
                                         }
                                     }
                                 }
