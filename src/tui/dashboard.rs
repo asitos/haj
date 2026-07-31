@@ -51,7 +51,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
         .any(|n| n.is_critical && !app.read_news.contains(&n.link));
 
     let updates_str = if updates > 0 {
-        format!("{} updates", updates)
+        format!("{} update(s)", updates)
     } else {
         "0 updates".to_string()
     };
@@ -106,7 +106,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
         ),
         Span::styled(" | ", Style::default().fg(Color::DarkGray)),
         Span::styled(
-            format!(" orphans: {} ", app.orphan_count),
+            format!(" {} orphan(s) ", app.orphan_count),
             Style::default()
                 .fg(orphan_color)
                 .add_modifier(orphan_modifier),
@@ -142,7 +142,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
     }
 
     let footer_str = match app.active_widget {
-        DashboardWidget::Blahaj => " tab next • / search • n news • ? help • q quit ",
+        DashboardWidget::Blahaj => " tab next • f or / search • n news • ? help • q quit ",
         DashboardWidget::News => " enter open • tab next • / search • b blahaj • ? help • q quit ",
     };
 

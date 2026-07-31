@@ -2218,7 +2218,7 @@ where
                                                     }
                                                 });
                                                 app.current_action =
-                                                    "copied command to clipboard ✓".to_string();
+                                                    "copied command to clipboard".to_string();
                                             }
                                         }
                                     }
