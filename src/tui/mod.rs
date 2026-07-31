@@ -2180,22 +2180,30 @@ where
                                         let page_size = NEWS_PAGE_SIZE;
                                         let actual_idx = (app.news_page - 1) * page_size + idx;
                                         if let Some(item) = app.filtered_news.get(actual_idx) {
-                                            let mut cmd_to_copy = String::new();
+                                            let mut cmds = Vec::new();
                                             for line in item.description.lines() {
-                                                let l = line.trim();
+                                                let cleaned = line
+                                                    .replace("<code>", "")
+                                                    .replace("</code>", "");
+                                                let mut l = cleaned.trim();
+                                                if l.starts_with('#') || l.starts_with('$') {
+                                                    l = l[1..].trim();
+                                                }
                                                 if l.starts_with("pacman ")
                                                     || l.starts_with("systemctl ")
                                                     || l.starts_with("mkinitcpio ")
                                                     || l.starts_with("grub-install ")
+                                                    || l.starts_with("chown ")
                                                 {
-                                                    cmd_to_copy = l.to_string();
-                                                    break;
+                                                    cmds.push(l.to_string());
                                                 }
                                             }
+                                            let cmd_to_copy = cmds.join("\n");
                                             if !cmd_to_copy.is_empty() {
+                                                let cmd_clone = cmd_to_copy.clone();
                                                 tokio::spawn(async move {
                                                     if std::process::Command::new("wl-copy")
-                                                        .arg(&cmd_to_copy)
+                                                        .arg(&cmd_clone)
                                                         .output()
                                                         .is_err()
                                                     {
@@ -2210,15 +2218,27 @@ where
                                                             {
                                                                 use std::io::Write;
                                                                 let _ = stdin.write_all(
-                                                                    cmd_to_copy.as_bytes(),
+                                                                    cmd_clone.as_bytes(),
                                                                 );
                                                             }
                                                             let _ = child.wait();
                                                         }
                                                     }
                                                 });
+                                                if cmds.len() > 1 {
+                                                    app.current_action = format!(
+                                                        "copied {} commands to clipboard",
+                                                        cmds.len()
+                                                    );
+                                                } else {
+                                                    app.current_action = format!(
+                                                        "copied \"{}\" to clipboard",
+                                                        cmd_to_copy
+                                                    );
+                                                }
+                                            } else {
                                                 app.current_action =
-                                                    "copied command to clipboard".to_string();
+                                                    "no command found to copy".to_string();
                                             }
                                         }
                                     }

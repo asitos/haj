@@ -364,6 +364,7 @@ fn is_command(line: &str) -> bool {
         || l.starts_with("systemctl ")
         || l.starts_with("mkinitcpio ")
         || l.starts_with("grub-install ")
+        || l.starts_with("chown ")
 }
 
 fn render_loading(f: &mut Frame, area: Rect, border: Color) {
