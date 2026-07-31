@@ -1,4 +1,5 @@
 use crate::tui::{App, CurrentScreen, HistoryFilter, InputMode, TxAction};
+use chrono::Datelike;
 use crossterm::event::KeyCode;
 use ratatui::{
     Frame,
@@ -170,7 +171,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
                         status_icon,
                     ]),
                     Line::from(Span::styled(
-                        format!("   {}", tx.timestamp),
+                        format!("   {}", format_relative_timestamp(&tx.timestamp)),
                         Style::default().fg(COLOR_GRAY),
                     )),
                 ])
@@ -208,7 +209,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
                     )),
                     Line::from(vec![
                         Span::styled("date      ", Style::default().fg(Color::LightMagenta)),
-                        Span::raw(&tx.timestamp),
+                        Span::raw(format_relative_timestamp(&tx.timestamp)),
                     ]),
                     Line::from(vec![
                         Span::styled("result    ", Style::default().fg(Color::LightMagenta)),
@@ -440,5 +441,25 @@ pub fn handle_key(key: crossterm::event::KeyEvent, app: &mut App) {
             }
             _ => {}
         },
+    }
+}
+
+fn format_relative_timestamp(ts: &str) -> String {
+    if let Ok(naive_dt) = chrono::NaiveDateTime::parse_from_str(ts, "%Y-%m-%dT%H:%M") {
+        let local_dt = chrono::Local::now();
+        let today = local_dt.date_naive();
+        let tx_date = naive_dt.date();
+
+        if tx_date == today {
+            format!("Today at {}", naive_dt.format("%H:%M"))
+        } else if tx_date == today.pred_opt().unwrap_or(today) {
+            format!("Yesterday at {}", naive_dt.format("%H:%M"))
+        } else if tx_date.year() == today.year() {
+            naive_dt.format("%b %d, %H:%M").to_string()
+        } else {
+            naive_dt.format("%b %d, %Y").to_string()
+        }
+    } else {
+        ts.to_string()
     }
 }
