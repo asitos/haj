@@ -1,7 +1,7 @@
+use chrono::Datelike;
 use owo_colors::OwoColorize;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use chrono::Datelike;
 
 pub fn show_history(limit: usize) {
     let file = match File::open("/var/log/pacman.log") {

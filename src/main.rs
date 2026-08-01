@@ -1102,16 +1102,88 @@ async fn main() -> anyhow::Result<()> {
                     }
 
                     let print_cmd = std::process::Command::new("pacman")
+                        .env("LC_ALL", "C")
                         .arg("-Rsp")
                         .args(&packages)
                         .output()
                         .expect("failed to execute pacman");
 
                     if !print_cmd.status.success() {
-                        println!(
-                            "{} failed to resolve dependencies. (do these packages conflict?)",
-                            "✗".red()
-                        );
+                        let stdout_str = String::from_utf8_lossy(&print_cmd.stdout);
+                        let stderr_str = String::from_utf8_lossy(&print_cmd.stderr);
+                        println!("{} failed to resolve dependencies:\n", "✗".red());
+                        for line in stderr_str.lines() {
+                            let trimmed = line.trim();
+                            if !trimmed.is_empty() {
+                                if trimmed.starts_with("error:") {
+                                    println!("  {}", trimmed.red().bold());
+                                } else {
+                                    println!("  {}", trimmed.dimmed());
+                                }
+                            }
+                        }
+                        let mut parsed_conflicts = Vec::new();
+                        let mut other_lines = Vec::new();
+                        for line in stdout_str.lines() {
+                            let trimmed = line.trim();
+                            if trimmed.starts_with(":: removing ")
+                                && let Some(breaks_idx) = trimmed.find(" breaks dependency '")
+                            {
+                                let rest = &trimmed[breaks_idx + 20..];
+                                if let Some(req_idx) = rest.find("' required by ") {
+                                    let dep = &rest[..req_idx];
+                                    let dependent = &rest[req_idx + 14..];
+                                    parsed_conflicts.push((dep.to_string(), dependent.to_string()));
+                                    continue;
+                                }
+                            }
+                            if !trimmed.is_empty() {
+                                other_lines.push(trimmed.to_string());
+                            }
+                        }
+
+                        if !parsed_conflicts.is_empty() {
+                            println!();
+                            let max_dep_len = parsed_conflicts
+                                .iter()
+                                .map(|(dep, _)| dep.len())
+                                .max()
+                                .unwrap_or(20)
+                                .max(10); // at least length of "dependency"
+
+                            println!(
+                                "  {:<width$}   {}",
+                                "dependency".bold().white(),
+                                "required by".bold().white(),
+                                width = max_dep_len
+                            );
+                            println!(
+                                "  {:<width$}   {}",
+                                "─".repeat(max_dep_len).dimmed(),
+                                "─".repeat(15).dimmed(),
+                                width = max_dep_len
+                            );
+                            for (dep, dependent) in parsed_conflicts {
+                                println!(
+                                    "  {:<width$}   {}",
+                                    dep.cyan(),
+                                    dependent.magenta().bold(),
+                                    width = max_dep_len
+                                );
+                            }
+                        }
+
+                        if !other_lines.is_empty() {
+                            println!();
+                            for line in other_lines {
+                                if line.starts_with("::") {
+                                    println!("  {}", line.yellow());
+                                } else {
+                                    println!("  {}", line.dimmed());
+                                }
+                            }
+                        }
+                        println!();
                         return Ok(());
                     }
 
@@ -1174,9 +1246,7 @@ async fn main() -> anyhow::Result<()> {
                     drop(alpm_handle);
 
                     if !no_sync {
-                        let sudo_status = std::process::Command::new("sudo")
-                            .arg("-v")
-                            .status();
+                        let sudo_status = std::process::Command::new("sudo").arg("-v").status();
 
                         if let Ok(status) = sudo_status
                             && !status.success()
