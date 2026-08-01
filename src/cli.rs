@@ -19,7 +19,7 @@ Commands (alias):
   \x1b[36;1mtui (t)\x1b[0m                         launch the interactive package manager dashboard
 
   \x1b[36;1mupdate (up/sync)\x1b[0m                synchronize remote repositories 
-  \x1b[36;1mjump (upgrade)\x1b[0m [-u]             full system upgrade
+  \x1b[36;1mjump (upgrade)\x1b[0m [--no-sync]       full system upgrade
   \x1b[36;1minstall (i)\x1b[0m <pkg>               install one or more packages
   \x1b[36;1mremove (rm/toss)\x1b[0m <pkg>          remove packages & unneeded dependencies
   \x1b[36;1msearch (s)\x1b[0m <query>              search remote repositories
@@ -120,8 +120,8 @@ pub enum Commands {
 
     #[command(alias = "jump")]
     Upgrade {
-        #[arg(short = 'u', long)]
-        sysupgrade: bool,
+        #[arg(long)]
+        no_sync: bool,
     },
 
     #[command(alias = "s")]

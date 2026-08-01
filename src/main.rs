@@ -1152,7 +1152,7 @@ async fn main() -> anyhow::Result<()> {
                     .await;
                 }
 
-                Commands::Upgrade { sysupgrade } => {
+                Commands::Upgrade { no_sync } => {
                     let mut foreign_pkgs = Vec::new();
 
                     if !cli.repo {
@@ -1173,10 +1173,22 @@ async fn main() -> anyhow::Result<()> {
 
                     drop(alpm_handle);
 
-                    if sysupgrade {
+                    if !no_sync {
+                        let sudo_status = std::process::Command::new("sudo")
+                            .arg("-v")
+                            .status();
+
+                        if let Ok(status) = sudo_status
+                            && !status.success()
+                        {
+                            println!("{} failed to obtain sudo privileges.", "✗".red());
+                            return Ok(());
+                        }
+
                         println!("{} syncing package databases...\n", "::".blue().bold());
                         let status = std::process::Command::new("sudo")
                             .args(["pacman", "-Sy"])
+                            .stdout(std::process::Stdio::null())
                             .status()
                             .expect("failed to sync databases");
 
