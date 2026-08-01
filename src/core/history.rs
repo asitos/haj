@@ -1,3 +1,4 @@
+use chrono::Datelike;
 use owo_colors::OwoColorize;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -59,9 +60,31 @@ pub fn show_history(limit: usize) {
                 action_string.to_string()
             };
 
-            println!("  {} {}", timestamp.dimmed(), colored_action);
+            let formatted_ts = format_relative_timestamp(&timestamp);
+            println!("  {} {}", formatted_ts.dimmed(), colored_action);
         } else {
             println!("  {}", entry);
         }
+    }
+}
+
+fn format_relative_timestamp(ts: &str) -> String {
+    let short_ts = if ts.len() >= 16 { &ts[..16] } else { ts };
+    if let Ok(naive_dt) = chrono::NaiveDateTime::parse_from_str(short_ts, "%Y-%m-%dT%H:%M") {
+        let local_dt = chrono::Local::now();
+        let today = local_dt.date_naive();
+        let tx_date = naive_dt.date();
+
+        if tx_date == today {
+            format!("Today at {}", naive_dt.format("%H:%M"))
+        } else if tx_date == today.pred_opt().unwrap_or(today) {
+            format!("Yesterday at {}", naive_dt.format("%H:%M"))
+        } else if tx_date.year() == today.year() {
+            naive_dt.format("%b %d, %H:%M").to_string()
+        } else {
+            naive_dt.format("%b %d, %Y").to_string()
+        }
+    } else {
+        ts.to_string()
     }
 }
