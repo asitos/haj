@@ -8,7 +8,6 @@ use clap::{Parser, Subcommand};
     about = "fast, quiet, beautiful package manager and tui for blahArch Linux.",
     long_about = None,
     disable_help_subcommand = true,
-    disable_help_flag = true,
     disable_version_flag = true,
     help_template = "\
 {about}
@@ -89,10 +88,6 @@ pub struct Cli {
     #[arg(short = 'd', long, global = true)]
     pub dry_run: bool,
 
-    /// display this help message
-    #[arg(short = 'h', long, action = clap::ArgAction::Help)]
-    pub help: Option<bool>,
-
     /// show version info
     #[arg(short = 'V', long, action = clap::ArgAction::Version)]
     pub version: Option<bool>,
@@ -100,40 +95,171 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum Commands {
-    #[command(alias = "t")]
+    #[command(
+        alias = "t",
+        help_template = "\
+\x1b[36;1mhaj tui (alias: t)\x1b[0m
+
+Usage: haj tui
+
+Description:
+  launch the interactive package manager terminal dashboard
+  features stats, search, orphans cleaner, news reader, and transaction history
+
+Options:
+  -h, --help  print help"
+    )]
     Tui,
 
-    #[command(alias = "i")]
+    #[command(
+        alias = "i",
+        help_template = "\
+\x1b[36;1mhaj install (alias: i)\x1b[0m
+
+Usage: haj install <packages>...
+
+Description:
+  install one or more packages from the repositories or AUR
+
+Arguments:
+  <packages>...  list of packages to install
+
+Options:
+  -h, --help  print help"
+    )]
     Install {
         #[arg(required = true)]
         packages: Vec<String>,
     },
 
-    #[command(alias = "rm", alias = "toss")]
+    #[command(
+        alias = "rm",
+        alias = "toss",
+        help_template = "\
+\x1b[36;1mhaj remove (aliases: rm, toss)\x1b[0m
+
+Usage: haj remove <packages>...
+
+Description:
+  remove packages along with their unneeded dependencies
+
+Arguments:
+  <packages>...  list of packages to remove
+
+Options:
+  -h, --help  print help"
+    )]
     Remove {
         #[arg(required = true)]
         packages: Vec<String>,
     },
 
-    #[command(alias = "up", alias = "sync")]
+    #[command(
+        alias = "up",
+        alias = "sync",
+        help_template = "\
+\x1b[36;1mhaj update (aliases: up, sync)\x1b[0m
+
+Usage: haj update
+
+Description:
+  synchronize package databases from remote repositories
+
+Options:
+  -h, --help  print help"
+    )]
     Update,
 
-    #[command(alias = "jump")]
+    #[command(
+        alias = "jump",
+        help_template = "\
+\x1b[36;1mhaj upgrade (alias: jump)\x1b[0m
+
+Usage: haj upgrade [OPTIONS]
+
+Description:
+  perform a full system upgrade of all official repositories and AUR packages
+
+Options:
+      --no-sync  do not sync package databases from remote mirrors
+  -h, --help     print help"
+    )]
     Upgrade {
+        /// Do not sync package databases before upgrading
         #[arg(long)]
         no_sync: bool,
     },
 
-    #[command(alias = "s")]
+    #[command(
+        alias = "s",
+        help_template = "\
+\x1b[36;1mhaj search (alias: s)\x1b[0m
+
+Usage: haj search <query>
+
+Description:
+  search official repositories and AUR for matching packages
+
+Arguments:
+  <query>  the search term to query
+
+Options:
+  -h, --help  print help"
+    )]
     Search { query: String },
 
-    #[command(alias = "info")]
+    #[command(
+        alias = "info",
+        help_template = "\
+\x1b[36;1mhaj show (alias: info)\x1b[0m
+
+Usage: haj show <package>
+
+Description:
+  display detailed package information such as size, installation reason, and dependencies
+
+Arguments:
+  <package>  the package name to inspect
+
+Options:
+  -h, --help  print help"
+    )]
     Show { package: String },
 
-    #[command(alias = "g")]
+    #[command(
+        alias = "g",
+        help_template = "\
+\x1b[36;1mhaj group (alias: g)\x1b[0m
+
+Usage: haj group <name>
+
+Description:
+  browse and install packages associated with a specific package group
+
+Arguments:
+  <name>  the package group name
+
+Options:
+  -h, --help  print help"
+    )]
     Group { name: String },
 
-    #[command(alias = "ls")]
+    #[command(
+        alias = "ls",
+        help_template = "\
+\x1b[36;1mhaj list (alias: ls)\x1b[0m
+
+Usage: haj list [OPTIONS]
+
+Description:
+  list installed packages on the system
+
+Options:
+  -e, --explicit  show only packages installed explicitly
+  -p, --deps      show only packages installed as dependencies
+  -f, --foreign   show only foreign/AUR packages
+  -h, --help      print help"
+    )]
     List {
         /// show only packages installed explicitly
         #[arg(short, long)]
@@ -146,55 +272,223 @@ pub enum Commands {
         foreign: bool,
     },
 
-    #[command(alias = "st")]
+    #[command(
+        alias = "st",
+        help_template = "\
+\x1b[36;1mhaj stats (alias: st)\x1b[0m
+
+Usage: haj stats
+
+Description:
+  display system health score, disk usage, cache statistics, and package counts
+
+Options:
+  -h, --help  print help"
+    )]
     Stats,
 
-    #[command(alias = "h")]
+    #[command(
+        alias = "h",
+        help_template = "\
+\x1b[36;1mhaj history (alias: h)\x1b[0m
+
+Usage: haj history [OPTIONS]
+
+Description:
+  show recent transaction history (installs, upgrades, removals)
+
+Options:
+  -l, --limit <LIMIT>  number of recent changes to show [default: 35]
+  -h, --help           print help"
+    )]
     History {
         /// number of recent changes to show
-        #[arg(short = 'l', long, default_value_t = 50)]
+        #[arg(short = 'l', long, default_value_t = 35)]
         limit: usize,
     },
 
-    #[command(alias = "sink")]
+    #[command(
+        alias = "sink",
+        help_template = "\
+\x1b[36;1mhaj downgrade (alias: sink)\x1b[0m
+
+Usage: haj downgrade <package>
+
+Description:
+  downgrade an installed package using the cached packages in /var/cache/pacman/pkg
+
+Arguments:
+  <package>  the package name to downgrade
+
+Options:
+  -h, --help  print help"
+    )]
     Downgrade {
         /// package to downgrade
         package: String,
     },
 
-    #[command(alias = "c")]
+    #[command(
+        alias = "c",
+        help_template = "\
+\x1b[36;1mhaj clean (alias: c)\x1b[0m
+
+Usage: haj clean [OPTIONS]
+
+Description:
+  clean the pacman package cache
+
+Options:
+  -k, --keep <KEEP>  number of package versions to keep in cache [default: 3]
+  -h, --help         print help"
+    )]
     Clean {
         /// number of package versions to keep in cache
         #[arg(short = 'k', long, default_value_t = 3)]
         keep: usize,
     },
 
-    #[command(alias = "o")]
+    #[command(
+        alias = "o",
+        help_template = "\
+\x1b[36;1mhaj orphan (alias: o)\x1b[0m
+
+Usage: haj orphan
+
+Description:
+  detect and list orphaned package dependencies that are no longer needed
+
+Options:
+  -h, --help  print help"
+    )]
     Orphan,
 
-    #[command(alias = "ow")]
+    #[command(
+        alias = "ow",
+        help_template = "\
+\x1b[36;1mhaj owns (alias: ow)\x1b[0m
+
+Usage: haj owns <file_path>
+
+Description:
+  find which installed package owns a given absolute file path
+
+Arguments:
+  <file_path>  the file path to query
+
+Options:
+  -h, --help  print help"
+    )]
     Owns { file_path: String },
 
-    #[command(alias = "loc")]
+    #[command(
+        alias = "loc",
+        help_template = "\
+\x1b[36;1mhaj locate (alias: loc)\x1b[0m
+
+Usage: haj locate <query>
+
+Description:
+  search remote package repositories for a file name matching the query
+
+Arguments:
+  <query>  the file name or pattern to search for
+
+Options:
+  -h, --help  print help"
+    )]
     Locate { query: String },
 
-    #[command(alias = "lf")]
+    #[command(
+        alias = "lf",
+        help_template = "\
+\x1b[36;1mhaj files (alias: lf)\x1b[0m
+
+Usage: haj files <package>
+
+Description:
+  list all files installed by a specific package
+
+Arguments:
+  <package>  the name of the package
+
+Options:
+  -h, --help  print help"
+    )]
     Files { package: String },
 
-    #[command(alias = "l")]
+    #[command(
+        alias = "l",
+        help_template = "\
+\x1b[36;1mhaj load (alias: l)\x1b[0m
+
+Usage: haj load <archive_path>
+
+Description:
+  install a local package archive (.pkg.tar.zst) onto the system
+
+Arguments:
+  <archive_path>  the path to the local package archive file
+
+Options:
+  -h, --help  print help"
+    )]
     Load { archive_path: String },
 
-    #[command(alias = "f")]
+    #[command(
+        alias = "f",
+        help_template = "\
+\x1b[36;1mhaj fetch (alias: f)\x1b[0m
+
+Usage: haj fetch <packages>...
+
+Description:
+  download package archives without installing them
+
+Arguments:
+  <packages>...  List of packages to fetch
+
+Options:
+  -h, --help  print help"
+    )]
     Fetch { packages: Vec<String> },
 
-    #[command(alias = "m")]
+    #[command(
+        alias = "m",
+        help_template = "\
+\x1b[36;1mhaj mark (alias: m)\x1b[0m
+
+Usage: haj mark <package> [OPTIONS]
+
+Description:
+  change an installed package's install reason (explicit or dependency)
+
+Arguments:
+  <package>  the package to modify
+
+Options:
+      --as-explicit  mark the package as explicitly installed
+  -h, --help         print help"
+    )]
     Mark {
         package: String,
         #[arg(long)]
         as_explicit: bool,
     },
 
-    #[command(alias = "pn")]
+    #[command(
+        alias = "pn",
+        help_template = "\
+\x1b[36;1mhaj diff (alias: pn)\x1b[0m
+
+Usage: haj diff
+
+Description:
+  interactively search, manage, and merge .pacnew configuration files on the system
+
+Options:
+  -h, --help  print help"
+    )]
     Diff,
 
     #[command(hide = true)]
