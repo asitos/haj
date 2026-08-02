@@ -901,12 +901,23 @@ async fn main() -> anyhow::Result<()> {
         Commands::Tui => {
             tui::run().await?;
         }
-        Commands::Completions { shell } => {
-            use clap::CommandFactory;
-            let mut cmd = Cli::command();
-            let bin_name = cmd.get_name().to_string();
-            clap_complete::generate(shell, &mut cmd, bin_name, &mut std::io::stdout());
-        }
+        Commands::Completions { shell } => match shell {
+            clap_complete::Shell::Bash => {
+                print!("{}", include_str!("completions/bash.sh"));
+            }
+            clap_complete::Shell::Zsh => {
+                print!("{}", include_str!("completions/zsh.sh"));
+            }
+            clap_complete::Shell::Fish => {
+                print!("{}", include_str!("completions/fish.sh"));
+            }
+            _ => {
+                use clap::CommandFactory;
+                let mut cmd = Cli::command();
+                let bin_name = cmd.get_name().to_string();
+                clap_complete::generate(shell, &mut cmd, bin_name, &mut std::io::stdout());
+            }
+        },
         Commands::Update => {
             run_pacman(
                 &["-Sy", "--noconfirm"],
