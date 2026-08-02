@@ -59,7 +59,7 @@ _haj_completions() {
 
     # Complete commands
     if [ $COMP_CWORD -eq 1 ]; then
-        opts="tui t update up sync upgrade jump install i remove rm toss search s show info group g list ls stats st load l fetch f downgrade sink owns ow files lf locate loc history h orphan o clean c mark m diff pn"
+        opts="tui update upgrade install remove search show group list stats load fetch downgrade owns files locate history orphan clean mark diff"
         COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
         return 0
     fi

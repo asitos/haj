@@ -47,49 +47,26 @@ _haj() {
             local -a subcmds
             subcmds=(
                 'tui:launch interactive package manager dashboard'
-                't:launch interactive package manager dashboard'
                 'update:synchronize remote repositories'
-                'up:synchronize remote repositories'
-                'sync:synchronize remote repositories'
                 'upgrade:full system upgrade'
-                'jump:full system upgrade'
                 'install:install one or more packages'
-                'i:install one or more packages'
                 'remove:remove packages & unneeded dependencies'
-                'rm:remove packages & unneeded dependencies'
-                'toss:remove packages & unneeded dependencies'
                 'search:search remote repositories'
-                's:search remote repositories'
                 'show:show detailed package information'
-                'info:show detailed package information'
                 'group:browse and install package groups'
-                'g:browse and install package groups'
                 'list:list installed packages'
-                'ls:list installed packages'
                 'stats:show system health and package statistics'
-                'st:show system health and package statistics'
                 'load:install a local package archive'
-                'l:install a local package archive'
                 'fetch:download a package without installing'
-                'f:download a package without installing'
                 'downgrade:downgrade an installed package'
-                'sink:downgrade an installed package'
                 'owns:find which installed package owns a file'
-                'ow:find which installed package owns a file'
                 'files:list files installed by a package'
-                'lf:list files installed by a package'
                 'locate:search repositories for a file'
-                'loc:search repositories for a file'
                 'history:show recent package changes'
-                'h:show recent package changes'
                 'orphan:detect orphaned dependencies'
-                'o:detect orphaned dependencies'
                 'clean:clean the package cache'
-                'c:clean the package cache'
                 'mark:change a package install reason'
-                'm:change a package install reason'
                 'diff:interactively manage and merge .pacnew files'
-                'pn:interactively manage and merge .pacnew files'
             )
             _describe -t commands 'haj commands' subcmds
             ;;
@@ -135,3 +112,5 @@ _haj() {
             ;;
     esac
 }
+
+compdef _haj haj
