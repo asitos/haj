@@ -557,17 +557,19 @@ async fn run_pacman(
     let exit_code = status.as_ref().map_or(1, |s| s.code().unwrap_or(1));
 
     if !is_success {
-        spinner.finish_with_message(format!(
+        spinner.finish_and_clear();
+        println!(
             "{} operation aborted or failed (code {}):\n{}",
             "✗".red(),
             exit_code,
             err_output.trim().red()
-        ));
+        );
         std::process::exit(exit_code);
     }
 
     if !hook_alerts.is_empty() {
-        spinner.finish_with_message(format!("{} {}", "✓".green(), success_msg));
+        spinner.finish_and_clear();
+        println!("{} {}", "✓".green(), success_msg);
         println!(
             "\n{}",
             "!!! changes completed, but warnings/errors occurred during hooks:"
@@ -581,7 +583,8 @@ async fn run_pacman(
         return;
     }
 
-    spinner.finish_with_message(format!("{} {}", "✓".green(), success_msg));
+    spinner.finish_and_clear();
+    println!("{} {}", "✓".green(), success_msg);
 }
 
 async fn process_installation(packages: Vec<String>, alpm_handle: alpm::Alpm, cli: &Cli) {
@@ -901,12 +904,23 @@ async fn main() -> anyhow::Result<()> {
         Commands::Tui => {
             tui::run().await?;
         }
-        Commands::Completions { shell } => {
-            use clap::CommandFactory;
-            let mut cmd = Cli::command();
-            let bin_name = cmd.get_name().to_string();
-            clap_complete::generate(shell, &mut cmd, bin_name, &mut std::io::stdout());
-        }
+        Commands::Completions { shell } => match shell {
+            clap_complete::Shell::Bash => {
+                print!("{}", include_str!("completions/bash.sh"));
+            }
+            clap_complete::Shell::Zsh => {
+                print!("{}", include_str!("completions/zsh.sh"));
+            }
+            clap_complete::Shell::Fish => {
+                print!("{}", include_str!("completions/fish.sh"));
+            }
+            _ => {
+                use clap::CommandFactory;
+                let mut cmd = Cli::command();
+                let bin_name = cmd.get_name().to_string();
+                clap_complete::generate(shell, &mut cmd, bin_name, &mut std::io::stdout());
+            }
+        },
         Commands::Update => {
             run_pacman(
                 &["-Sy", "--noconfirm"],
@@ -1707,22 +1721,24 @@ async fn main() -> anyhow::Result<()> {
                     .await;
                 }
 
-                Commands::Mark {
-                    package,
-                    as_explicit,
-                } => {
+                Commands::Mark { package } => {
+                    let local_db = alpm_handle.localdb();
+                    let (reason_flag, state) = match local_db.pkg(package.as_str()) {
+                        Ok(pkg) => match pkg.reason() {
+                            alpm::PackageReason::Explicit => ("--asdeps", "dependency"),
+                            alpm::PackageReason::Depend => ("--asexplicit", "explicit"),
+                        },
+                        Err(_) => {
+                            println!(
+                                "{} package '{}' is not installed.",
+                                "✗".red(),
+                                package.bold()
+                            );
+                            drop(alpm_handle);
+                            return Ok(());
+                        }
+                    };
                     drop(alpm_handle);
-
-                    let reason_flag = if as_explicit {
-                        "--asexplicit"
-                    } else {
-                        "--asdeps"
-                    };
-                    let state = if as_explicit {
-                        "explicit"
-                    } else {
-                        "dependency"
-                    };
 
                     run_pacman(
                         &["-D", reason_flag, &package],

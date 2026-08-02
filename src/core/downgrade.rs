@@ -34,6 +34,24 @@ pub fn select_downgrade_target(package: &str) -> Option<PathBuf> {
         package.bold()
     );
 
+    let current_version = if let Ok(alpm) = crate::core::alpm_init::init_alpm() {
+        alpm.localdb()
+            .pkg(package)
+            .map(|pkg| pkg.version().to_string())
+            .ok()
+    } else {
+        None
+    };
+
+    if let Some(ref cur_ver) = current_version {
+        println!(
+            "{} currently installed: {} v{}",
+            "::".blue(),
+            package.bold(),
+            cur_ver.yellow()
+        );
+    }
+
     let mut candidate_entries: Vec<(PathBuf, String)> = Vec::new();
 
     let native_cache = Path::new("/var/cache/pacman/pkg");
@@ -84,11 +102,22 @@ pub fn select_downgrade_target(package: &str) -> Option<PathBuf> {
     for (i, (path, ver)) in candidate_entries.iter().enumerate() {
         let is_aur = path.to_string_lossy().contains(".cache/haj");
         let tag = if is_aur { " (aur)" } else { "" };
+        let status_tag = if let Some(ref cur_ver) = current_version {
+            let cmp = alpm::vercmp(ver.as_str(), cur_ver.as_str());
+            match cmp {
+                Ordering::Equal => " [current]".yellow().to_string(),
+                Ordering::Less => " [downgrade]".cyan().to_string(),
+                Ordering::Greater => " [upgrade]".green().to_string(),
+            }
+        } else {
+            "".to_string()
+        };
         println!(
-            "  {}) {} v{}{}",
+            "  {}) {} v{}{}{}",
             (i + 1).to_string().cyan(),
             package.magenta().bold(),
             ver.green(),
+            status_tag,
             tag.dimmed()
         );
     }

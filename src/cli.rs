@@ -100,14 +100,15 @@ pub enum Commands {
         help_template = "\
 \x1b[36;1mhaj tui (alias: t)\x1b[0m
 
-Usage: haj tui
+Usage: haj tui [OPTIONS]
 
 Description:
   launch the interactive package manager terminal dashboard
   features stats, search, orphans cleaner, news reader, and transaction history
 
 Options:
-  -h, --help  print help"
+  -v, --verbose  enable verbose debug logging
+  -h, --help     print help"
     )]
     Tui,
 
@@ -116,7 +117,7 @@ Options:
         help_template = "\
 \x1b[36;1mhaj install (alias: i)\x1b[0m
 
-Usage: haj install <packages>...
+Usage: haj install [OPTIONS] <packages>...
 
 Description:
   install one or more packages from the repositories or AUR
@@ -125,7 +126,13 @@ Arguments:
   <packages>...  list of packages to install
 
 Options:
-  -h, --help  print help"
+  -a, --aur            restrict operations to the aur
+  -r, --repo           restrict operations to arch repositories
+  -y, --noconfirm      bypass all confirmation prompts
+      --root <PATH>    specify an alternate installation root
+  -v, --verbose        enable verbose debug logging
+  -d, --dry-run        preview a command without modifying the system
+  -h, --help           print help"
     )]
     Install {
         #[arg(required = true)]
@@ -138,16 +145,20 @@ Options:
         help_template = "\
 \x1b[36;1mhaj remove (aliases: rm, toss)\x1b[0m
 
-Usage: haj remove <packages>...
+Usage: haj remove [OPTIONS] <packages>...
 
 Description:
-  remove packages along with their unneeded dependencies
+  remove packages along with their unneeded dependencies (via pacman -Rs)
 
 Arguments:
   <packages>...  list of packages to remove
 
 Options:
-  -h, --help  print help"
+  -y, --noconfirm      bypass all confirmation prompts
+      --root <PATH>    specify an alternate installation root
+  -v, --verbose        enable verbose debug logging
+  -d, --dry-run        preview a command without modifying the system
+  -h, --help           print help"
     )]
     Remove {
         #[arg(required = true)]
@@ -160,13 +171,18 @@ Options:
         help_template = "\
 \x1b[36;1mhaj update (aliases: up, sync)\x1b[0m
 
-Usage: haj update
+Usage: haj update [OPTIONS]
 
 Description:
   synchronize package databases from remote repositories
 
 Options:
-  -h, --help  print help"
+  -a, --aur            restrict operations to the aur
+  -r, --repo           restrict operations to arch repositories
+      --root <PATH>    specify an alternate installation root
+  -v, --verbose        enable verbose debug logging
+  -d, --dry-run        preview a command without modifying the system
+  -h, --help           print help"
     )]
     Update,
 
@@ -181,8 +197,14 @@ Description:
   perform a full system upgrade of all official repositories and AUR packages
 
 Options:
-      --no-sync  do not sync package databases from remote mirrors
-  -h, --help     print help"
+      --no-sync        do not sync package databases from remote mirrors
+  -a, --aur            restrict operations to the aur
+  -r, --repo           restrict operations to arch repositories
+  -y, --noconfirm      bypass all confirmation prompts
+      --root <PATH>    specify an alternate installation root
+  -v, --verbose        enable verbose debug logging
+  -d, --dry-run        preview a command without modifying the system
+  -h, --help           print help"
     )]
     Upgrade {
         /// Do not sync package databases before upgrading
@@ -195,7 +217,7 @@ Options:
         help_template = "\
 \x1b[36;1mhaj search (alias: s)\x1b[0m
 
-Usage: haj search <query>
+Usage: haj search [OPTIONS] <query>
 
 Description:
   search official repositories and AUR for matching packages
@@ -204,7 +226,10 @@ Arguments:
   <query>  the search term to query
 
 Options:
-  -h, --help  print help"
+  -a, --aur      restrict operations to the aur
+  -r, --repo     restrict operations to arch repositories
+  -v, --verbose  enable verbose debug logging
+  -h, --help     print help"
     )]
     Search { query: String },
 
@@ -213,7 +238,7 @@ Options:
         help_template = "\
 \x1b[36;1mhaj show (alias: info)\x1b[0m
 
-Usage: haj show <package>
+Usage: haj show [OPTIONS] <package>
 
 Description:
   display detailed package information such as size, installation reason, and dependencies
@@ -222,7 +247,8 @@ Arguments:
   <package>  the package name to inspect
 
 Options:
-  -h, --help  print help"
+  -v, --verbose  enable verbose debug logging
+  -h, --help     print help"
     )]
     Show { package: String },
 
@@ -231,16 +257,17 @@ Options:
         help_template = "\
 \x1b[36;1mhaj group (alias: g)\x1b[0m
 
-Usage: haj group <name>
+Usage: haj group [OPTIONS] <name>
 
 Description:
-  browse and install packages associated with a specific package group
+  browse and install packages associated with a specific package group (e.g. gnome, base-devel)
 
 Arguments:
   <name>  the package group name
 
 Options:
-  -h, --help  print help"
+  -v, --verbose  enable verbose debug logging
+  -h, --help     print help"
     )]
     Group { name: String },
 
@@ -258,6 +285,7 @@ Options:
   -e, --explicit  show only packages installed explicitly
   -p, --deps      show only packages installed as dependencies
   -f, --foreign   show only foreign/AUR packages
+  -v, --verbose   enable verbose debug logging
   -h, --help      print help"
     )]
     List {
@@ -277,13 +305,14 @@ Options:
         help_template = "\
 \x1b[36;1mhaj stats (alias: st)\x1b[0m
 
-Usage: haj stats
+Usage: haj stats [OPTIONS]
 
 Description:
   display system health score, disk usage, cache statistics, and package counts
 
 Options:
-  -h, --help  print help"
+  -v, --verbose  enable verbose debug logging
+  -h, --help     print help"
     )]
     Stats,
 
@@ -295,15 +324,16 @@ Options:
 Usage: haj history [OPTIONS]
 
 Description:
-  show recent transaction history (installs, upgrades, removals)
+  show recent transaction history (installs, upgrades, removals) with smart relative timestamps
 
 Options:
-  -l, --limit <LIMIT>  number of recent changes to show [default: 35]
+  -l, --limit <LIMIT>  number of recent changes to show [default: 50]
+  -v, --verbose        enable verbose debug logging
   -h, --help           print help"
     )]
     History {
         /// number of recent changes to show
-        #[arg(short = 'l', long, default_value_t = 35)]
+        #[arg(short = 'l', long, default_value_t = 50)]
         limit: usize,
     },
 
@@ -312,7 +342,7 @@ Options:
         help_template = "\
 \x1b[36;1mhaj downgrade (alias: sink)\x1b[0m
 
-Usage: haj downgrade <package>
+Usage: haj downgrade [OPTIONS] <package>
 
 Description:
   downgrade an installed package using the cached packages in /var/cache/pacman/pkg
@@ -321,7 +351,11 @@ Arguments:
   <package>  the package name to downgrade
 
 Options:
-  -h, --help  print help"
+  -y, --noconfirm      bypass all confirmation prompts
+      --root <PATH>    specify an alternate installation root
+  -v, --verbose        enable verbose debug logging
+  -d, --dry-run        preview a command without modifying the system
+  -h, --help           print help"
     )]
     Downgrade {
         /// package to downgrade
@@ -336,10 +370,11 @@ Options:
 Usage: haj clean [OPTIONS]
 
 Description:
-  clean the pacman package cache
+  clean the pacman package cache to reclaim disk space
 
 Options:
   -k, --keep <KEEP>  number of package versions to keep in cache [default: 3]
+  -v, --verbose      enable verbose debug logging
   -h, --help         print help"
     )]
     Clean {
@@ -353,13 +388,14 @@ Options:
         help_template = "\
 \x1b[36;1mhaj orphan (alias: o)\x1b[0m
 
-Usage: haj orphan
+Usage: haj orphan [OPTIONS]
 
 Description:
   detect and list orphaned package dependencies that are no longer needed
 
 Options:
-  -h, --help  print help"
+  -v, --verbose  enable verbose debug logging
+  -h, --help     print help"
     )]
     Orphan,
 
@@ -368,16 +404,17 @@ Options:
         help_template = "\
 \x1b[36;1mhaj owns (alias: ow)\x1b[0m
 
-Usage: haj owns <file_path>
+Usage: haj owns [OPTIONS] <file_path>
 
 Description:
   find which installed package owns a given absolute file path
 
 Arguments:
-  <file_path>  the file path to query
+  <file_path>  the file path to query (e.g. /usr/bin/bash)
 
 Options:
-  -h, --help  print help"
+  -v, --verbose  enable verbose debug logging
+  -h, --help     print help"
     )]
     Owns { file_path: String },
 
@@ -386,16 +423,17 @@ Options:
         help_template = "\
 \x1b[36;1mhaj locate (alias: loc)\x1b[0m
 
-Usage: haj locate <query>
+Usage: haj locate [OPTIONS] <query>
 
 Description:
-  search remote package repositories for a file name matching the query
+  search remote package repositories for a file name matching the query (using pacman -F)
 
 Arguments:
   <query>  the file name or pattern to search for
 
 Options:
-  -h, --help  print help"
+  -v, --verbose  enable verbose debug logging
+  -h, --help     print help"
     )]
     Locate { query: String },
 
@@ -404,7 +442,7 @@ Options:
         help_template = "\
 \x1b[36;1mhaj files (alias: lf)\x1b[0m
 
-Usage: haj files <package>
+Usage: haj files [OPTIONS] <package>
 
 Description:
   list all files installed by a specific package
@@ -413,7 +451,8 @@ Arguments:
   <package>  the name of the package
 
 Options:
-  -h, --help  print help"
+  -v, --verbose  enable verbose debug logging
+  -h, --help     print help"
     )]
     Files { package: String },
 
@@ -422,7 +461,7 @@ Options:
         help_template = "\
 \x1b[36;1mhaj load (alias: l)\x1b[0m
 
-Usage: haj load <archive_path>
+Usage: haj load [OPTIONS] <archive_path>
 
 Description:
   install a local package archive (.pkg.tar.zst) onto the system
@@ -431,7 +470,11 @@ Arguments:
   <archive_path>  the path to the local package archive file
 
 Options:
-  -h, --help  print help"
+  -y, --noconfirm      bypass all confirmation prompts
+      --root <PATH>    specify an alternate installation root
+  -v, --verbose        enable verbose debug logging
+  -d, --dry-run        preview a command without modifying the system
+  -h, --help           print help"
     )]
     Load { archive_path: String },
 
@@ -440,16 +483,19 @@ Options:
         help_template = "\
 \x1b[36;1mhaj fetch (alias: f)\x1b[0m
 
-Usage: haj fetch <packages>...
+Usage: haj fetch [OPTIONS] <packages>...
 
 Description:
-  download package archives without installing them
+  download package archives to the cache directory without installing them
 
 Arguments:
-  <packages>...  List of packages to fetch
+  <packages>...  list of packages to fetch
 
 Options:
-  -h, --help  print help"
+      --root <PATH>    specify an alternate installation root
+  -v, --verbose        enable verbose debug logging
+  -d, --dry-run        preview a command without modifying the system
+  -h, --help           print help"
     )]
     Fetch { packages: Vec<String> },
 
@@ -458,36 +504,35 @@ Options:
         help_template = "\
 \x1b[36;1mhaj mark (alias: m)\x1b[0m
 
-Usage: haj mark <package> [OPTIONS]
+Usage: haj mark [OPTIONS] <package>
 
 Description:
-  change an installed package's install reason (explicit or dependency)
+  toggle an installed package's install reason between explicit and dependency
 
 Arguments:
   <package>  the package to modify
 
 Options:
-      --as-explicit  mark the package as explicitly installed
-  -h, --help         print help"
+      --root <PATH>    specify an alternate installation root
+  -v, --verbose        enable verbose debug logging
+  -d, --dry-run        preview a command without modifying the system
+  -h, --help           print help"
     )]
-    Mark {
-        package: String,
-        #[arg(long)]
-        as_explicit: bool,
-    },
+    Mark { package: String },
 
     #[command(
         alias = "pn",
         help_template = "\
 \x1b[36;1mhaj diff (alias: pn)\x1b[0m
 
-Usage: haj diff
+Usage: haj diff [OPTIONS]
 
 Description:
   interactively search, manage, and merge .pacnew configuration files on the system
 
 Options:
-  -h, --help  print help"
+  -v, --verbose  enable verbose debug logging
+  -h, --help     print help"
     )]
     Diff,
 
