@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand};
 #[command(
     name = "haj",
     author = "asitos",
-    version = "0.2.7",
+    version = "0.2.8",
     about = "fast, quiet, beautiful package manager and tui for blahArch Linux.",
     long_about = None,
     disable_help_subcommand = true,

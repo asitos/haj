@@ -45,7 +45,7 @@ works on virtually every `pacman`-based distro: arch, blahArch, artix, endeavour
 - **the cargo/bun aesthetic:** no more jagged progress bars or walls of text. `haj` parses `pacman` output streams in real-time, displaying a single, elegant progress spinner and clean transaction summaries.
 - **native libalpm backend:** `haj` uses `alpm.rs` (C bindings for `libalpm`) to query your local and sync databases directly in memory.
 
-## how it works   
+## how it works
 
 `haj` is completely transparent and relies entirely on standard arch linux infrastructure:
 1. **reads** (`search`, `show`, `orphan`) are done natively via `libalpm` bindings for maximum performance.
@@ -53,7 +53,7 @@ works on virtually every `pacman`-based distro: arch, blahArch, artix, endeavour
 
 ## installation
 
-### aur 
+### aur
 
 you can install [haj](https://aur.archlinux.org/packages/haj) using your favorite aur helper:
 
@@ -147,7 +147,7 @@ sudo install -Dm755 target/release/haj /usr/bin/haj
 
 launch the interactive dashboard:
 ```bash
-haj tui 
+haj tui
 # or
 haj t
 ```
@@ -170,17 +170,66 @@ haj jump
 
 # sync repos
 haj sync
-# or 
+# or
 haj up
 
 haj install htop cmatrix
-# or 
+# or
 haj i htop cmatrix
 ```
 
 safely preview removing a package:
 ```bash
 haj -d toss firefox
+```
+
+## shell autocompletion
+
+`haj` supports shell autocompletion for **bash**, **zsh**, and **fish**, available in the releases tab assets after v0.2.8 onwards.
+
+```
+cd ~/.config/haj
+curl -sSL https://github.com/asitos/haj/releases/download/v0.2.8/completions.tar.gz | tar -xz
+```
+
+---
+
+### 1. fish setup
+
+```bash
+# system-wide (all-users)
+sudo cp src/completions/fish.sh /usr/share/fish/vendor_completions.d/haj.fish
+
+# user-only
+mkdir -p ~/.config/fish/completions
+cp src/completions/fish.sh ~/.config/fish/completions/haj.fish
+
+# restart shell or run the following command
+source ~/.config/fish/completions/haj.fish
+```
+
+### 2. bash setup
+```bash
+# system-wide (all-users)
+sudo cp src/completions/bash.sh /usr/share/bash-completion/completions/haj
+
+# user-only
+mkdir -p ~/.local/share/bash-completion/completions
+cp src/completions/bash.sh ~/.local/share/bash-completion/completions/haj
+```
+
+### 3. zsh setup
+```bash
+# user-only
+mkdir -p ~/.zsh/completion
+cp src/completions/zsh.sh ~/.zsh/completion/_haj
+
+# ensure ~/.zshrc includes completion path
+fpath=(~/.zsh/completion $fpath)
+autoload -U compinit && compinit
+
+# reload zsh
+exec zsh
 ```
 
 ## configuration
