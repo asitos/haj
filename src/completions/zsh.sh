@@ -67,12 +67,13 @@ _haj() {
                 'clean:clean the package cache'
                 'mark:change a package install reason'
                 'diff:interactively manage and merge .pacnew files'
+                'pkgbuild:read and print the PKGBUILD file of a package from the AUR'
             )
             _describe -t commands 'haj commands' subcmds
             ;;
         args)
             case $words[1] in
-                install|i|fetch|f)
+                install|i|fetch|f|pkgbuild|pb)
                     _haj_all_packages
                     ;;
                 remove|rm|toss|mark|m|show|info|files|lf)

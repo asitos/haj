@@ -6,7 +6,7 @@ _haj_completions() {
 
     # Complete options for commands
     case "$prev" in
-        install|i|fetch|f)
+        install|i|fetch|f|pkgbuild|pb)
             COMPREPLY=( $(compgen -W "$(pacman -Slq)" -- "$cur") )
             return 0
             ;;
@@ -59,7 +59,7 @@ _haj_completions() {
 
     # Complete commands
     if [ $COMP_CWORD -eq 1 ]; then
-        opts="tui update upgrade install remove search show group list stats load fetch downgrade owns files locate history orphan clean mark diff"
+        opts="tui update upgrade install remove search show group list stats load fetch downgrade owns files locate history orphan clean mark diff pkgbuild"
         COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
         return 0
     fi

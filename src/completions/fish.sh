@@ -73,11 +73,12 @@ complete -c haj -n '__fish_haj_needs_command' -a 'orphan' -d 'detect orphaned de
 complete -c haj -n '__fish_haj_needs_command' -a 'clean' -d 'clean the package cache'
 complete -c haj -n '__fish_haj_needs_command' -a 'mark' -d 'change a package install reason'
 complete -c haj -n '__fish_haj_needs_command' -a 'diff' -d 'interactively manage and merge .pacnew files'
+complete -c haj -n '__fish_haj_needs_command' -a 'pkgbuild' -d 'read and print the PKGBUILD file of a package from the AUR'
 
 
 # --- DYNAMIC COMPLETIONS ---
 
-complete -c haj -n '__fish_seen_subcommand_from install i fetch f' -f -a '(__fish_haj_repo_packages)'
+complete -c haj -n '__fish_seen_subcommand_from install i fetch f pkgbuild pb' -f -a '(__fish_haj_repo_packages)'
 complete -c haj -n '__fish_seen_subcommand_from remove rm toss mark m show info files lf' -f -a '(__fish_haj_installed_packages)'
 complete -c haj -n '__fish_seen_subcommand_from downgrade sink' -f -a '(__fish_haj_downgrades)'
 complete -c haj -n '__fish_seen_subcommand_from group g' -f -a '(__fish_haj_groups)'
