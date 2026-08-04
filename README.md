@@ -53,7 +53,7 @@ works on virtually every `pacman`-based distro: arch, blahArch, artix, endeavour
 
 ## installation
 
-### aur
+### aur (currently down for maintenance)
 
 you can install [haj](https://aur.archlinux.org/packages/haj) using your favorite aur helper:
 
