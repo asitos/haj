@@ -1756,6 +1756,11 @@ async fn main() -> anyhow::Result<()> {
                     core::pacnew::manage_pacnew_files();
                 }
 
+                Commands::Pkgbuild { package } => {
+                    drop(alpm_handle);
+                    view_pkgbuilds(&[package]).await;
+                }
+
                 Commands::List {
                     explicit,
                     deps,

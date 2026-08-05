@@ -18,7 +18,7 @@ Commands (alias):
   \x1b[36;1mtui (t)\x1b[0m                         launch the interactive package manager dashboard
 
   \x1b[36;1mupdate (up/sync)\x1b[0m                synchronize remote repositories 
-  \x1b[36;1mjump (upgrade)\x1b[0m [--no-sync]       full system upgrade
+  \x1b[36;1mjump (upgrade)\x1b[0m [--no-sync]      full system upgrade
   \x1b[36;1minstall (i)\x1b[0m <pkg>               install one or more packages
   \x1b[36;1mremove (rm/toss)\x1b[0m <pkg>          remove packages & unneeded dependencies
   \x1b[36;1msearch (s)\x1b[0m <query>              search remote repositories
@@ -535,6 +535,24 @@ Options:
   -h, --help     print help"
     )]
     Diff,
+
+    #[command(
+        alias = "pb",
+        help_template = "\
+\x1b[36;1mhaj pkgbuild (alias: pb)\x1b[0m
+
+Usage: haj pkgbuild [OPTIONS] <package>
+
+Description:
+  read and print the PKGBUILD file of a package from the AUR
+
+Arguments:
+  <package>  the package to fetch the PKGBUILD for
+
+Options:
+  -h, --help     print help"
+    )]
+    Pkgbuild { package: String },
 
     #[command(hide = true)]
     Completions {
