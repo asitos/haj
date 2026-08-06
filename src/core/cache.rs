@@ -1,4 +1,4 @@
-use owo_colors::OwoColorize;
+use crossterm::style::Stylize;
 use std::process::Command;
 
 pub fn scrub(keep: usize) {
@@ -26,7 +26,7 @@ pub fn scrub(keep: usize) {
         return;
     }
 
-    if let Some(home) = dirs::home_dir() {
+    if let Some(home) = std::env::var("HOME").map(std::path::PathBuf::from).ok() {
         let aur_cache = home.join(".cache/haj/aur");
         if aur_cache.exists()
             && let Ok(entries) = std::fs::read_dir(&aur_cache)

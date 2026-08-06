@@ -1,4 +1,4 @@
-use owo_colors::OwoColorize;
+use crossterm::style::Stylize;
 use tokio::process::Command;
 
 pub async fn ensure_sudo() -> anyhow::Result<()> {

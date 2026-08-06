@@ -1,4 +1,4 @@
-use owo_colors::OwoColorize;
+use crossterm::style::Stylize;
 use std::path::PathBuf;
 use std::process::Stdio;
 use tokio::io::AsyncReadExt;

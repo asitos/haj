@@ -1,5 +1,5 @@
 use chrono::Datelike;
-use owo_colors::OwoColorize;
+use crossterm::style::Stylize;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 
@@ -61,7 +61,7 @@ pub fn show_history(limit: usize) {
             };
 
             let formatted_ts = format_relative_timestamp(&timestamp);
-            println!("  {} {}", formatted_ts.dimmed(), colored_action);
+            println!("  {} {}", formatted_ts.dim(), colored_action);
         } else {
             println!("  {}", entry);
         }

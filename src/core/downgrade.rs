@@ -1,4 +1,4 @@
-use owo_colors::OwoColorize;
+use crossterm::style::Stylize;
 use std::cmp::Ordering;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -48,7 +48,7 @@ pub fn select_downgrade_target(package: &str) -> Option<PathBuf> {
             "{} currently installed: {} v{}",
             "::".blue(),
             package.bold(),
-            cur_ver.yellow()
+            cur_ver.clone().yellow()
         );
     }
 
@@ -66,7 +66,7 @@ pub fn select_downgrade_target(package: &str) -> Option<PathBuf> {
         }
     }
 
-    if let Some(home) = dirs::home_dir() {
+    if let Some(home) = std::env::var("HOME").map(std::path::PathBuf::from).ok() {
         let aur_cache = home.join(format!(".cache/haj/aur/{}", package));
         if let Ok(entries) = std::fs::read_dir(&aur_cache) {
             for entry in entries.filter_map(Result::ok) {
@@ -116,9 +116,9 @@ pub fn select_downgrade_target(package: &str) -> Option<PathBuf> {
             "  {}) {} v{}{}{}",
             (i + 1).to_string().cyan(),
             package.magenta().bold(),
-            ver.green(),
+            ver.clone().green(),
             status_tag,
-            tag.dimmed()
+            tag.dim()
         );
     }
 

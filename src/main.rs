@@ -6,8 +6,7 @@ mod ui;
 
 use clap::Parser;
 use cli::{Cli, Commands};
-use fs2::FileExt;
-use owo_colors::OwoColorize;
+use crossterm::style::Stylize;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
@@ -149,9 +148,9 @@ async fn display_arch_news() {
                                     "\n{} {}\n  {} {}\n  {}\n",
                                     "!!!".red().bold(),
                                     "ACTION REQUIRED: recent Arch Linux news".red().bold(),
-                                    "headline:".dimmed(),
+                                    "headline:".dim(),
                                     title.yellow().bold(),
-                                    "haj requests you to read the news before upgrading.".dimmed()
+                                    "haj requests you to read the news before upgrading.".dim()
                                 );
                             }
                         }
@@ -194,7 +193,7 @@ async fn view_pkgbuilds(pkgs: &[String]) {
         });
 
     for pkg in pkgs {
-        let spinner = ui::progress::spinner(&format!("fetching PKGBUILD for {}...", pkg.magenta()));
+        let spinner = ui::progress::spinner(&format!("fetching PKGBUILD for {}...", pkg.clone().magenta()));
         let tmp_dir = format!("/tmp/haj_view_{}", pkg);
 
         let _ = std::fs::remove_dir_all(&tmp_dir);
@@ -241,14 +240,14 @@ async fn view_pkgbuilds(pkgs: &[String]) {
                 println!(
                     "{} PKGBUILD not found in repository for {}.",
                     "✗".red(),
-                    pkg.bold()
+                    pkg.clone().bold()
                 );
             }
         } else {
             println!(
                 "{} failed to fetch repository for {}.",
                 "✗".red(),
-                pkg.bold()
+                pkg.clone().bold()
             );
         }
 
@@ -405,7 +404,7 @@ async fn run_pacman(
                     );
                     spinner.set_message(last_spinner_msg.clone());
                 } else if clean.contains("Retrieving packages") || clean.contains("downloading") {
-                    last_spinner_msg = format!("  {}", "downloading packages...".dimmed());
+                    last_spinner_msg = format!("  {}", "downloading packages...".dim());
                     spinner.set_message(last_spinner_msg.clone());
                 } else if clean.starts_with('(') && clean.contains(") upgrading")
                     || clean.starts_with('(') && clean.contains(") installing")
@@ -436,7 +435,7 @@ async fn run_pacman(
                     if clean.starts_with("==> Building image")
                         || clean.starts_with("==> Install DKMS")
                     {
-                        last_spinner_msg = format!("{}    {}", ":3".yellow(), clean.dimmed());
+                        last_spinner_msg = format!("{}    {}", ":3".yellow(), clean.dim());
                         spinner.set_message(last_spinner_msg.clone());
                     } else if (lower_clean.contains("missing") || lower_clean.contains("not found"))
                         && !hook_alerts.contains(&clean.to_string())
@@ -472,7 +471,7 @@ async fn run_pacman(
 
                     if !context_buffer.is_empty() {
                         for line in &context_buffer {
-                            println!("  {}", line.dimmed());
+                            println!("  {}", line.clone().dim());
                         }
                         context_buffer.clear();
                     }
@@ -664,8 +663,8 @@ async fn process_installation(packages: Vec<String>, alpm_handle: alpm::Alpm, cl
                                 println!(
                                     "{} {} is up to date ({}).",
                                     "✓".green(),
-                                    pkg.magenta().bold(),
-                                    aur_ver.dimmed()
+                                    pkg.clone().magenta().bold(),
+                                    aur_ver.dim()
                                 );
                                 skip = true;
                             } else {
@@ -706,28 +705,28 @@ async fn process_installation(packages: Vec<String>, alpm_handle: alpm::Alpm, cl
     println!("\n{}", "targets:".bold().white());
 
     if !native_summaries.is_empty() {
-        println!("  {}", "native repositories:".dimmed());
+        println!("  {}", "native repositories:".dim());
         for sum in &native_summaries {
             println!(
                 "    {:<25} {}",
-                sum.name.cyan().bold(),
-                sum.version.dimmed()
+                sum.name.clone().cyan().bold(),
+                sum.version.clone().dim()
             );
         }
     }
 
     if !resolved_aur_pkgs.is_empty() {
-        println!("  {}", "arch user repository:".dimmed());
+        println!("  {}", "arch user repository:".dim());
         for (pkg, aur_ver, is_update, local_ver) in &resolved_aur_pkgs {
             if *is_update {
                 println!(
                     "    {:<25} {} -> {}",
-                    pkg.magenta().bold(),
-                    local_ver.as_ref().unwrap().red(),
-                    aur_ver.green()
+                    pkg.clone().magenta().bold(),
+                    local_ver.as_ref().unwrap().clone().red(),
+                    aur_ver.clone().green()
                 );
             } else {
-                println!("    {:<25} {}", pkg.magenta().bold(), aur_ver.green());
+                println!("    {:<25} {}", pkg.clone().magenta().bold(), aur_ver.clone().green());
             }
         }
     }
@@ -806,29 +805,29 @@ async fn process_installation(packages: Vec<String>, alpm_handle: alpm::Alpm, cl
             println!(
                 "\n{} preparing {} ({})...",
                 "::".blue(),
-                pkg.magenta().bold(),
-                aur_ver.green()
+                pkg.clone().magenta().bold(),
+                aur_ver.clone().green()
             );
 
             match core::aur::build(&pkg, cli.verbose).await {
                 Ok(pkg_path) => {
                     let spinner_msg = if is_update {
-                        format!("updating built package {}...", pkg.magenta().bold())
+                        format!("updating built package {}...", pkg.clone().magenta().bold())
                     } else {
-                        format!("installing built package {}...", pkg.magenta().bold())
+                        format!("installing built package {}...", pkg.clone().magenta().bold())
                     };
 
                     let success_msg = if is_update {
                         format!(
                             "{} updated successfully ({}).",
                             pkg.magenta().bold(),
-                            aur_ver.dimmed()
+                            aur_ver.dim()
                         )
                     } else {
                         format!(
                             "{} installed successfully ({}).",
                             pkg.magenta().bold(),
-                            aur_ver.dimmed()
+                            aur_ver.dim()
                         )
                     };
 
@@ -877,12 +876,14 @@ async fn main() -> anyhow::Result<()> {
         .open("/tmp/haj.lock")
         .expect("failed to open lock file");
 
-    if lock_file.try_lock_exclusive().is_err() {
+    use std::os::unix::io::AsRawFd;
+    let fd = lock_file.as_raw_fd();
+    if unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) } != 0 {
         println!(
-            "{} haj is currently running in another terminal. (waiting for lock...)",
-            "✗".red()
+            "{} haj is already running. waiting for lock...",
+            "::".blue()
         );
-        lock_file.lock_exclusive().expect("failed to acquire lock");
+        unsafe { libc::flock(fd, libc::LOCK_EX); }
     }
 
     let _haj_lock = lock_file;
@@ -944,7 +945,7 @@ async fn main() -> anyhow::Result<()> {
 
                 Commands::Interactive(queries) => {
                     let query_str = queries.join(" ");
-                    println!("{} searching for '{}'...\n", "::".blue(), query_str.bold());
+                    println!("{} searching for '{}'...\n", "::".blue(), query_str.clone().bold());
 
                     let mut results = Vec::new();
 
@@ -1046,23 +1047,23 @@ async fn main() -> anyhow::Result<()> {
                         "version".white().bold(),
                         "origin/status".white().bold()
                     );
-                    println!("  {}", "-".repeat(78).dimmed());
+                    println!("  {}", "-".repeat(78).dim());
 
                     for (i, (name, ver, status, desc)) in results.iter().enumerate() {
                         let name_colored = if status.contains("aur") {
-                            name.magenta().bold().to_string()
+                            name.clone().magenta().bold().to_string()
                         } else {
-                            name.cyan().bold().to_string()
+                            name.clone().cyan().bold().to_string()
                         };
 
                         println!(
                             "  {:<4} {:<35} {:<20} {}",
                             format!("[{}]", i + 1).green().bold(),
                             name_colored,
-                            ver.dimmed(),
+                            ver.clone().dim(),
                             status
                         );
-                        println!("       {}\n", desc.dimmed());
+                        println!("       {}\n", desc.clone().dim());
                     }
 
                     print!(
@@ -1104,7 +1105,7 @@ async fn main() -> anyhow::Result<()> {
                     let mut found = true;
                     for pkg in &packages {
                         if local_db.pkg(pkg.as_str()).is_err() {
-                            println!("{} package '{}' is not installed.", "✗".red(), pkg.bold());
+                            println!("{} package '{}' is not installed.", "✗".red(), pkg.clone().bold());
                             found = false;
                         }
                     }
@@ -1131,7 +1132,7 @@ async fn main() -> anyhow::Result<()> {
                                 if trimmed.starts_with("error:") {
                                     println!("  {}", trimmed.red().bold());
                                 } else {
-                                    println!("  {}", trimmed.dimmed());
+                                    println!("  {}", trimmed.dim());
                                 }
                             }
                         }
@@ -1172,8 +1173,8 @@ async fn main() -> anyhow::Result<()> {
                             );
                             println!(
                                 "  {:<width$}   {}",
-                                "─".repeat(max_dep_len).dimmed(),
-                                "─".repeat(15).dimmed(),
+                                "─".repeat(max_dep_len).dim(),
+                                "─".repeat(15).dim(),
                                 width = max_dep_len
                             );
                             for (dep, dependent) in parsed_conflicts {
@@ -1192,7 +1193,7 @@ async fn main() -> anyhow::Result<()> {
                                 if line.starts_with("::") {
                                     println!("  {}", line.yellow());
                                 } else {
-                                    println!("  {}", line.dimmed());
+                                    println!("  {}", line.dim());
                                 }
                             }
                         }
@@ -1349,16 +1350,16 @@ async fn main() -> anyhow::Result<()> {
                                 parts[3].green()
                             );
                         } else {
-                            println!("  {}", line.cyan());
+                            println!("  {}", line.clone().cyan());
                         }
                     }
 
                     for (name, old, new) in &aur_updates {
                         println!(
                             "  {:<30} {} -> {}",
-                            name.magenta().bold(),
-                            old.red(),
-                            new.green()
+                            name.clone().magenta().bold(),
+                            old.clone().red(),
+                            new.clone().green()
                         );
                     }
 
@@ -1397,20 +1398,20 @@ async fn main() -> anyhow::Result<()> {
                             println!(
                                 "\n{} preparing to update {} ({})...",
                                 "::".blue(),
-                                name.magenta().bold(),
-                                new_ver.green()
+                                name.clone().magenta().bold(),
+                                new_ver.clone().green()
                             );
 
                             match core::aur::build(&name, cli.verbose).await {
                                 Ok(pkg_path) => {
                                     let spinner_msg = format!(
                                         "updating built package {}...",
-                                        name.magenta().bold()
+                                        name.clone().magenta().bold()
                                     );
                                     let success_msg = format!(
                                         "{} updated successfully ({}).",
                                         name.magenta().bold(),
-                                        new_ver.dimmed()
+                                        new_ver.dim()
                                     );
                                     let pacman_args =
                                         vec!["-U", pkg_path.to_str().unwrap(), "--noconfirm"];
@@ -1481,7 +1482,7 @@ async fn main() -> anyhow::Result<()> {
                         "{} searching {} for '{}'...\n",
                         "✓".green(),
                         target_msg.white().bold(),
-                        query.cyan()
+                        query.clone().cyan()
                     );
 
                     let mut found = false;
@@ -1495,7 +1496,7 @@ async fn main() -> anyhow::Result<()> {
                                 "version".white().bold(),
                                 "origin/status".white().bold()
                             );
-                            println!("  {}", "-".repeat(75).dimmed());
+                            println!("  {}", "-".repeat(75).dim());
                             header_printed = true;
                         }
                     };
@@ -1523,12 +1524,12 @@ async fn main() -> anyhow::Result<()> {
                                     println!(
                                         "  {:<35} {:<20} {}",
                                         pkg.name().cyan().bold(),
-                                        pkg.version().dimmed(),
+                                        pkg.version().dim(),
                                         status
                                     );
 
                                     let desc = pkg.desc().unwrap_or("no description provided.");
-                                    println!("      {}\n", desc.dimmed());
+                                    println!("      {}\n", desc.dim());
                                 }
                             }
                         }
@@ -1575,10 +1576,10 @@ async fn main() -> anyhow::Result<()> {
                                 println!(
                                     "  {:<35} {:<20} {}",
                                     name.magenta().bold(),
-                                    version.dimmed(),
+                                    version.dim(),
                                     status
                                 );
-                                println!("      {}\n", desc.dimmed());
+                                println!("      {}\n", desc.dim());
                             }
                         }
                     }
@@ -1599,7 +1600,7 @@ async fn main() -> anyhow::Result<()> {
                             "{} {} {}",
                             "::".blue(),
                             pkg.name().cyan().bold(),
-                            pkg.version().dimmed()
+                            pkg.version().dim()
                         );
                         if let Some(desc) = pkg.desc() {
                             println!("   {}", desc.italic());
@@ -1619,25 +1620,25 @@ async fn main() -> anyhow::Result<()> {
                         let depends = pkg.depends();
                         println!("\n{}", "depends on:".bold().white());
                         if depends.is_empty() {
-                            println!("  {}", "none".dimmed());
+                            println!("  {}", "none".dim());
                         } else {
                             let deps_list: Vec<_> = depends.iter().collect();
                             for (i, dep) in deps_list.iter().enumerate() {
                                 let is_last = i == deps_list.len() - 1;
                                 let prefix = if is_last { "└─" } else { "├─" };
-                                println!("  {} {}", prefix.dimmed(), dep.name().magenta());
+                                println!("  {} {}", prefix.dim(), dep.name().magenta());
                             }
                         }
 
                         let required_by = pkg.required_by();
                         println!("\n{}", "required by:".bold().white());
                         if required_by.is_empty() {
-                            println!("  {}", "none".dimmed());
+                            println!("  {}", "none".dim());
                         } else {
                             for (i, req) in required_by.iter().enumerate() {
                                 let is_last = i == required_by.len() - 1;
                                 let prefix = if is_last { "└─" } else { "├─" };
-                                println!("  {} {}", prefix.dimmed(), req.cyan());
+                                println!("  {} {}", prefix.dim(), req.cyan());
                             }
                         }
                         println!();
@@ -1673,7 +1674,7 @@ async fn main() -> anyhow::Result<()> {
                         println!("{}", "orphans found:".bold().white());
                         let mut total_size = 0.0;
                         for pkg in &orphans {
-                            println!("  {:<25} {}", pkg.name().magenta(), pkg.version().dimmed());
+                            println!("  {:<25} {}", pkg.name().magenta(), pkg.version().dim());
                             total_size += pkg.isize() as f64 / 1024.0 / 1024.0;
                         }
                         println!("\n{:<15} {:.2} MB", "wasted space:", total_size);
@@ -1773,7 +1774,7 @@ async fn main() -> anyhow::Result<()> {
                         "version".white().bold(),
                         "origin".white().bold()
                     );
-                    println!("  {}", "-".repeat(70).dimmed());
+                    println!("  {}", "-".repeat(70).dim());
 
                     for pkg in local_db.pkgs() {
                         let is_explicit = pkg.reason() == alpm::PackageReason::Explicit;
@@ -1801,14 +1802,14 @@ async fn main() -> anyhow::Result<()> {
                             println!(
                                 "  {:<35} {:<25} {}",
                                 pkg.name().cyan(),
-                                pkg.version().dimmed(),
+                                pkg.version().dim(),
                                 "native".blue()
                             );
                         } else {
                             println!(
                                 "  {:<35} {:<25} {}",
                                 pkg.name().magenta(),
-                                pkg.version().dimmed(),
+                                pkg.version().dim(),
                                 "aur".magenta()
                             );
                         }
@@ -1972,7 +1973,7 @@ async fn main() -> anyhow::Result<()> {
                     let update_str = if updates > 0 {
                         updates.to_string().yellow().bold().to_string()
                     } else {
-                        "0 (up to date)".dimmed().to_string()
+                        "0 (up to date)".dim().to_string()
                     };
 
                     println!("\n{}", "✓ system overview".bold().white());
@@ -1982,7 +1983,7 @@ async fn main() -> anyhow::Result<()> {
                         "  {:<15} {} {}",
                         "packages:".bold(),
                         total_pkgs.to_string().cyan().bold(),
-                        format!("({} explicit, {} dependencies)", explicit_pkgs, dep_pkgs).dimmed()
+                        format!("({} explicit, {} dependencies)", explicit_pkgs, dep_pkgs).dim()
                     );
                     println!("  {:<15} {}", "aur:".bold(), aur_pkgs.to_string().magenta());
                     println!("  {:<15} {}", "updates:".bold(), update_str);
@@ -1999,14 +2000,14 @@ async fn main() -> anyhow::Result<()> {
                             format_gb(pacman_cache as f64),
                             format_gb(aur_cache as f64)
                         )
-                        .dimmed()
+                        .dim()
                     );
                     println!("  {:<15} {}", "health:".bold(), health_status);
                     println!("  {:<15} {}", "last sync:".bold(), sync_time.cyan());
                     println!(
                         "  {:<15} {}",
                         "activity:".bold(),
-                        format!("{} (newest), {} (oldest)", newest_pkg, oldest_pkg).dimmed()
+                        format!("{} (newest), {} (oldest)", newest_pkg, oldest_pkg).dim()
                     );
                     println!();
                 }
@@ -2043,7 +2044,7 @@ async fn main() -> anyhow::Result<()> {
                     println!(
                         "{} packages in group {}:\n",
                         "✓".green(),
-                        name.cyan().bold()
+                        name.clone().cyan().bold()
                     );
                     for (pkg_name, pkg_ver, is_installed) in &group_pkgs {
                         let status = if *is_installed {
@@ -2051,7 +2052,7 @@ async fn main() -> anyhow::Result<()> {
                         } else {
                             "".to_string()
                         };
-                        println!("  {} {}{}", pkg_name.bold(), pkg_ver.dimmed(), status);
+                        println!("  {} {}{}", pkg_name.clone().bold(), pkg_ver.clone().dim(), status);
                     }
 
                     println!("\n{:<15} {}", "total:", group_pkgs.len().to_string().cyan());
@@ -2077,7 +2078,7 @@ async fn main() -> anyhow::Result<()> {
 
                     run_pacman(
                         &args,
-                        &format!("installing group {}...", name.cyan()),
+                        &format!("installing group {}...", name.clone().cyan()),
                         &format!("group {} installed successfully.", name.cyan()),
                         cli.dry_run,
                         cli.verbose,
@@ -2092,7 +2093,7 @@ async fn main() -> anyhow::Result<()> {
                     println!(
                         "{} searching remote file databases for '{}'...\n",
                         "✓".green(),
-                        query.cyan()
+                        query.clone().cyan()
                     );
 
                     let status = std::process::Command::new("pacman")

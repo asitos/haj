@@ -321,7 +321,7 @@ impl App {
             }
         }
 
-        let home = dirs::home_dir().unwrap_or_default();
+        let home = std::env::var("HOME").map(std::path::PathBuf::from).unwrap_or_default();
         let cache_dir = home.join(".cache/haj");
         let _ = std::fs::create_dir_all(&cache_dir);
 
@@ -517,7 +517,7 @@ impl App {
 
     pub fn mark_news_read(&mut self, link: String) {
         if self.read_news.insert(link) {
-            let home = dirs::home_dir().unwrap_or_default();
+            let home = std::env::var("HOME").map(std::path::PathBuf::from).unwrap_or_default();
             let data = serde_json::to_string(&self.read_news).unwrap_or_default();
             tokio::spawn(async move {
                 let _ = tokio::fs::create_dir_all(home.join(".cache/haj")).await;
@@ -1132,52 +1132,53 @@ pub fn fetch_article_body(tx: mpsc::Sender<TuiEvent>, link: String) {
             if resp.status().is_success() {
                 if let Ok(html) = resp.text().await {
                     let desc = {
-                        let doc = scraper::Html::parse_document(&html);
-                        let body_selector = scraper::Selector::parse(".article-content").unwrap();
-                        doc.select(&body_selector).next().map(|body_elem| {
-                            let mut desc = body_elem.html();
-                            desc = desc
-                                .replace("<p>", "")
-                                .replace("</p>", "\n\n")
-                                .replace("<li>", "• ")
-                                .replace("</li>", "\n")
-                                .replace("<ul>", "")
-                                .replace("</ul>", "\n")
-                                .replace("<br>", "\n")
-                                .replace("<br/>", "\n")
-                                .replace("<br />", "\n");
+                        if let Some(start) = html.find("class=\"article-content\">") {
+                            let content_start = start + "class=\"article-content\">".len();
+                            if let Some(end) = html[content_start..].find("</div>") {
+                                let mut desc = html[content_start..content_start + end].to_string();
+                                desc = desc
+                                    .replace("<p>", "")
+                                    .replace("</p>", "\n\n")
+                                    .replace("<li>", "• ")
+                                    .replace("</li>", "\n")
+                                    .replace("<ul>", "")
+                                    .replace("</ul>", "\n")
+                                    .replace("<br>", "\n")
+                                    .replace("<br/>", "\n")
+                                    .replace("<br />", "\n");
 
-                            while let Some(start) = desc.find('<') {
-                                if let Some(end) = desc[start..].find('>') {
-                                    let tag = &desc[start..=start + end];
-                                    if tag == "<code>" || tag == "</code>" {
-                                        desc.replace_range(
-                                            start..=start + end,
-                                            if tag == "<code>" {
-                                                "[[CODE_START]]"
-                                            } else {
-                                                "[[CODE_END]]"
-                                            },
-                                        );
+                                while let Some(start) = desc.find('<') {
+                                    if let Some(end) = desc[start..].find('>') {
+                                        let tag = &desc[start..=start + end];
+                                        if tag == "<code>" || tag == "</code>" {
+                                            desc.replace_range(
+                                                start..=start + end,
+                                                if tag == "<code>" {
+                                                    "[[CODE_START]]"
+                                                } else {
+                                                    "[[CODE_END]]"
+                                                },
+                                            );
+                                        } else {
+                                            desc.replace_range(start..=start + end, "");
+                                        }
                                     } else {
-                                        desc.replace_range(start..=start + end, "");
+                                        break;
                                     }
-                                } else {
-                                    break;
                                 }
-                            }
-                            desc = desc
-                                .replace("[[CODE_START]]", "<code>")
-                                .replace("[[CODE_END]]", "</code>");
+                                desc = desc
+                                    .replace("[[CODE_START]]", "<code>")
+                                    .replace("[[CODE_END]]", "</code>");
 
-                            desc = desc
-                                .replace("&gt;", ">")
-                                .replace("&lt;", "<")
-                                .replace("&quot;", "\"")
-                                .replace("&amp;", "&")
-                                .replace("&#39;", "'");
-                            desc
-                        })
+                                desc = desc
+                                    .replace("&gt;", ">")
+                                    .replace("&lt;", "<")
+                                    .replace("&quot;", "\"")
+                                    .replace("&amp;", "&")
+                                    .replace("&#39;", "'");
+                                Some(desc)
+                            } else { None }
+                        } else { None }
                     };
 
                     if let Some(d) = desc {
@@ -1197,7 +1198,7 @@ pub fn fetch_arch_news(tx: mpsc::Sender<TuiEvent>, page: usize) {
             .build()
             .unwrap();
 
-        let home = dirs::home_dir().unwrap_or_default();
+        let home = std::env::var("HOME").map(std::path::PathBuf::from).unwrap_or_default();
         let cache_path = home.join(".cache/haj/news.json");
 
         let mut items = Vec::new();
@@ -1230,59 +1231,78 @@ pub fn fetch_arch_news(tx: mpsc::Sender<TuiEvent>, page: usize) {
                     }
 
                     let new_items = {
-                        let doc = scraper::Html::parse_document(&html_idx);
-                        let row_selector =
-                            scraper::Selector::parse("#article-list tbody tr").unwrap();
-                        let td_selector = scraper::Selector::parse("td").unwrap();
-                        let a_selector = scraper::Selector::parse("a").unwrap();
-
                         let mut parsed_items = Vec::new();
-                        for row in doc.select(&row_selector) {
-                            let tds: Vec<_> = row.select(&td_selector).collect();
-                            if tds.len() >= 2 {
-                                let date_str = tds[0].text().collect::<String>().trim().to_string();
-                                if let Some(a) = tds[1].select(&a_selector).next() {
-                                    let title = a.text().collect::<String>().trim().to_string();
-                                    let path =
-                                        a.value().attr("href").unwrap_or_default().to_string();
-                                    let link = format!("https://archlinux.org{}", path);
+                        let mut current_html = html_idx.as_str();
+                        while let Some(tr_start) = current_html.find("<tr>") {
+                            current_html = &current_html[tr_start + 4..];
+                            if let Some(tr_end) = current_html.find("</tr>") {
+                                let tr_content = &current_html[..tr_end];
+                                current_html = &current_html[tr_end + 5..];
+                                
+                                let mut tds = Vec::new();
+                                let mut tr_search = tr_content;
+                                while let Some(td_start) = tr_search.find("<td>") {
+                                    tr_search = &tr_search[td_start + 4..];
+                                    if let Some(td_end) = tr_search.find("</td>") {
+                                        tds.push(&tr_search[..td_end]);
+                                        tr_search = &tr_search[td_end + 5..];
+                                    }
+                                }
+                                
+                                if tds.len() >= 2 {
+                                    let date_str = tds[0].trim().to_string();
+                                    let td1 = tds[1];
+                                    if let Some(href_start) = td1.find("href=\"") {
+                                        let href_rest = &td1[href_start + 6..];
+                                        if let Some(href_end) = href_rest.find("\"") {
+                                            let path = &href_rest[..href_end];
+                                            let link = format!("https://archlinux.org{}", path);
+                                            
+                                            if let Some(title_start) = href_rest.find(">") {
+                                                let title_rest = &href_rest[title_start + 1..];
+                                                if let Some(title_end) = title_rest.find("</a>") {
+                                                    let title = title_rest[..title_end].trim().to_string();
 
-                                    if !items.iter().any(|item| item.link == link) {
-                                        let pub_date = if let Ok(dt) =
-                                            chrono::NaiveDate::parse_from_str(&date_str, "%Y-%m-%d")
-                                        {
-                                            dt.and_hms_opt(0, 0, 0)
-                                                .map(|dt_time| {
-                                                    dt_time
-                                                        .format("%a, %d %b %Y 00:00:00 +0000")
-                                                        .to_string()
-                                                })
-                                                .unwrap_or_else(|| date_str.clone())
-                                        } else {
-                                            date_str.clone()
-                                        };
+                                                    if !items.iter().any(|item| item.link == link) {
+                                                        let pub_date = if let Ok(dt) =
+                                                            chrono::NaiveDate::parse_from_str(&date_str, "%Y-%m-%d")
+                                                        {
+                                                            dt.and_hms_opt(0, 0, 0)
+                                                                .map(|dt_time| {
+                                                                    dt_time
+                                                                        .format("%a, %d %b %Y 00:00:00 +0000")
+                                                                        .to_string()
+                                                                })
+                                                                .unwrap_or_else(|| date_str.clone())
+                                                        } else {
+                                                            date_str.clone()
+                                                        };
 
-                                        let critical_words = [
-                                            "manual intervention",
-                                            "requires intervention",
-                                            "breaking change",
-                                            "filesystem",
-                                            "pacman",
-                                            "keyring",
-                                            "glibc",
-                                        ];
+                                                        let critical_words = [
+                                                            "manual intervention",
+                                                            "requires intervention",
+                                                            "breaking change",
+                                                            "filesystem",
+                                                            "pacman",
+                                                            "keyring",
+                                                            "glibc",
+                                                        ];
 
-                                        let is_crit = critical_words
-                                            .iter()
-                                            .any(|&w| title.to_lowercase().contains(w));
+                                                        let is_crit = critical_words
+                                                            .iter()
+                                                            .any(|&w| title.to_lowercase().contains(w));
 
-                                        parsed_items.push(NewsItem {
-                                            title,
-                                            link,
-                                            pub_date,
-                                            description: "loading article content...".to_string(),
-                                            is_critical: is_crit,
-                                        });
+                                                        parsed_items.push(NewsItem {
+                                                            title,
+                                                            link,
+                                                            pub_date,
+                                                            description: "loading article content...".to_string(),
+                                                            is_critical: is_crit,
+                                                        });
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -1799,7 +1819,7 @@ where
                     if let Some(item) = app.filtered_news.iter_mut().find(|n| n.link == link) {
                         item.description = description.clone();
                     }
-                    let home = dirs::home_dir().unwrap_or_default();
+                    let home = std::env::var("HOME").map(std::path::PathBuf::from).unwrap_or_default();
                     let cache_path = home.join(".cache/haj/news.json");
                     if let Ok(cache_data) = serde_json::to_string(&app.news_items) {
                         let _ = std::fs::write(cache_path, cache_data);
