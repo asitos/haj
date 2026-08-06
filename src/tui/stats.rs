@@ -55,7 +55,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
         .filter(|p| p.is_installed)
         .map(|p| p.size_mb)
         .sum();
-    let total_size_str = format!("{:.1} GiB", total_size_mb / 1024.0);
+    let total_size_str = format!("{:.1} gib", total_size_mb / 1024.0);
 
     let mut health = 100i32;
     health -= app.orphan_count as i32 * 3;
@@ -185,7 +185,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
     for pkg in sorted_pkgs.iter().take(4) {
         top_pkgs.push(format_stat(
             &pkg.name,
-            &format!("{:.0} MB", pkg.size_mb),
+            &format!("{:.0} mb", pkg.size_mb),
             COLOR_VALUE,
         ));
     }

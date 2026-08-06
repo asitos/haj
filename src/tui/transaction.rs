@@ -117,7 +117,7 @@ pub fn render_confirm_popup(f: &mut Frame, app: &App) {
     let text = vec![
         Line::from(""),
         Line::from(vec![
-            Span::raw(format!("Proceed to {} ", app.prompt_type)),
+            Span::raw(format!("proceed to {} ", app.prompt_type)),
             Span::styled(
                 format!("{}", app.prompt_targets.len()),
                 Style::default().add_modifier(Modifier::BOLD),

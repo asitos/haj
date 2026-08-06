@@ -391,13 +391,13 @@ impl App {
             history_input_mode: InputMode::Normal,
 
             group_items: Vec::new(),
-            cache_size: "Unknown".into(),
+            cache_size: "unknown".into(),
             explicit_count: 0,
-            kernel: "Unknown".into(),
-            uptime: "Unknown".into(),
-            free_space: "Unknown".into(),
-            last_sync: "Unknown".into(),
-            last_refreshed: "Never".into(),
+            kernel: "unknown".into(),
+            uptime: "unknown".into(),
+            free_space: "unknown".into(),
+            last_sync: "unknown".into(),
+            last_refreshed: "never".into(),
 
             groups: Vec::new(),
             filtered_groups: Vec::new(),
@@ -655,7 +655,7 @@ impl App {
                 let ts = if line.starts_with('[') && line.len() > 18 {
                     line[1..17].to_string()
                 } else {
-                    "Unknown".to_string()
+                    "unknown".to_string()
                 };
 
                 if line.contains("transaction started") {
@@ -811,7 +811,7 @@ impl App {
                     name,
                     packages: pkgs,
                     description: format!(
-                        "Package group containing {} packages ({} installed)",
+                        "package group containing {} packages ({} installed)",
                         total, installed
                     ),
                     repo: "extra".to_string(),
@@ -829,7 +829,7 @@ impl App {
         {
             String::from_utf8_lossy(&output.stdout).trim().to_string()
         } else {
-            "Unknown".to_string()
+            "unknown".to_string()
         };
 
         if !self.transactions.is_empty() {
@@ -1387,7 +1387,7 @@ pub fn fetch_arch_news(tx: mpsc::Sender<TuiEvent>, page: usize) {
         }
         let _ = tx
             .send(TuiEvent::NewsFetchFailed(
-                "Failed to fetch Arch news".into(),
+                "failed to fetch arch news".into(),
             ))
             .await;
     });

@@ -116,6 +116,52 @@ fn prompt_install(msg: &str) -> InstallChoice {
     }
 }
 
+fn handle_conflicts_ui<F>(
+    conflicts: &[core::conflicts::ConflictInfo],
+    dry_run: bool,
+    noconfirm: bool,
+    mut prompter: F,
+) -> Result<bool, &'static str>
+where
+    F: FnMut(&str) -> bool,
+{
+    if conflicts.is_empty() {
+        return Ok(false);
+    }
+    for conflict in conflicts {
+        println!("\n{} package conflict detected\n", "✗".red());
+        println!("  installing: {}", conflict.incoming_pkg.clone().bold());
+        println!(
+            "  conflicts with installed package: {}",
+            conflict.installed_pkg.clone().bold()
+        );
+        if let Some(constraint) = &conflict.constraint {
+            println!("  constraint: {}", constraint.clone().yellow());
+        }
+        println!("\n  only one of these packages can be installed.\n");
+        
+        if dry_run {
+            println!(
+                "{} would replace '{}' with '{}'",
+                "[dry run]".bold().yellow(),
+                conflict.installed_pkg,
+                conflict.incoming_pkg
+            );
+        } else if noconfirm {
+            return Err("conflicting packages detected and --noconfirm used without explicit authorization. aborting.");
+        } else {
+            let prompt = format!(
+                "replace installed package '{}' with '{}'? [y/N]",
+                conflict.installed_pkg, conflict.incoming_pkg
+            );
+            if !prompter(&prompt) {
+                return Err("aborted: no changes were made.");
+            }
+        }
+    }
+    Ok(true)
+}
+
 async fn display_arch_news() {
     let spinner = ui::progress::spinner("checking arch linux news...");
     let url = "https://archlinux.org/feeds/news/";
@@ -147,7 +193,7 @@ async fn display_arch_news() {
                                 println!(
                                     "\n{} {}\n  {} {}\n  {}\n",
                                     "!!!".red().bold(),
-                                    "ACTION REQUIRED: recent Arch Linux news".red().bold(),
+                                    "action required: recent arch linux news".red().bold(),
                                     "headline:".dim(),
                                     title.yellow().bold(),
                                     "haj requests you to read the news before upgrading.".dim()
@@ -406,7 +452,7 @@ async fn run_pacman(
                         "verifying package integrity...".bold()
                     );
                     spinner.set_message(last_spinner_msg.clone());
-                } else if clean.contains("Retrieving packages") || clean.contains("downloading") {
+                } else if clean.contains("retrieving packages") || clean.contains("downloading") {
                     last_spinner_msg = format!("  {}", "downloading packages...".dim());
                     spinner.set_message(last_spinner_msg.clone());
                 } else if clean.starts_with('(') && clean.contains(") upgrading")
@@ -427,8 +473,8 @@ async fn run_pacman(
                         );
                         spinner.set_message(last_spinner_msg.clone());
                     }
-                } else if clean.contains("Running pre-transaction hooks")
-                    || clean.contains("Running post-transaction hooks")
+                } else if clean.contains("running pre-transaction hooks")
+                    || clean.contains("running post-transaction hooks")
                 {
                     in_hook_phase = true;
                     last_spinner_msg =
@@ -639,6 +685,7 @@ async fn process_installation(packages: Vec<String>, alpm_handle: alpm::Alpm, cl
     }
 
     let mut resolved_aur_pkgs = Vec::new();
+    let mut aur_conflicts_map = std::collections::HashMap::new();
     if !aur_pkgs.is_empty() {
         let check_spinner = ui::progress::spinner("querying aur...");
 
@@ -658,6 +705,16 @@ async fn process_installation(packages: Vec<String>, alpm_handle: alpm::Alpm, cl
                     .iter()
                     .find(|r| r.get("Name").and_then(|n| n.as_str()) == Some(&pkg))
                 {
+                    if let Some(conflicts_val) = result.get("Conflicts").and_then(|c| c.as_array()) {
+                        let c_list: Vec<String> = conflicts_val
+                            .iter()
+                            .filter_map(|c| c.as_str().map(|s| s.to_string()))
+                            .collect();
+                        if !c_list.is_empty() {
+                            aur_conflicts_map.insert(pkg.clone(), c_list);
+                        }
+                    }
+
                     if let Some(aur_ver) = result.get("Version").and_then(|v| v.as_str()) {
                         let mut is_update = false;
                         let mut skip = false;
@@ -699,7 +756,22 @@ async fn process_installation(packages: Vec<String>, alpm_handle: alpm::Alpm, cl
         }
     }
 
+    let conflicts = core::conflicts::detect_conflicts(&alpm_handle, &native_pkgs, &aur_conflicts_map);
+    
     drop(alpm_handle);
+
+    let allow_conflict_removal = match handle_conflicts_ui(
+        &conflicts, 
+        cli.dry_run, 
+        cli.noconfirm, 
+        prompt_confirm
+    ) {
+        Ok(allowed) => allowed,
+        Err(e) => {
+            println!("{} {}", "✗".red(), e);
+            std::process::exit(1);
+        }
+    };
 
     if native_summaries.is_empty() && resolved_aur_pkgs.is_empty() {
         println!("{} nothing to do.", "✓".green());
@@ -740,8 +812,8 @@ async fn process_installation(packages: Vec<String>, alpm_handle: alpm::Alpm, cl
     }
 
     if total_dl > 0.0 || total_inst > 0.0 {
-        println!("\n{:<15} {:.2} MB", "download:", total_dl);
-        println!("{:<15} {:.2} MB", "disk usage:", total_inst);
+        println!("\n{:<15} {:.2} mb", "download:", total_dl);
+        println!("{:<15} {:.2} mb", "disk usage:", total_inst);
     } else {
         println!();
     }
@@ -749,9 +821,9 @@ async fn process_installation(packages: Vec<String>, alpm_handle: alpm::Alpm, cl
     if !cli.noconfirm {
         let has_aur = !resolved_aur_pkgs.is_empty();
         let mut prompt_msg = if has_aur {
-            "Proceed with installation? [Y/n/v] (v = view PKGBUILDs)".to_string()
+            "proceed with installation? [Y/n/v] (v = view PKGBUILDs)".to_string()
         } else {
-            "Proceed with installation? [Y/n]".to_string()
+            "proceed with installation? [Y/n]".to_string()
         };
 
         loop {
@@ -786,6 +858,9 @@ async fn process_installation(packages: Vec<String>, alpm_handle: alpm::Alpm, cl
 
     if !native_pkgs.is_empty() {
         let mut args = vec!["-S", "--noconfirm"];
+        if allow_conflict_removal {
+            args.push("--ask=4");
+        }
         args.extend(native_pkgs.iter().map(|s| s.as_str()));
 
         run_pacman(
@@ -842,7 +917,10 @@ async fn process_installation(packages: Vec<String>, alpm_handle: alpm::Alpm, cl
                         )
                     };
 
-                    let pacman_args = vec!["-U", pkg_path.to_str().unwrap(), "--noconfirm"];
+                    let mut pacman_args = vec!["-U", pkg_path.to_str().unwrap(), "--noconfirm"];
+                    if allow_conflict_removal {
+                        pacman_args.push("--ask=4");
+                    }
 
                     run_pacman(
                         &pacman_args,
@@ -1658,7 +1736,7 @@ async fn main() -> anyhow::Result<()> {
                         }
 
                         let format_mb = |bytes: i64| -> String {
-                            format!("{:.2} MB", bytes as f64 / 1_048_576.0)
+                            format!("{:.2} mb", bytes as f64 / 1_048_576.0)
                         };
                         println!("\n   {:<15} {}", "size:", format_mb(pkg.isize()).green());
 
@@ -1728,7 +1806,7 @@ async fn main() -> anyhow::Result<()> {
                             println!("  {:<25} {}", pkg.name().magenta(), pkg.version().dim());
                             total_size += pkg.isize() as f64 / 1024.0 / 1024.0;
                         }
-                        println!("\n{:<15} {:.2} MB", "wasted space:", total_size);
+                        println!("\n{:<15} {:.2} mb", "wasted space:", total_size);
                         println!("\nrun {} to remove them.", "haj toss <packages>".cyan());
                     }
                 }
@@ -1984,9 +2062,9 @@ async fn main() -> anyhow::Result<()> {
 
                     let format_gb = |bytes: f64| -> String {
                         if bytes > 1_073_741_824.0 {
-                            format!("{:.2} GiB", bytes / 1_073_741_824.0)
+                            format!("{:.2} gib", bytes / 1_073_741_824.0)
                         } else {
-                            format!("{:.2} MiB", bytes / 1_048_576.0)
+                            format!("{:.2} mib", bytes / 1_048_576.0)
                         }
                     };
 
@@ -2017,7 +2095,7 @@ async fn main() -> anyhow::Result<()> {
                         .find(|line| line.starts_with("PRETTY_NAME="))
                         .and_then(|line| line.split('=').nth(1))
                         .map(|name| name.trim_matches('"').to_string())
-                        .unwrap_or_else(|| "Arch Linux".to_string());
+                        .unwrap_or_else(|| "arch linux".to_string());
 
                     spinner.finish_and_clear();
 
@@ -2116,7 +2194,7 @@ async fn main() -> anyhow::Result<()> {
                     if !cli.noconfirm {
                         println!();
                         if !prompt_confirm(&format!(
-                            "Install all packages in group '{}'? [Y/n]",
+                            "install all packages in group '{}'? [Y/n]",
                             name
                         )) {
                             println!("{} aborted.", "✗".red());
@@ -2201,5 +2279,87 @@ mod tests {
         // We simulate a success scenario by showing that the fallback message is not generated.
         let success_scenario = true;
         assert!(success_scenario);
+    }
+
+    #[test]
+    fn test_conflict_ui_no_conflict() {
+        let conflicts = vec![];
+        let res = handle_conflicts_ui(&conflicts, false, false, |_| true);
+        assert_eq!(res, Ok(false));
+    }
+
+    #[test]
+    fn test_conflict_ui_accepted() {
+        let conflicts = vec![
+            core::conflicts::ConflictInfo {
+                incoming_pkg: "nvidia-dkms".to_string(),
+                installed_pkg: "nvidia".to_string(),
+                constraint: None,
+            }
+        ];
+        let res = handle_conflicts_ui(&conflicts, false, false, |_| true);
+        assert_eq!(res, Ok(true));
+    }
+
+    #[test]
+    fn test_conflict_ui_declined() {
+        let conflicts = vec![
+            core::conflicts::ConflictInfo {
+                incoming_pkg: "nvidia-dkms".to_string(),
+                installed_pkg: "nvidia".to_string(),
+                constraint: None,
+            }
+        ];
+        let res = handle_conflicts_ui(&conflicts, false, false, |_| false);
+        assert_eq!(res, Err("aborted: no changes were made."));
+    }
+
+    #[test]
+    fn test_conflict_ui_multiple() {
+        let conflicts = vec![
+            core::conflicts::ConflictInfo {
+                incoming_pkg: "a".to_string(),
+                installed_pkg: "b".to_string(),
+                constraint: None,
+            },
+            core::conflicts::ConflictInfo {
+                incoming_pkg: "c".to_string(),
+                installed_pkg: "d".to_string(),
+                constraint: None,
+            }
+        ];
+        let mut prompt_count = 0;
+        let res = handle_conflicts_ui(&conflicts, false, false, |_| {
+            prompt_count += 1;
+            true
+        });
+        assert_eq!(res, Ok(true));
+        assert_eq!(prompt_count, 2);
+    }
+
+    #[test]
+    fn test_conflict_ui_dry_run() {
+        let conflicts = vec![
+            core::conflicts::ConflictInfo {
+                incoming_pkg: "nvidia-dkms".to_string(),
+                installed_pkg: "nvidia".to_string(),
+                constraint: None,
+            }
+        ];
+        let res = handle_conflicts_ui(&conflicts, true, false, |_| panic!("Should not prompt on dry run"));
+        assert_eq!(res, Ok(true));
+    }
+
+    #[test]
+    fn test_conflict_ui_noconfirm() {
+        let conflicts = vec![
+            core::conflicts::ConflictInfo {
+                incoming_pkg: "nvidia-dkms".to_string(),
+                installed_pkg: "nvidia".to_string(),
+                constraint: None,
+            }
+        ];
+        let res = handle_conflicts_ui(&conflicts, false, true, |_| panic!("Should not prompt on noconfirm"));
+        assert_eq!(res, Err("conflicting packages detected and --noconfirm used without explicit authorization. aborting."));
     }
 }

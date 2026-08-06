@@ -76,9 +76,9 @@ fn format_relative_timestamp(ts: &str) -> String {
         let tx_date = naive_dt.date();
 
         if tx_date == today {
-            format!("Today at {}", naive_dt.format("%H:%M"))
+            format!("today at {}", naive_dt.format("%H:%M"))
         } else if tx_date == today.pred_opt().unwrap_or(today) {
-            format!("Yesterday at {}", naive_dt.format("%H:%M"))
+            format!("yesterday at {}", naive_dt.format("%H:%M"))
         } else if tx_date.year() == today.year() {
             naive_dt.format("%b %d, %H:%M").to_string()
         } else {

@@ -7,3 +7,4 @@ pub mod resolver;
 pub mod cache;
 pub mod downgrade;
 pub mod history;
+pub mod conflicts;

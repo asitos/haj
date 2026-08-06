@@ -79,7 +79,7 @@ fn render_headlines(f: &mut Frame, app: &mut App, area: Rect) {
             };
 
             let date_str = chrono::DateTime::parse_from_rfc2822(&news.pub_date)
-                .map(|dt| dt.format("Published %b %d, %Y").to_string())
+                .map(|dt| dt.format("published %b %d, %Y").to_string())
                 .unwrap_or_else(|_| news.pub_date.clone());
 
             ListItem::new(vec![
@@ -460,7 +460,7 @@ fn render_footer(f: &mut Frame, app: &App, area: Rect) {
         "0 articles".to_string()
     } else {
         format!(
-            "Page {}/{} ({}-{} of {})",
+            "page {}/{} ({}-{} of {})",
             app.news_page,
             max_pages.max(1),
             start_idx,
