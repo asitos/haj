@@ -139,7 +139,7 @@ where
             println!("  constraint: {}", constraint.clone().yellow());
         }
         println!("\n  only one of these packages can be installed.\n");
-        
+
         if dry_run {
             println!(
                 "{} would replace '{}' with '{}'",
@@ -148,7 +148,9 @@ where
                 conflict.incoming_pkg
             );
         } else if noconfirm {
-            return Err("conflicting packages detected and --noconfirm used without explicit authorization. aborting.");
+            return Err(
+                "conflicting packages detected and --noconfirm used without explicit authorization. aborting.",
+            );
         } else {
             let prompt = format!(
                 "replace installed package '{}' with '{}'? [y/N]",
@@ -705,7 +707,8 @@ async fn process_installation(packages: Vec<String>, alpm_handle: alpm::Alpm, cl
                     .iter()
                     .find(|r| r.get("Name").and_then(|n| n.as_str()) == Some(&pkg))
                 {
-                    if let Some(conflicts_val) = result.get("Conflicts").and_then(|c| c.as_array()) {
+                    if let Some(conflicts_val) = result.get("Conflicts").and_then(|c| c.as_array())
+                    {
                         let c_list: Vec<String> = conflicts_val
                             .iter()
                             .filter_map(|c| c.as_str().map(|s| s.to_string()))
@@ -756,22 +759,19 @@ async fn process_installation(packages: Vec<String>, alpm_handle: alpm::Alpm, cl
         }
     }
 
-    let conflicts = core::conflicts::detect_conflicts(&alpm_handle, &native_pkgs, &aur_conflicts_map);
-    
+    let conflicts =
+        core::conflicts::detect_conflicts(&alpm_handle, &native_pkgs, &aur_conflicts_map);
+
     drop(alpm_handle);
 
-    let allow_conflict_removal = match handle_conflicts_ui(
-        &conflicts, 
-        cli.dry_run, 
-        cli.noconfirm, 
-        prompt_confirm
-    ) {
-        Ok(allowed) => allowed,
-        Err(e) => {
-            println!("{} {}", "✗".red(), e);
-            std::process::exit(1);
-        }
-    };
+    let allow_conflict_removal =
+        match handle_conflicts_ui(&conflicts, cli.dry_run, cli.noconfirm, prompt_confirm) {
+            Ok(allowed) => allowed,
+            Err(e) => {
+                println!("{} {}", "✗".red(), e);
+                std::process::exit(1);
+            }
+        };
 
     if native_summaries.is_empty() && resolved_aur_pkgs.is_empty() {
         println!("{} nothing to do.", "✓".green());
@@ -2290,26 +2290,22 @@ mod tests {
 
     #[test]
     fn test_conflict_ui_accepted() {
-        let conflicts = vec![
-            core::conflicts::ConflictInfo {
-                incoming_pkg: "nvidia-dkms".to_string(),
-                installed_pkg: "nvidia".to_string(),
-                constraint: None,
-            }
-        ];
+        let conflicts = vec![core::conflicts::ConflictInfo {
+            incoming_pkg: "nvidia-dkms".to_string(),
+            installed_pkg: "nvidia".to_string(),
+            constraint: None,
+        }];
         let res = handle_conflicts_ui(&conflicts, false, false, |_| true);
         assert_eq!(res, Ok(true));
     }
 
     #[test]
     fn test_conflict_ui_declined() {
-        let conflicts = vec![
-            core::conflicts::ConflictInfo {
-                incoming_pkg: "nvidia-dkms".to_string(),
-                installed_pkg: "nvidia".to_string(),
-                constraint: None,
-            }
-        ];
+        let conflicts = vec![core::conflicts::ConflictInfo {
+            incoming_pkg: "nvidia-dkms".to_string(),
+            installed_pkg: "nvidia".to_string(),
+            constraint: None,
+        }];
         let res = handle_conflicts_ui(&conflicts, false, false, |_| false);
         assert_eq!(res, Err("aborted: no changes were made."));
     }
@@ -2326,7 +2322,7 @@ mod tests {
                 incoming_pkg: "c".to_string(),
                 installed_pkg: "d".to_string(),
                 constraint: None,
-            }
+            },
         ];
         let mut prompt_count = 0;
         let res = handle_conflicts_ui(&conflicts, false, false, |_| {
@@ -2339,27 +2335,32 @@ mod tests {
 
     #[test]
     fn test_conflict_ui_dry_run() {
-        let conflicts = vec![
-            core::conflicts::ConflictInfo {
-                incoming_pkg: "nvidia-dkms".to_string(),
-                installed_pkg: "nvidia".to_string(),
-                constraint: None,
-            }
-        ];
-        let res = handle_conflicts_ui(&conflicts, true, false, |_| panic!("Should not prompt on dry run"));
+        let conflicts = vec![core::conflicts::ConflictInfo {
+            incoming_pkg: "nvidia-dkms".to_string(),
+            installed_pkg: "nvidia".to_string(),
+            constraint: None,
+        }];
+        let res = handle_conflicts_ui(&conflicts, true, false, |_| {
+            panic!("Should not prompt on dry run")
+        });
         assert_eq!(res, Ok(true));
     }
 
     #[test]
     fn test_conflict_ui_noconfirm() {
-        let conflicts = vec![
-            core::conflicts::ConflictInfo {
-                incoming_pkg: "nvidia-dkms".to_string(),
-                installed_pkg: "nvidia".to_string(),
-                constraint: None,
-            }
-        ];
-        let res = handle_conflicts_ui(&conflicts, false, true, |_| panic!("Should not prompt on noconfirm"));
-        assert_eq!(res, Err("conflicting packages detected and --noconfirm used without explicit authorization. aborting."));
+        let conflicts = vec![core::conflicts::ConflictInfo {
+            incoming_pkg: "nvidia-dkms".to_string(),
+            installed_pkg: "nvidia".to_string(),
+            constraint: None,
+        }];
+        let res = handle_conflicts_ui(&conflicts, false, true, |_| {
+            panic!("Should not prompt on noconfirm")
+        });
+        assert_eq!(
+            res,
+            Err(
+                "conflicting packages detected and --noconfirm used without explicit authorization. aborting."
+            )
+        );
     }
 }
