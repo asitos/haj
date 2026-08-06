@@ -1,7 +1,6 @@
 mod cli;
 mod config;
 mod core;
-mod network;
 mod tui;
 mod ui;
 
