@@ -2,3 +2,5 @@
 *.tape
 RELEASE.md
 assets/*.mp4
+alpm_init
+test_alpm*
