@@ -321,7 +321,9 @@ impl App {
             }
         }
 
-        let home = std::env::var("HOME").map(std::path::PathBuf::from).unwrap_or_default();
+        let home = std::env::var("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_default();
         let cache_dir = home.join(".cache/haj");
         let _ = std::fs::create_dir_all(&cache_dir);
 
@@ -517,7 +519,9 @@ impl App {
 
     pub fn mark_news_read(&mut self, link: String) {
         if self.read_news.insert(link) {
-            let home = std::env::var("HOME").map(std::path::PathBuf::from).unwrap_or_default();
+            let home = std::env::var("HOME")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_default();
             let data = serde_json::to_string(&self.read_news).unwrap_or_default();
             tokio::spawn(async move {
                 let _ = tokio::fs::create_dir_all(home.join(".cache/haj")).await;
@@ -1177,8 +1181,12 @@ pub fn fetch_article_body(tx: mpsc::Sender<TuiEvent>, link: String) {
                                     .replace("&amp;", "&")
                                     .replace("&#39;", "'");
                                 Some(desc)
-                            } else { None }
-                        } else { None }
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
                     };
 
                     if let Some(d) = desc {
@@ -1198,7 +1206,9 @@ pub fn fetch_arch_news(tx: mpsc::Sender<TuiEvent>, page: usize) {
             .build()
             .unwrap();
 
-        let home = std::env::var("HOME").map(std::path::PathBuf::from).unwrap_or_default();
+        let home = std::env::var("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_default();
         let cache_path = home.join(".cache/haj/news.json");
 
         let mut items = Vec::new();
@@ -1238,7 +1248,7 @@ pub fn fetch_arch_news(tx: mpsc::Sender<TuiEvent>, page: usize) {
                             if let Some(tr_end) = current_html.find("</tr>") {
                                 let tr_content = &current_html[..tr_end];
                                 current_html = &current_html[tr_end + 5..];
-                                
+
                                 let mut tds = Vec::new();
                                 let mut tr_search = tr_content;
                                 while let Some(td_start) = tr_search.find("<td>") {
@@ -1248,7 +1258,7 @@ pub fn fetch_arch_news(tx: mpsc::Sender<TuiEvent>, page: usize) {
                                         tr_search = &tr_search[td_end + 5..];
                                     }
                                 }
-                                
+
                                 if tds.len() >= 2 {
                                     let date_str = tds[0].trim().to_string();
                                     let td1 = tds[1];
@@ -1257,16 +1267,18 @@ pub fn fetch_arch_news(tx: mpsc::Sender<TuiEvent>, page: usize) {
                                         if let Some(href_end) = href_rest.find("\"") {
                                             let path = &href_rest[..href_end];
                                             let link = format!("https://archlinux.org{}", path);
-                                            
+
                                             if let Some(title_start) = href_rest.find(">") {
                                                 let title_rest = &href_rest[title_start + 1..];
                                                 if let Some(title_end) = title_rest.find("</a>") {
-                                                    let title = title_rest[..title_end].trim().to_string();
+                                                    let title =
+                                                        title_rest[..title_end].trim().to_string();
 
                                                     if !items.iter().any(|item| item.link == link) {
                                                         let pub_date = if let Ok(dt) =
-                                                            chrono::NaiveDate::parse_from_str(&date_str, "%Y-%m-%d")
-                                                        {
+                                                            chrono::NaiveDate::parse_from_str(
+                                                                &date_str, "%Y-%m-%d",
+                                                            ) {
                                                             dt.and_hms_opt(0, 0, 0)
                                                                 .map(|dt_time| {
                                                                     dt_time
@@ -1288,15 +1300,18 @@ pub fn fetch_arch_news(tx: mpsc::Sender<TuiEvent>, page: usize) {
                                                             "glibc",
                                                         ];
 
-                                                        let is_crit = critical_words
-                                                            .iter()
-                                                            .any(|&w| title.to_lowercase().contains(w));
+                                                        let is_crit =
+                                                            critical_words.iter().any(|&w| {
+                                                                title.to_lowercase().contains(w)
+                                                            });
 
                                                         parsed_items.push(NewsItem {
                                                             title,
                                                             link,
                                                             pub_date,
-                                                            description: "loading article content...".to_string(),
+                                                            description:
+                                                                "loading article content..."
+                                                                    .to_string(),
                                                             is_critical: is_crit,
                                                         });
                                                     }
@@ -1819,7 +1834,9 @@ where
                     if let Some(item) = app.filtered_news.iter_mut().find(|n| n.link == link) {
                         item.description = description.clone();
                     }
-                    let home = std::env::var("HOME").map(std::path::PathBuf::from).unwrap_or_default();
+                    let home = std::env::var("HOME")
+                        .map(std::path::PathBuf::from)
+                        .unwrap_or_default();
                     let cache_path = home.join(".cache/haj/news.json");
                     if let Ok(cache_data) = serde_json::to_string(&app.news_items) {
                         let _ = std::fs::write(cache_path, cache_data);

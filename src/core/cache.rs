@@ -26,7 +26,7 @@ pub fn scrub(keep: usize) {
         return;
     }
 
-    if let Some(home) = std::env::var("HOME").map(std::path::PathBuf::from).ok() {
+    if let Ok(home) = std::env::var("HOME").map(std::path::PathBuf::from) {
         let aur_cache = home.join(".cache/haj/aur");
         if aur_cache.exists()
             && let Ok(entries) = std::fs::read_dir(&aur_cache)

@@ -193,7 +193,10 @@ async fn view_pkgbuilds(pkgs: &[String]) {
         });
 
     for pkg in pkgs {
-        let spinner = ui::progress::spinner(&format!("fetching PKGBUILD for {}...", pkg.clone().magenta()));
+        let spinner = ui::progress::spinner(&format!(
+            "fetching PKGBUILD for {}...",
+            pkg.clone().magenta()
+        ));
         let tmp_dir = format!("/tmp/haj_view_{}", pkg);
 
         let _ = std::fs::remove_dir_all(&tmp_dir);
@@ -726,7 +729,11 @@ async fn process_installation(packages: Vec<String>, alpm_handle: alpm::Alpm, cl
                     aur_ver.clone().green()
                 );
             } else {
-                println!("    {:<25} {}", pkg.clone().magenta().bold(), aur_ver.clone().green());
+                println!(
+                    "    {:<25} {}",
+                    pkg.clone().magenta().bold(),
+                    aur_ver.clone().green()
+                );
             }
         }
     }
@@ -814,7 +821,10 @@ async fn process_installation(packages: Vec<String>, alpm_handle: alpm::Alpm, cl
                     let spinner_msg = if is_update {
                         format!("updating built package {}...", pkg.clone().magenta().bold())
                     } else {
-                        format!("installing built package {}...", pkg.clone().magenta().bold())
+                        format!(
+                            "installing built package {}...",
+                            pkg.clone().magenta().bold()
+                        )
                     };
 
                     let success_msg = if is_update {
@@ -883,7 +893,9 @@ async fn main() -> anyhow::Result<()> {
             "{} haj is already running. waiting for lock...",
             "::".blue()
         );
-        unsafe { libc::flock(fd, libc::LOCK_EX); }
+        unsafe {
+            libc::flock(fd, libc::LOCK_EX);
+        }
     }
 
     let _haj_lock = lock_file;
@@ -945,7 +957,11 @@ async fn main() -> anyhow::Result<()> {
 
                 Commands::Interactive(queries) => {
                     let query_str = queries.join(" ");
-                    println!("{} searching for '{}'...\n", "::".blue(), query_str.clone().bold());
+                    println!(
+                        "{} searching for '{}'...\n",
+                        "::".blue(),
+                        query_str.clone().bold()
+                    );
 
                     let mut results = Vec::new();
 
@@ -1105,7 +1121,11 @@ async fn main() -> anyhow::Result<()> {
                     let mut found = true;
                     for pkg in &packages {
                         if local_db.pkg(pkg.as_str()).is_err() {
-                            println!("{} package '{}' is not installed.", "✗".red(), pkg.clone().bold());
+                            println!(
+                                "{} package '{}' is not installed.",
+                                "✗".red(),
+                                pkg.clone().bold()
+                            );
                             found = false;
                         }
                     }
@@ -2052,7 +2072,12 @@ async fn main() -> anyhow::Result<()> {
                         } else {
                             "".to_string()
                         };
-                        println!("  {} {}{}", pkg_name.clone().bold(), pkg_ver.clone().dim(), status);
+                        println!(
+                            "  {} {}{}",
+                            pkg_name.clone().bold(),
+                            pkg_ver.clone().dim(),
+                            status
+                        );
                     }
 
                     println!("\n{:<15} {}", "total:", group_pkgs.len().to_string().cyan());

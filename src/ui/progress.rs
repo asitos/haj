@@ -1,8 +1,8 @@
+use crossterm::style::Stylize;
+use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::task::JoinHandle;
-use crossterm::style::Stylize;
-use std::io::Write;
 
 pub struct ProgressBar {
     message: Arc<Mutex<String>>,
@@ -23,7 +23,7 @@ impl ProgressBar {
         let msg_clone = Arc::clone(&self.message);
         let stop_clone = Arc::clone(&self.stop);
         let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-        
+
         self.handle = Some(tokio::spawn(async move {
             let mut i = 0;
             loop {

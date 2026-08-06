@@ -66,7 +66,7 @@ pub fn select_downgrade_target(package: &str) -> Option<PathBuf> {
         }
     }
 
-    if let Some(home) = std::env::var("HOME").map(std::path::PathBuf::from).ok() {
+    if let Ok(home) = std::env::var("HOME").map(std::path::PathBuf::from) {
         let aur_cache = home.join(format!(".cache/haj/aur/{}", package));
         if let Ok(entries) = std::fs::read_dir(&aur_cache) {
             for entry in entries.filter_map(Result::ok) {

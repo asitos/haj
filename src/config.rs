@@ -16,7 +16,9 @@ pub struct GeneralConfig {
 
 impl Default for GeneralConfig {
     fn default() -> Self {
-        let home = std::env::var("HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/"));
+        let home = std::env::var("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("/"));
         Self {
             aur_only: false,
             repo_only: false,
@@ -35,10 +37,14 @@ pub struct HajConfig {
 }
 
 pub fn load_config() -> HajConfig {
-    let config_dir = std::env::var("XDG_CONFIG_HOME").map(PathBuf::from).ok()
-        .or_else(|| 
-            std::env::var("HOME").map(|h| PathBuf::from(h).join(".config")).ok()
-        )
+    let config_dir = std::env::var("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .ok()
+        .or_else(|| {
+            std::env::var("HOME")
+                .map(|h| PathBuf::from(h).join(".config"))
+                .ok()
+        })
         .unwrap_or_else(|| PathBuf::from("/etc/haj"))
         .join("haj");
 
