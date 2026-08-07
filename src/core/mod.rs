@@ -8,3 +8,5 @@ pub mod cache;
 pub mod conflicts;
 pub mod downgrade;
 pub mod history;
+pub mod pacman;
+pub mod ui;

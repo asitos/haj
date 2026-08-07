@@ -1,4 +1,5 @@
 mod cli;
+pub mod commands;
 mod config;
 mod core;
 mod tui;
@@ -10,1031 +11,6 @@ use crossterm::style::Stylize;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
-
-fn prompt_confirm(msg: &str) -> bool {
-    print!("{} {} ", "?".magenta().bold(), msg.bold());
-    let _ = std::io::stdout().flush();
-
-    if crossterm::terminal::enable_raw_mode().is_ok() {
-        let result;
-        loop {
-            if let Ok(crossterm::event::Event::Key(key)) = crossterm::event::read() {
-                if key
-                    .modifiers
-                    .contains(crossterm::event::KeyModifiers::CONTROL)
-                    && key.code == crossterm::event::KeyCode::Char('c')
-                {
-                    result = false;
-                    break;
-                }
-                match key.code {
-                    crossterm::event::KeyCode::Char('y')
-                    | crossterm::event::KeyCode::Char('Y')
-                    | crossterm::event::KeyCode::Enter => {
-                        result = true;
-                        break;
-                    }
-                    crossterm::event::KeyCode::Char('n') | crossterm::event::KeyCode::Char('N') => {
-                        result = false;
-                        break;
-                    }
-                    _ => continue,
-                }
-            }
-        }
-        let _ = crossterm::terminal::disable_raw_mode();
-        println!("{}", if result { "Y" } else { "n" });
-        result
-    } else {
-        let mut input = String::new();
-        let _ = std::io::stdin().read_line(&mut input);
-        let input = input.trim().to_lowercase();
-        input.is_empty() || input == "y"
-    }
-}
-
-pub enum InstallChoice {
-    Yes,
-    No,
-    View,
-}
-
-fn prompt_install(msg: &str) -> InstallChoice {
-    print!("{} {} ", "?".magenta().bold(), msg.bold());
-    let _ = std::io::stdout().flush();
-
-    if crossterm::terminal::enable_raw_mode().is_ok() {
-        let result;
-        loop {
-            if let Ok(crossterm::event::Event::Key(key)) = crossterm::event::read() {
-                if key
-                    .modifiers
-                    .contains(crossterm::event::KeyModifiers::CONTROL)
-                    && key.code == crossterm::event::KeyCode::Char('c')
-                {
-                    result = InstallChoice::No;
-                    break;
-                }
-                match key.code {
-                    crossterm::event::KeyCode::Char('y')
-                    | crossterm::event::KeyCode::Char('Y')
-                    | crossterm::event::KeyCode::Enter => {
-                        result = InstallChoice::Yes;
-                        break;
-                    }
-                    crossterm::event::KeyCode::Char('n') | crossterm::event::KeyCode::Char('N') => {
-                        result = InstallChoice::No;
-                        break;
-                    }
-                    crossterm::event::KeyCode::Char('v') | crossterm::event::KeyCode::Char('V') => {
-                        result = InstallChoice::View;
-                        break;
-                    }
-                    _ => continue,
-                }
-            }
-        }
-        let _ = crossterm::terminal::disable_raw_mode();
-        let display_str = match result {
-            InstallChoice::Yes => "Y",
-            InstallChoice::No => "n",
-            InstallChoice::View => "v",
-        };
-        println!("{}", display_str);
-        result
-    } else {
-        let mut input = String::new();
-        let _ = std::io::stdin().read_line(&mut input);
-        let input = input.trim().to_lowercase();
-        if input == "v" {
-            InstallChoice::View
-        } else if input.is_empty() || input == "y" {
-            InstallChoice::Yes
-        } else {
-            InstallChoice::No
-        }
-    }
-}
-
-fn handle_conflicts_ui<F>(
-    conflicts: &[core::conflicts::ConflictInfo],
-    dry_run: bool,
-    noconfirm: bool,
-    mut prompter: F,
-) -> Result<bool, &'static str>
-where
-    F: FnMut(&str) -> bool,
-{
-    if conflicts.is_empty() {
-        return Ok(false);
-    }
-    for conflict in conflicts {
-        println!("\n{} package conflict detected\n", "✗".red());
-        println!("  installing: {}", conflict.incoming_pkg.clone().bold());
-        println!(
-            "  conflicts with installed package: {}",
-            conflict.installed_pkg.clone().bold()
-        );
-        if let Some(constraint) = &conflict.constraint {
-            println!("  constraint: {}", constraint.clone().yellow());
-        }
-        println!("\n  only one of these packages can be installed.\n");
-
-        if dry_run {
-            println!(
-                "{} would replace '{}' with '{}'",
-                "[dry run]".bold().yellow(),
-                conflict.installed_pkg,
-                conflict.incoming_pkg
-            );
-        } else if noconfirm {
-            return Err(
-                "conflicting packages detected and --noconfirm used without explicit authorization. aborting.",
-            );
-        } else {
-            let prompt = format!(
-                "replace installed package '{}' with '{}'? [y/N]",
-                conflict.installed_pkg, conflict.incoming_pkg
-            );
-            if !prompter(&prompt) {
-                return Err("aborted: no changes were made.");
-            }
-        }
-    }
-    Ok(true)
-}
-
-async fn display_arch_news() {
-    let spinner = ui::progress::spinner("checking arch linux news...");
-    let url = "https://archlinux.org/feeds/news/";
-
-    if let Ok(response) = reqwest::get(url).await {
-        if let Ok(xml) = response.text().await {
-            spinner.finish_and_clear();
-
-            if let Some(item_start) = xml.find("<item>") {
-                let item_str = &xml[item_start..];
-
-                if let (Some(t_start), Some(t_end)) =
-                    (item_str.find("<title>"), item_str.find("</title>"))
-                {
-                    let title = &item_str[t_start + 7..t_end];
-
-                    if let (Some(d_start), Some(d_end)) =
-                        (item_str.find("<pubDate>"), item_str.find("</pubDate>"))
-                    {
-                        let date_str = &item_str[d_start + 9..d_end];
-
-                        if let Ok(pub_date) = chrono::DateTime::parse_from_rfc2822(date_str) {
-                            let now = chrono::Utc::now();
-                            if now
-                                .signed_duration_since(pub_date.with_timezone(&chrono::Utc))
-                                .num_days()
-                                <= 7
-                            {
-                                println!(
-                                    "\n{} {}\n  {} {}\n  {}\n",
-                                    "!!!".red().bold(),
-                                    "action required: recent arch linux news".red().bold(),
-                                    "headline:".dim(),
-                                    title.yellow().bold(),
-                                    "haj requests you to read the news before upgrading.".dim()
-                                );
-                            }
-                        }
-                    }
-                }
-            }
-        } else {
-            spinner.finish_and_clear();
-        }
-    } else {
-        spinner.finish_and_clear();
-    }
-}
-
-async fn view_pkgbuilds(pkgs: &[String]) {
-    let editor = std::env::var("VISUAL")
-        .or_else(|_| std::env::var("EDITOR"))
-        .unwrap_or_else(|_| {
-            if std::process::Command::new("nvim")
-                .arg("--version")
-                .output()
-                .is_ok()
-            {
-                "nvim".to_string()
-            } else if std::process::Command::new("vim")
-                .arg("--version")
-                .output()
-                .is_ok()
-            {
-                "vim".to_string()
-            } else if std::process::Command::new("nano")
-                .arg("--version")
-                .output()
-                .is_ok()
-            {
-                "nano".to_string()
-            } else {
-                "less".to_string()
-            }
-        });
-
-    for pkg in pkgs {
-        let spinner = ui::progress::spinner(&format!(
-            "fetching PKGBUILD for {}...",
-            pkg.clone().magenta()
-        ));
-        let tmp_dir = format!("/tmp/haj_view_{}", pkg);
-
-        let _ = std::fs::remove_dir_all(&tmp_dir);
-
-        let clone_status = std::process::Command::new("git")
-            .args([
-                "clone",
-                "--depth=1",
-                "--quiet",
-                &format!("https://aur.archlinux.org/{}.git", pkg),
-                &tmp_dir,
-            ])
-            .status();
-
-        spinner.finish_and_clear();
-
-        if clone_status.is_ok_and(|s| s.success()) {
-            let pkgbuild_path = format!("{}/PKGBUILD", tmp_dir);
-
-            if std::path::Path::new(&pkgbuild_path).exists() {
-                let parts: Vec<String> = editor.split_whitespace().map(|s| s.to_string()).collect();
-                if !parts.is_empty() {
-                    let exec = &parts[0];
-                    let mut cmd = std::process::Command::new(exec);
-
-                    if parts.len() > 1 {
-                        cmd.args(&parts[1..]);
-                    }
-
-                    let exec_lower = exec.to_lowercase();
-                    if exec_lower.contains("nvim")
-                        || exec_lower.contains("vim")
-                        || exec_lower.contains("vi")
-                    {
-                        cmd.arg("-R");
-                    } else if exec_lower.contains("nano") {
-                        cmd.arg("-v");
-                    }
-
-                    cmd.arg(&pkgbuild_path);
-                    let _ = cmd.status();
-                }
-            } else {
-                println!(
-                    "{} PKGBUILD not found in repository for {}.",
-                    "✗".red(),
-                    pkg.clone().bold()
-                );
-            }
-        } else {
-            println!(
-                "{} failed to fetch repository for {}.",
-                "✗".red(),
-                pkg.clone().bold()
-            );
-        }
-
-        let _ = std::fs::remove_dir_all(&tmp_dir);
-    }
-}
-
-async fn run_pacman(
-    args: &[&str],
-    spinner_msg: &str,
-    success_msg: &str,
-    is_dry_run: bool,
-    is_verbose: bool,
-    root: &Option<String>,
-) {
-    if is_dry_run {
-        println!(
-            "{} no system changes will be made.",
-            "[dry run]".bold().yellow()
-        );
-        let arrow = "→".cyan();
-        let cmd = args.join(" ");
-        let root_arg = root
-            .as_ref()
-            .map_or(String::new(), |r| format!("--root {} ", r));
-        println!("{arrow} would execute: sudo pacman {root_arg}{cmd}");
-        return;
-    }
-
-    if let Err(e) = core::escalate::ensure_sudo().await {
-        println!("{} {}", "✗".red(), e);
-        return;
-    }
-
-    let is_root = unsafe { libc::geteuid() == 0 };
-
-    let mut child_cmd = if is_root {
-        tokio::process::Command::new("pacman")
-    } else {
-        let mut c = tokio::process::Command::new("sudo");
-        c.arg("pacman");
-        c
-    };
-
-    let mut final_args = Vec::new();
-    if let Some(r) = root {
-        final_args.push("--root");
-        final_args.push(r.as_str());
-    }
-    final_args.extend_from_slice(args);
-
-    if is_verbose {
-        println!(
-            "{} [verbose] executing: pacman {}",
-            "::".blue(),
-            args.join(" ")
-        );
-        let mut child = match child_cmd
-            .args(args)
-            .stdin(std::process::Stdio::inherit())
-            .stdout(std::process::Stdio::inherit())
-            .stderr(std::process::Stdio::inherit())
-            .spawn()
-        {
-            Ok(c) => c,
-            Err(e) => {
-                print_network_error(&format!("{} failed to spawn pacman: {}", "✗".red(), e));
-                return;
-            }
-        };
-
-        let status = child.wait().await;
-        if status.is_ok_and(|s| s.success()) {
-            println!("{} {}", "✓".green(), success_msg);
-        } else {
-            print_network_error(&format!("{} operation failed.", "✗".red()));
-        }
-        return;
-    }
-
-    child_cmd.arg("--color=never");
-
-    let mut spinner = ui::progress::spinner(spinner_msg);
-    let mut last_spinner_msg = spinner_msg.to_string();
-    let mut context_buffer: Vec<String> = Vec::new();
-    let mut in_hook_phase = false;
-
-    let mut child = match child_cmd
-        .args(args)
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            spinner.finish_and_clear();
-            print_network_error(&format!("{} failed to spawn pacman: {}", "✗".red(), e));
-            return;
-        }
-    };
-
-    let mut stdin = if let Some(s) = child.stdin.take() {
-        s
-    } else {
-        return;
-    };
-    let mut stdout = if let Some(s) = child.stdout.take() {
-        s
-    } else {
-        return;
-    };
-    let mut stderr = if let Some(s) = child.stderr.take() {
-        s
-    } else {
-        return;
-    };
-
-    let err_handle = tokio::spawn(async move {
-        let mut err_str = String::new();
-        let mut buf = [0u8; 1024];
-        while let Ok(n) = tokio::io::AsyncReadExt::read(&mut stderr, &mut buf).await {
-            if n == 0 {
-                break;
-            }
-            err_str.push_str(&String::from_utf8_lossy(&buf[..n]));
-        }
-        err_str
-    });
-
-    let mut buf = [0u8; 128];
-    let mut current_line = String::new();
-    let mut hook_alerts = Vec::new();
-
-    let is_noconfirm = args.contains(&"--noconfirm");
-
-    while let Ok(n) = tokio::io::AsyncReadExt::read(&mut stdout, &mut buf).await {
-        if n == 0 {
-            break;
-        }
-        let chunk = String::from_utf8_lossy(&buf[..n]);
-
-        for c in chunk.chars() {
-            if c == '\n' || c == '\r' {
-                let clean = current_line.trim();
-                if clean.is_empty() {
-                    current_line.clear();
-                    continue;
-                }
-
-                let mut matched_spinner = true;
-                let lower_clean = clean.to_lowercase();
-
-                if (lower_clean.contains("error")
-                    || lower_clean.contains("warning")
-                    || lower_clean.contains("failed"))
-                    && !hook_alerts.contains(&clean.to_string())
-                {
-                    hook_alerts.push(clean.to_string());
-                }
-
-                if clean.contains("resolving dependencies")
-                    || clean.contains("conflicting packages")
-                {
-                    last_spinner_msg = format!(
-                        "{} {}",
-                        ":3c".yellow(),
-                        "resolving package dependencies...".bold()
-                    );
-                    spinner.set_message(last_spinner_msg.clone());
-                } else if clean.contains("checking keys")
-                    || clean.contains("checking package integrity")
-                    || clean.contains("loading package files")
-                {
-                    last_spinner_msg = format!(
-                        "{} {}",
-                        ":O".yellow(),
-                        "verifying package integrity...".bold()
-                    );
-                    spinner.set_message(last_spinner_msg.clone());
-                } else if clean.contains("retrieving packages") || clean.contains("downloading") {
-                    last_spinner_msg = format!("  {}", "downloading packages...".dim());
-                    spinner.set_message(last_spinner_msg.clone());
-                } else if clean.starts_with('(') && clean.contains(") upgrading")
-                    || clean.starts_with('(') && clean.contains(") installing")
-                {
-                    if let Some(idx_end) = clean.find(')') {
-                        let counter = &clean[..=idx_end];
-                        let action = if clean.contains("installing") {
-                            "installing"
-                        } else {
-                            "upgrading"
-                        };
-                        last_spinner_msg = format!(
-                            "{} {} packages {}...",
-                            ":p".yellow(),
-                            counter.cyan().bold(),
-                            action
-                        );
-                        spinner.set_message(last_spinner_msg.clone());
-                    }
-                } else if clean.contains("running pre-transaction hooks")
-                    || clean.contains("running post-transaction hooks")
-                {
-                    in_hook_phase = true;
-                    last_spinner_msg =
-                        format!("{} {}", ":v".yellow(), "running system hooks...".bold());
-                    spinner.set_message(last_spinner_msg.clone());
-                } else if in_hook_phase {
-                    if clean.starts_with("==> Building image")
-                        || clean.starts_with("==> Install DKMS")
-                    {
-                        last_spinner_msg = format!("{}    {}", ":3".yellow(), clean.dim());
-                        spinner.set_message(last_spinner_msg.clone());
-                    } else if (lower_clean.contains("missing") || lower_clean.contains("not found"))
-                        && !hook_alerts.contains(&clean.to_string())
-                    {
-                        hook_alerts.push(clean.to_string());
-                    }
-                } else if clean.starts_with("::") {
-                    last_spinner_msg = clean.replace("::", "→").cyan().bold().to_string();
-                    spinner.set_message(last_spinner_msg.clone());
-                    context_buffer.push(current_line.clone());
-                } else {
-                    matched_spinner = false;
-                }
-
-                if !matched_spinner && !in_hook_phase {
-                    context_buffer.push(current_line.clone());
-                    if context_buffer.len() > 15 {
-                        context_buffer.remove(0);
-                    }
-                }
-
-                current_line.clear();
-            } else {
-                current_line.push(c);
-                let lower = current_line.to_lowercase();
-                let trimmed_lower = lower.trim_end();
-
-                let is_yn = trimmed_lower.ends_with("[y/n]");
-                let is_choice = trimmed_lower.ends_with("):");
-
-                if (is_yn || is_choice) && !is_noconfirm {
-                    spinner.finish_and_clear();
-
-                    if !context_buffer.is_empty() {
-                        for line in &context_buffer {
-                            println!("  {}", line.clone().dim());
-                        }
-                        context_buffer.clear();
-                    }
-
-                    use std::io::Write;
-                    print!("{} {} ", "?".magenta().bold(), current_line.trim().bold());
-                    let _ = std::io::stdout().flush();
-
-                    let is_yn_prompt = is_yn;
-                    let user_input = tokio::task::spawn_blocking(move || {
-                        if crossterm::terminal::enable_raw_mode().is_ok() {
-                            let mut result = String::new();
-                            loop {
-                                if let Ok(crossterm::event::Event::Key(key)) =
-                                    crossterm::event::read()
-                                {
-                                    if key
-                                        .modifiers
-                                        .contains(crossterm::event::KeyModifiers::CONTROL)
-                                        && key.code == crossterm::event::KeyCode::Char('c')
-                                    {
-                                        result = "n\n".to_string();
-                                        println!("^C");
-                                        break;
-                                    }
-                                    match key.code {
-                                        crossterm::event::KeyCode::Enter => {
-                                            result.push('\n');
-                                            println!();
-                                            break;
-                                        }
-                                        crossterm::event::KeyCode::Backspace => {
-                                            if !is_yn_prompt && !result.is_empty() {
-                                                result.pop();
-                                                print!("\x08 \x08");
-                                                let _ = std::io::stdout().flush();
-                                            }
-                                        }
-                                        crossterm::event::KeyCode::Char(c) => {
-                                            result.push(c);
-                                            print!("{}", c);
-                                            let _ = std::io::stdout().flush();
-
-                                            if is_yn_prompt {
-                                                result.push('\n');
-                                                println!();
-                                                break;
-                                            }
-                                        }
-                                        _ => continue,
-                                    }
-                                }
-                            }
-                            let _ = crossterm::terminal::disable_raw_mode();
-                            result
-                        } else {
-                            let mut input = String::new();
-                            let _ = std::io::stdin().read_line(&mut input);
-                            input
-                        }
-                    })
-                    .await
-                    .unwrap_or_else(|_| "\n".to_string());
-
-                    let _ = tokio::io::AsyncWriteExt::write_all(&mut stdin, user_input.as_bytes())
-                        .await;
-                    let _ = tokio::io::AsyncWriteExt::flush(&mut stdin).await;
-
-                    current_line.clear();
-
-                    println!();
-                    spinner = ui::progress::spinner(&last_spinner_msg);
-                }
-            }
-        }
-    }
-
-    let status = child.wait().await;
-    let err_output = err_handle.await.unwrap_or_default();
-    let is_success = status.as_ref().is_ok_and(|s| s.success());
-    let exit_code = status.as_ref().map_or(1, |s| s.code().unwrap_or(1));
-
-    if !is_success {
-        spinner.finish_and_clear();
-        let fallback = format!(
-            "{} operation aborted or failed (code {}):\n{}",
-            "✗".red(),
-            exit_code,
-            err_output.trim().red()
-        );
-        print_network_error(&fallback);
-        std::process::exit(exit_code);
-    }
-
-    if !hook_alerts.is_empty() {
-        spinner.finish_and_clear();
-        println!("{} {}", "✓".green(), success_msg);
-        println!(
-            "\n{}",
-            "!!! changes completed, but warnings/errors occurred during hooks:"
-                .yellow()
-                .bold()
-        );
-        for alert in hook_alerts {
-            println!("  {}", alert.yellow());
-        }
-        println!();
-        return;
-    }
-
-    spinner.finish_and_clear();
-    println!("{} {}", "✓".green(), success_msg);
-}
-
-async fn process_installation(packages: Vec<String>, alpm_handle: alpm::Alpm, cli: &Cli) {
-    let mut native_pkgs = Vec::new();
-    let mut aur_pkgs = Vec::new();
-
-    for pkg in packages {
-        let mut found_in_repo = false;
-
-        if !cli.aur {
-            for db in alpm_handle.syncdbs() {
-                if db.pkg(pkg.as_str()).is_ok() {
-                    found_in_repo = true;
-                    break;
-                }
-            }
-        }
-
-        if found_in_repo || cli.repo {
-            native_pkgs.push(pkg.clone());
-        } else {
-            let local_ver = alpm_handle
-                .localdb()
-                .pkg(pkg.as_str())
-                .map(|p| p.version().to_string())
-                .ok();
-            aur_pkgs.push((pkg.clone(), local_ver));
-        }
-    }
-
-    let mut native_summaries = Vec::new();
-    let mut total_dl = 0.0;
-    let mut total_inst = 0.0;
-
-    if !native_pkgs.is_empty() {
-        println!("{} resolving native dependencies...", "::".blue());
-        match core::resolver::get_install_summaries(&alpm_handle, &native_pkgs) {
-            Ok(summaries) => {
-                for sum in &summaries {
-                    total_dl += sum.download_size_mb;
-                    total_inst += sum.install_size_mb;
-                }
-                native_summaries = summaries;
-            }
-            Err(e) => {
-                print_network_error(&format!("{} {}", "✗".red(), e));
-                native_pkgs.clear();
-            }
-        }
-    }
-
-    let mut resolved_aur_pkgs = Vec::new();
-    let mut aur_conflicts_map = std::collections::HashMap::new();
-    if !aur_pkgs.is_empty() {
-        let check_spinner = ui::progress::spinner("querying aur...");
-
-        let mut url = String::from("https://aur.archlinux.org/rpc/v5/info?");
-        for (pkg, _) in &aur_pkgs {
-            url.push_str(&format!("arg[]={}&", pkg));
-        }
-
-        if let Ok(response) = reqwest::get(&url).await
-            && let Ok(json) = response.json::<serde_json::Value>().await
-            && let Some(results) = json.get("results").and_then(|r| r.as_array())
-        {
-            check_spinner.finish_and_clear();
-
-            for (pkg, local_ver) in aur_pkgs {
-                if let Some(result) = results
-                    .iter()
-                    .find(|r| r.get("Name").and_then(|n| n.as_str()) == Some(&pkg))
-                {
-                    if let Some(conflicts_val) = result.get("Conflicts").and_then(|c| c.as_array())
-                    {
-                        let c_list: Vec<String> = conflicts_val
-                            .iter()
-                            .filter_map(|c| c.as_str().map(|s| s.to_string()))
-                            .collect();
-                        if !c_list.is_empty() {
-                            aur_conflicts_map.insert(pkg.clone(), c_list);
-                        }
-                    }
-
-                    if let Some(aur_ver) = result.get("Version").and_then(|v| v.as_str()) {
-                        let mut is_update = false;
-                        let mut skip = false;
-
-                        if let Some(lv) = &local_ver {
-                            if lv == aur_ver {
-                                println!(
-                                    "{} {} is up to date ({}).",
-                                    "✓".green(),
-                                    pkg.clone().magenta().bold(),
-                                    aur_ver.dim()
-                                );
-                                skip = true;
-                            } else {
-                                is_update = true;
-                            }
-                        }
-
-                        if !skip {
-                            resolved_aur_pkgs.push((
-                                pkg.clone(),
-                                aur_ver.to_string(),
-                                is_update,
-                                local_ver.clone(),
-                            ));
-                        }
-                    }
-                } else {
-                    println!(
-                        "{} package '{}' not found on the aur.",
-                        "✗".red(),
-                        pkg.bold()
-                    );
-                }
-            }
-        } else {
-            check_spinner.finish_and_clear();
-            print_network_error(&format!("{} failed to query the aur.", "✗".red()));
-        }
-    }
-
-    let conflicts =
-        core::conflicts::detect_conflicts(&alpm_handle, &native_pkgs, &aur_conflicts_map);
-
-    drop(alpm_handle);
-
-    let allow_conflict_removal =
-        match handle_conflicts_ui(&conflicts, cli.dry_run, cli.noconfirm, prompt_confirm) {
-            Ok(allowed) => allowed,
-            Err(e) => {
-                println!("{} {}", "✗".red(), e);
-                std::process::exit(1);
-            }
-        };
-
-    if native_summaries.is_empty() && resolved_aur_pkgs.is_empty() {
-        println!("{} nothing to do.", "✓".green());
-        return;
-    }
-
-    println!("\n{}", "targets:".bold().white());
-
-    if !native_summaries.is_empty() {
-        println!("  {}", "native repositories:".dim());
-        for sum in &native_summaries {
-            println!(
-                "    {:<25} {}",
-                sum.name.clone().cyan().bold(),
-                sum.version.clone().dim()
-            );
-        }
-    }
-
-    if !resolved_aur_pkgs.is_empty() {
-        println!("  {}", "arch user repository:".dim());
-        for (pkg, aur_ver, is_update, local_ver) in &resolved_aur_pkgs {
-            if *is_update {
-                println!(
-                    "    {:<25} {} -> {}",
-                    pkg.clone().magenta().bold(),
-                    local_ver.as_ref().unwrap().clone().red(),
-                    aur_ver.clone().green()
-                );
-            } else {
-                println!(
-                    "    {:<25} {}",
-                    pkg.clone().magenta().bold(),
-                    aur_ver.clone().green()
-                );
-            }
-        }
-    }
-
-    if total_dl > 0.0 || total_inst > 0.0 {
-        println!("\n{:<15} {:.2} mb", "download:", total_dl);
-        println!("{:<15} {:.2} mb", "disk usage:", total_inst);
-    } else {
-        println!();
-    }
-
-    if !cli.noconfirm {
-        let has_aur = !resolved_aur_pkgs.is_empty();
-        let mut prompt_msg = if has_aur {
-            "proceed with installation? [Y/n/v] (v = view PKGBUILDs)".to_string()
-        } else {
-            "proceed with installation? [Y/n]".to_string()
-        };
-
-        loop {
-            let choice = if has_aur {
-                prompt_install(&prompt_msg)
-            } else {
-                if prompt_confirm(&prompt_msg) {
-                    InstallChoice::Yes
-                } else {
-                    InstallChoice::No
-                }
-            };
-
-            match choice {
-                InstallChoice::Yes => break,
-                InstallChoice::No => {
-                    println!("{} aborted.", "✗".red());
-                    return;
-                }
-                InstallChoice::View => {
-                    let aur_names: Vec<String> = resolved_aur_pkgs
-                        .iter()
-                        .map(|(pkg, _, _, _)| pkg.clone())
-                        .collect();
-                    view_pkgbuilds(&aur_names).await;
-
-                    prompt_msg = "proceed with installation? [Y/n]".to_string();
-                }
-            }
-        }
-    }
-
-    if !native_pkgs.is_empty() {
-        let mut args = vec!["-S", "--noconfirm"];
-        if allow_conflict_removal {
-            args.push("--ask=4");
-        }
-        args.extend(native_pkgs.iter().map(|s| s.as_str()));
-
-        run_pacman(
-            &args,
-            "installing native packages...",
-            "native packages installed successfully.",
-            cli.dry_run,
-            cli.verbose,
-            &cli.root,
-        )
-        .await;
-    }
-
-    if !resolved_aur_pkgs.is_empty() {
-        for (pkg, aur_ver, is_update, _) in resolved_aur_pkgs {
-            if cli.dry_run {
-                println!(
-                    "{} would build and install aur package: {}",
-                    "[dry run]".bold().yellow(),
-                    pkg.magenta()
-                );
-                continue;
-            }
-
-            println!(
-                "\n{} preparing {} ({})...",
-                "::".blue(),
-                pkg.clone().magenta().bold(),
-                aur_ver.clone().green()
-            );
-
-            match core::aur::build(&pkg, cli.verbose).await {
-                Ok(pkg_path) => {
-                    let spinner_msg = if is_update {
-                        format!("updating built package {}...", pkg.clone().magenta().bold())
-                    } else {
-                        format!(
-                            "installing built package {}...",
-                            pkg.clone().magenta().bold()
-                        )
-                    };
-
-                    let success_msg = if is_update {
-                        format!(
-                            "{} updated successfully ({}).",
-                            pkg.magenta().bold(),
-                            aur_ver.dim()
-                        )
-                    } else {
-                        format!(
-                            "{} installed successfully ({}).",
-                            pkg.magenta().bold(),
-                            aur_ver.dim()
-                        )
-                    };
-
-                    let mut pacman_args = vec!["-U", pkg_path.to_str().unwrap(), "--noconfirm"];
-                    if allow_conflict_removal {
-                        pacman_args.push("--ask=4");
-                    }
-
-                    run_pacman(
-                        &pacman_args,
-                        &spinner_msg,
-                        &success_msg,
-                        cli.dry_run,
-                        cli.verbose,
-                        &cli.root,
-                    )
-                    .await;
-                }
-                Err(e) => eprintln!("{} {}", "error:".red().bold(), e),
-            }
-        }
-    }
-}
-
-async fn check_and_offer_sync(cli: &Cli) {
-    if cli.dry_run {
-        return;
-    }
-
-    let mut needs_sync = false;
-    let mut missing = true;
-    let sync_dir =
-        std::path::Path::new(cli.root.as_deref().unwrap_or("/")).join("var/lib/pacman/sync");
-
-    if let Ok(entries) = std::fs::read_dir(&sync_dir) {
-        for entry in entries.flatten() {
-            if entry.path().extension().and_then(|s| s.to_str()) == Some("db") {
-                missing = false;
-                if let Ok(metadata) = entry.metadata()
-                    && let Ok(modified) = metadata.modified()
-                    && let Ok(duration) = std::time::SystemTime::now().duration_since(modified)
-                    && duration.as_secs() > 7 * 24 * 60 * 60
-                {
-                    needs_sync = true;
-                    break;
-                }
-            }
-        }
-    }
-
-    if missing || needs_sync {
-        let msg = if missing {
-            "package databases are missing."
-        } else {
-            "package databases are stale (older than 7 days)."
-        };
-        println!("\n{} {}", "::".blue(), msg);
-        if cli.noconfirm || prompt_confirm("run 'haj sync' now? [Y/n]") {
-            run_pacman(
-                &["-Sy"],
-                "syncing package databases from mirrors...",
-                "repositories synced successfully.",
-                cli.dry_run,
-                cli.verbose,
-                &cli.root,
-            )
-            .await;
-        }
-    }
-}
-
-fn network_error_message(fallback_msg: &str, is_connected: bool) -> String {
-    if is_connected {
-        fallback_msg.to_string()
-    } else {
-        format!(
-            "{} haj cannot surf the internet, check your internet connection.",
-            "✗".red()
-        )
-    }
-}
-
-fn print_network_error(fallback_msg: &str) {
-    let ping_status = std::process::Command::new("ping")
-        .arg("-c")
-        .arg("1")
-        .arg("-W")
-        .arg("2")
-        .arg("archlinux.org")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status();
-
-    let is_connected = ping_status.is_ok_and(|s| s.success());
-    println!("{}", network_error_message(fallback_msg, is_connected));
-}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -1111,7 +87,7 @@ async fn main() -> anyhow::Result<()> {
             }
         },
         Commands::Update => {
-            run_pacman(
+            core::pacman::run_pacman(
                 &["-Sy", "--noconfirm"],
                 "syncing package databases from mirrors...",
                 "repositories synced successfully.",
@@ -1124,7 +100,7 @@ async fn main() -> anyhow::Result<()> {
         cmd => {
             match &cmd {
                 Commands::Install { .. } | Commands::Interactive(_) | Commands::Search { .. } => {
-                    check_and_offer_sync(&cli).await;
+                    core::pacman::check_and_offer_sync(&cli).await;
                 }
                 _ => {}
             }
@@ -1136,7 +112,7 @@ async fn main() -> anyhow::Result<()> {
                 Commands::Tui | Commands::Completions { .. } | Commands::Update => unreachable!(),
 
                 Commands::Install { packages } => {
-                    process_installation(packages, alpm_handle, &cli).await;
+                    commands::install::process_installation(packages, alpm_handle, &cli).await;
                 }
 
                 Commands::Interactive(queries) => {
@@ -1190,7 +166,10 @@ async fn main() -> anyhow::Result<()> {
                         let response = reqwest::get(&aur_url).await;
                         if response.is_err() {
                             check_spinner.finish_and_clear();
-                            print_network_error(&format!("{} failed to query the aur.", "✗".red()));
+                            core::pacman::print_network_error(&format!(
+                                "{} failed to query the aur.",
+                                "✗".red()
+                            ));
                         } else if let Ok(resp) = response
                             && let Ok(json) = resp.json::<serde_json::Value>().await
                             && let Some(aur_results) =
@@ -1300,7 +279,8 @@ async fn main() -> anyhow::Result<()> {
                         pkgs_to_install.join(", ").cyan()
                     );
 
-                    process_installation(pkgs_to_install, alpm_handle, &cli).await;
+                    commands::install::process_installation(pkgs_to_install, alpm_handle, &cli)
+                        .await;
                 }
 
                 Commands::Remove { packages } => {
@@ -1424,7 +404,7 @@ async fn main() -> anyhow::Result<()> {
 
                     if !cli.noconfirm {
                         println!();
-                        if !prompt_confirm("proceed with removal? [Y/n]") {
+                        if !core::ui::prompt_confirm("proceed with removal? [Y/n]") {
                             println!("{} aborted.", "✗".red());
                             return Ok(());
                         }
@@ -1435,7 +415,7 @@ async fn main() -> anyhow::Result<()> {
                     let mut args = vec!["-Rs", "--noconfirm"];
                     args.extend(packages.iter().map(|s| s.as_str()));
 
-                    run_pacman(
+                    core::pacman::run_pacman(
                         &args,
                         "tossing packages back into the ocean...",
                         "packages removed successfully.",
@@ -1572,15 +552,15 @@ async fn main() -> anyhow::Result<()> {
 
                     let total_upgrades = native_lines.len() + aur_updates.len();
                     println!("\n{:<15} {}", "total:", total_upgrades.to_string().cyan());
-                    display_arch_news().await;
+                    core::ui::display_arch_news().await;
 
-                    if !cli.noconfirm && !prompt_confirm("proceed with upgrade? [Y/n]") {
+                    if !cli.noconfirm && !core::ui::prompt_confirm("proceed with upgrade? [Y/n]") {
                         println!("{} aborted.", "✗".red());
                         return Ok(());
                     }
 
                     if !native_lines.is_empty() {
-                        run_pacman(
+                        core::pacman::run_pacman(
                             &["-Su", "--noconfirm"],
                             "upgrading system packages...",
                             "system upgraded successfully.",
@@ -1623,7 +603,7 @@ async fn main() -> anyhow::Result<()> {
                                     let pacman_args =
                                         vec!["-U", pkg_path.to_str().unwrap(), "--noconfirm"];
 
-                                    run_pacman(
+                                    core::pacman::run_pacman(
                                         &pacman_args,
                                         &spinner_msg,
                                         &success_msg,
@@ -1653,7 +633,7 @@ async fn main() -> anyhow::Result<()> {
                             args.push("--noconfirm");
                         }
 
-                        run_pacman(
+                        core::pacman::run_pacman(
                             &args,
                             &format!(
                                 "downgrading to {}...",
@@ -1900,7 +880,7 @@ async fn main() -> anyhow::Result<()> {
                 Commands::Load { archive_path } => {
                     drop(alpm_handle);
 
-                    run_pacman(
+                    core::pacman::run_pacman(
                         &["-U", &archive_path, "--noconfirm"],
                         "loading package archive...",
                         "package loaded successfully.",
@@ -1917,7 +897,7 @@ async fn main() -> anyhow::Result<()> {
                     let mut args = vec!["-Sw", "--noconfirm"];
                     args.extend(packages.iter().map(|s| s.as_str()));
 
-                    run_pacman(
+                    core::pacman::run_pacman(
                         &args,
                         "fetching packages to cache...",
                         "packages downloaded successfully.",
@@ -1947,7 +927,7 @@ async fn main() -> anyhow::Result<()> {
                     };
                     drop(alpm_handle);
 
-                    run_pacman(
+                    core::pacman::run_pacman(
                         &["-D", reason_flag, &package],
                         "updating database records...",
                         &format!("marked {} as {}.", package, state),
@@ -1967,7 +947,7 @@ async fn main() -> anyhow::Result<()> {
 
                 Commands::Pkgbuild { package } => {
                     drop(alpm_handle);
-                    view_pkgbuilds(&[package]).await;
+                    commands::install::view_pkgbuilds(&[package]).await;
                 }
 
                 Commands::List {
@@ -2273,7 +1253,7 @@ async fn main() -> anyhow::Result<()> {
 
                     if !cli.noconfirm {
                         println!();
-                        if !prompt_confirm(&format!(
+                        if !core::ui::prompt_confirm(&format!(
                             "install all packages in group '{}'? [Y/n]",
                             name
                         )) {
@@ -2290,7 +1270,7 @@ async fn main() -> anyhow::Result<()> {
                     let mut args = vec!["-S", "--noconfirm"];
                     args.extend(pkgs_to_install.iter().map(|s| s.as_str()));
 
-                    run_pacman(
+                    core::pacman::run_pacman(
                         &args,
                         &format!("installing group {}...", name.clone().cyan()),
                         &format!("group {} installed successfully.", name.cyan()),
@@ -2332,6 +1312,7 @@ async fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::pacman::network_error_message;
     use crossterm::style::Stylize;
 
     #[test]
@@ -2364,7 +1345,7 @@ mod tests {
     #[test]
     fn test_conflict_ui_no_conflict() {
         let conflicts = vec![];
-        let res = handle_conflicts_ui(&conflicts, false, false, |_| true);
+        let res = core::ui::handle_conflicts_ui(&conflicts, false, false, |_| true);
         assert_eq!(res, Ok(false));
     }
 
@@ -2375,7 +1356,7 @@ mod tests {
             installed_pkg: "nvidia".to_string(),
             constraint: None,
         }];
-        let res = handle_conflicts_ui(&conflicts, false, false, |_| true);
+        let res = core::ui::handle_conflicts_ui(&conflicts, false, false, |_| true);
         assert_eq!(res, Ok(true));
     }
 
@@ -2386,7 +1367,7 @@ mod tests {
             installed_pkg: "nvidia".to_string(),
             constraint: None,
         }];
-        let res = handle_conflicts_ui(&conflicts, false, false, |_| false);
+        let res = core::ui::handle_conflicts_ui(&conflicts, false, false, |_| false);
         assert_eq!(res, Err("aborted: no changes were made."));
     }
 
@@ -2405,7 +1386,7 @@ mod tests {
             },
         ];
         let mut prompt_count = 0;
-        let res = handle_conflicts_ui(&conflicts, false, false, |_| {
+        let res = core::ui::handle_conflicts_ui(&conflicts, false, false, |_| {
             prompt_count += 1;
             true
         });
@@ -2420,7 +1401,7 @@ mod tests {
             installed_pkg: "nvidia".to_string(),
             constraint: None,
         }];
-        let res = handle_conflicts_ui(&conflicts, true, false, |_| {
+        let res = core::ui::handle_conflicts_ui(&conflicts, true, false, |_| {
             panic!("Should not prompt on dry run")
         });
         assert_eq!(res, Ok(true));
@@ -2433,7 +1414,7 @@ mod tests {
             installed_pkg: "nvidia".to_string(),
             constraint: None,
         }];
-        let res = handle_conflicts_ui(&conflicts, false, true, |_| {
+        let res = core::ui::handle_conflicts_ui(&conflicts, false, true, |_| {
             panic!("Should not prompt on noconfirm")
         });
         assert_eq!(
