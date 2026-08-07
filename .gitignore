@@ -1,4 +1,5 @@
 /target
+/dist
 *.tape
 RELEASE.md
 assets/*.mp4

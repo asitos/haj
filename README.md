@@ -85,6 +85,7 @@ sudo pacman -Syu haj
 requires [rust + cargo](https://www.rust-lang.org/tools/install) to be installed:
 
 ```bash
+cargo install display3d
 cargo install haj
 ```
 
@@ -95,9 +96,23 @@ requires the rust toolchain (`cargo`).
 ```bash
 git clone https://github.com/asitos/haj.git
 cd haj
+cargo install display3d
 cargo build --release
 
 # install the binary to your system path
+sudo install -Dm755 target/release/haj /usr/bin/haj
+```
+
+### source release bundle
+
+every source release includes the exact `display3d` source required by haj under `third_party/display3d`. build and install both binaries:
+
+```bash
+tar -xzf haj-<version>-source.tar.gz
+cd haj-<version>-source
+cargo build --release --manifest-path third_party/display3d/Cargo.toml
+sudo install -Dm755 third_party/display3d/target/release/display3d /usr/bin/display3d
+cargo build --release
 sudo install -Dm755 target/release/haj /usr/bin/haj
 ```
 

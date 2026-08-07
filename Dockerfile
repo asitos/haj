@@ -7,16 +7,19 @@ WORKDIR /usr/src/haj
 
 COPY . .
 
-RUN cargo build --release
+RUN cargo install display3d --version 0.2.3 --locked \
+ && cargo build --release
 
 # runtime
 FROM archlinux:base
 
-RUN pacman -Syu --noconfirm && pacman -Scc --noconfirm
+RUN pacman -Syu --noconfirm pacman sudo ca-certificates \
+ && pacman -Scc --noconfirm
 
 WORKDIR /app
 
 COPY --from=builder /usr/src/haj/target/release/haj /usr/local/bin/haj
+COPY --from=builder /root/.cargo/bin/display3d /usr/local/bin/display3d
 
-# default is help
-CMD ["haj", "--help"]
+ENTRYPOINT ["haj"]
+CMD ["--help"]

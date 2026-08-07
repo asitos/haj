@@ -15,10 +15,23 @@ fi
 VERSION="$1"
 TAG="v$VERSION"
 DEFAULT_AUR_PATH="/home/asitos/Projects/haj-aur/haj"
+PACKAGE_VERSION="$(awk -F '"' '/^version = / { print $2; exit }' Cargo.toml)"
+CURRENT_BRANCH="$(git branch --show-current)"
+
+if [ "$CURRENT_BRANCH" != "main" ]; then
+    echo -e "${RED}releases must be created from main (currently: ${CURRENT_BRANCH:-detached HEAD}).${NC}"
+    exit 1
+fi
+
+if [ "$PACKAGE_VERSION" != "$VERSION" ]; then
+    echo -e "${RED}Cargo.toml version is ${PACKAGE_VERSION:-missing}, not ${VERSION}.${NC}"
+    echo "Update Cargo.toml and Cargo.lock before releasing."
+    exit 1
+fi
 
 echo -e "${CYAN}==> starting release pipeline for haj ${TAG}...${NC}"
 
-echo -e "\n${CYAN}==> [1/4] committing and tagging release...${NC}"
+echo -e "\n${CYAN}==> [1/5] committing and tagging release...${NC}"
 git add .
 git commit -m "release: ${TAG}"
 git tag -a "${TAG}" -m "release ${TAG}"
@@ -27,7 +40,7 @@ echo -e "pushing commits and tags to origin..."
 git push origin main
 git push origin "${TAG}"
 
-echo -e "\n${CYAN}==> [2/4] Publishing to crates.io...${NC}"
+echo -e "\n${CYAN}==> [2/5] Publishing to crates.io...${NC}"
 echo "Running dry-run..."
 cargo publish --dry-run
 
@@ -41,7 +54,28 @@ else
     echo -e "${RED}skipped crates.io publish.${NC}"
 fi
 
-echo -e "\n${CYAN}==> [3/4] Updating AUR package...${NC}"
+echo -e "\n${CYAN}==> [3/5] Creating source release bundle...${NC}"
+./scripts/package-source-release.sh "$VERSION"
+
+echo -e "\n${CYAN}==> [4/5] Creating GitHub release...${NC}"
+if command -v gh >/dev/null 2>&1; then
+    read -p "Publish GitHub release ${TAG} with the source bundle? [y/N] " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        RELEASE_ASSETS=("dist/haj-${VERSION}-source.tar.gz")
+        if [ -f "completions.tar.gz" ]; then
+            RELEASE_ASSETS+=("completions.tar.gz")
+        fi
+        gh release create "$TAG" "${RELEASE_ASSETS[@]}" --title "haj ${TAG}" --generate-notes
+        echo -e "${GREEN}GitHub release created successfully!${NC}"
+    else
+        echo -e "${RED}skipped GitHub release.${NC}"
+    fi
+else
+    echo -e "${RED}GitHub CLI (gh) is not installed; skipped GitHub release.${NC}"
+fi
+
+echo -e "\n${CYAN}==> [5/5] Updating AUR package...${NC}"
 read -p "Enter path to local AUR clone [default: $DEFAULT_AUR_PATH] (or type 'skip'): " AUR_PATH
 AUR_PATH="${AUR_PATH:-$DEFAULT_AUR_PATH}"
 
