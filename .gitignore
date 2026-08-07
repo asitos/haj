@@ -4,3 +4,5 @@ RELEASE.md
 assets/*.mp4
 alpm_init
 test_alpm*
+/.agents/skills
+/skills-lock.json
