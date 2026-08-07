@@ -33,7 +33,18 @@ echo -e "${CYAN}==> starting release pipeline for haj ${TAG}...${NC}"
 
 echo -e "\n${CYAN}==> [1/5] committing and tagging release...${NC}"
 git add .
-git commit -m "release: ${TAG}"
+
+if git diff --cached --quiet; then
+    echo "no uncommitted release changes; tagging the current main commit."
+else
+    git commit -m "release: ${TAG}"
+fi
+
+if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+    echo -e "${RED}tag ${TAG} already exists. Choose a new version or delete the local tag intentionally.${NC}"
+    exit 1
+fi
+
 git tag -a "${TAG}" -m "release ${TAG}"
 
 echo -e "pushing commits and tags to origin..."
