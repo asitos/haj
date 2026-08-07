@@ -964,7 +964,7 @@ async fn process_installation(packages: Vec<String>, alpm_handle: alpm::Alpm, cl
 }
 
 async fn check_and_offer_sync(cli: &Cli) {
-    if cli.dry_run || cli.noconfirm {
+    if cli.dry_run {
         return;
     }
 
@@ -996,7 +996,7 @@ async fn check_and_offer_sync(cli: &Cli) {
             "package databases are stale (older than 7 days)."
         };
         println!("\n{} {}", "::".blue(), msg);
-        if prompt_confirm("run 'haj sync' now? [Y/n]") {
+        if cli.noconfirm || prompt_confirm("run 'haj sync' now? [Y/n]") {
             run_pacman(
                 &["-Sy"],
                 "syncing package databases from mirrors...",
