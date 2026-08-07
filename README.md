@@ -232,7 +232,7 @@ haj -d toss firefox
 
 ```
 cd ~/.config/haj
-curl -sSL https://github.com/asitos/haj/releases/download/v0.2.8/completions.tar.gz | tar -xz
+curl -sSL https://github.com/asitos/haj/releases/latest/download/completions.tar.gz | tar -xz
 ```
 
 ---

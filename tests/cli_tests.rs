@@ -23,9 +23,11 @@ fn test_cli_version() {
         .expect("Failed to execute haj");
 
     assert!(output.status.success());
-    let stdout = str::from_utf8(&output.stdout).unwrap();
+
+    let stdout = std::str::from_utf8(&output.stdout).unwrap();
+
     assert!(stdout.contains("haj"));
-    assert!(stdout.contains("0.2.8"));
+    assert!(stdout.contains(env!("CARGO_PKG_VERSION")));
 }
 
 #[test]
