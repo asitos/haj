@@ -32,9 +32,11 @@ pub fn scrub(keep: usize) {
             && let Ok(entries) = std::fs::read_dir(&aur_cache)
         {
             for entry in entries.filter_map(Result::ok) {
-                if entry.path().is_dir() {
+                if entry.path().is_dir()
+                    && let Some(path_str) = entry.path().to_str()
+                {
                     let _ = Command::new("paccache")
-                        .args(["-r", "-k", &keep_str, "-c", entry.path().to_str().unwrap()])
+                        .args(["-r", "-k", &keep_str, "-c", path_str])
                         .output();
                 }
             }

@@ -356,13 +356,19 @@ async fn run_pacman(
             "::".blue(),
             args.join(" ")
         );
-        let mut child = child_cmd
+        let mut child = match child_cmd
             .args(args)
             .stdin(std::process::Stdio::inherit())
             .stdout(std::process::Stdio::inherit())
             .stderr(std::process::Stdio::inherit())
             .spawn()
-            .expect("failed to spawn pacman");
+        {
+            Ok(c) => c,
+            Err(e) => {
+                print_network_error(&format!("{} failed to spawn pacman: {}", "✗".red(), e));
+                return;
+            }
+        };
 
         let status = child.wait().await;
         if status.is_ok_and(|s| s.success()) {
@@ -380,17 +386,36 @@ async fn run_pacman(
     let mut context_buffer: Vec<String> = Vec::new();
     let mut in_hook_phase = false;
 
-    let mut child = child_cmd
+    let mut child = match child_cmd
         .args(args)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .expect("failed to spawn pacman");
+    {
+        Ok(c) => c,
+        Err(e) => {
+            spinner.finish_and_clear();
+            print_network_error(&format!("{} failed to spawn pacman: {}", "✗".red(), e));
+            return;
+        }
+    };
 
-    let mut stdin = child.stdin.take().unwrap();
-    let mut stdout = child.stdout.take().unwrap();
-    let mut stderr = child.stderr.take().unwrap();
+    let mut stdin = if let Some(s) = child.stdin.take() {
+        s
+    } else {
+        return;
+    };
+    let mut stdout = if let Some(s) = child.stdout.take() {
+        s
+    } else {
+        return;
+    };
+    let mut stderr = if let Some(s) = child.stderr.take() {
+        s
+    } else {
+        return;
+    };
 
     let err_handle = tokio::spawn(async move {
         let mut err_str = String::new();
@@ -938,6 +963,53 @@ async fn process_installation(packages: Vec<String>, alpm_handle: alpm::Alpm, cl
     }
 }
 
+async fn check_and_offer_sync(cli: &Cli) {
+    if cli.dry_run || cli.noconfirm {
+        return;
+    }
+
+    let mut needs_sync = false;
+    let mut missing = true;
+    let sync_dir =
+        std::path::Path::new(cli.root.as_deref().unwrap_or("/")).join("var/lib/pacman/sync");
+
+    if let Ok(entries) = std::fs::read_dir(&sync_dir) {
+        for entry in entries.flatten() {
+            if entry.path().extension().and_then(|s| s.to_str()) == Some("db") {
+                missing = false;
+                if let Ok(metadata) = entry.metadata()
+                    && let Ok(modified) = metadata.modified()
+                    && let Ok(duration) = std::time::SystemTime::now().duration_since(modified)
+                    && duration.as_secs() > 7 * 24 * 60 * 60
+                {
+                    needs_sync = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    if missing || needs_sync {
+        let msg = if missing {
+            "package databases are missing."
+        } else {
+            "package databases are stale (older than 7 days)."
+        };
+        println!("\n{} {}", "::".blue(), msg);
+        if prompt_confirm("run 'haj sync' now? [Y/n]") {
+            run_pacman(
+                &["-Sy"],
+                "syncing package databases from mirrors...",
+                "repositories synced successfully.",
+                cli.dry_run,
+                cli.verbose,
+                &cli.root,
+            )
+            .await;
+        }
+    }
+}
+
 fn network_error_message(fallback_msg: &str, is_connected: bool) -> String {
     if is_connected {
         fallback_msg.to_string()
@@ -989,7 +1061,7 @@ async fn main() -> anyhow::Result<()> {
         .truncate(true)
         .mode(0o666)
         .open("/tmp/haj.lock")
-        .expect("failed to open lock file");
+        .map_err(|e| anyhow::anyhow!("failed to open lock file: {}", e))?;
 
     use std::os::unix::io::AsRawFd;
     let fd = lock_file.as_raw_fd();
@@ -1050,6 +1122,13 @@ async fn main() -> anyhow::Result<()> {
             .await;
         }
         cmd => {
+            match &cmd {
+                Commands::Install { .. } | Commands::Interactive(_) | Commands::Search { .. } => {
+                    check_and_offer_sync(&cli).await;
+                }
+                _ => {}
+            }
+
             let alpm_handle = core::alpm_init::init_alpm()?;
             let local_db = alpm_handle.localdb();
 
@@ -1197,7 +1276,7 @@ async fn main() -> anyhow::Result<()> {
                     );
                     let _ = std::io::stdout().flush();
                     let mut input = String::new();
-                    std::io::stdin().read_line(&mut input).unwrap();
+                    let _ = std::io::stdin().read_line(&mut input);
 
                     let selections: Vec<usize> = input
                         .split_whitespace()
@@ -1402,10 +1481,8 @@ async fn main() -> anyhow::Result<()> {
                         let status = std::process::Command::new("sudo")
                             .args(["pacman", "-Sy"])
                             .stdout(std::process::Stdio::null())
-                            .status()
-                            .expect("failed to sync databases");
-
-                        if !status.success() {
+                            .status();
+                        if status.is_err() || !status.as_ref().unwrap().success() {
                             println!("{} failed to sync databases.", "✗".red());
                             return Ok(());
                         }
@@ -1449,17 +1526,18 @@ async fn main() -> anyhow::Result<()> {
 
                     let mut native_lines: Vec<String> = Vec::new();
                     if !cli.aur {
-                        let qu_output = std::process::Command::new("pacman")
-                            .arg("-Qu")
-                            .output()
-                            .expect("failed to query updates");
-
-                        let updates = String::from_utf8_lossy(&qu_output.stdout);
-                        native_lines = updates
-                            .lines()
-                            .filter(|l| !l.trim().is_empty())
-                            .map(|s| s.to_string())
-                            .collect();
+                        if let Ok(qu_output) =
+                            std::process::Command::new("pacman").arg("-Qu").output()
+                        {
+                            let updates = String::from_utf8_lossy(&qu_output.stdout);
+                            native_lines = updates
+                                .lines()
+                                .filter(|l| !l.trim().is_empty())
+                                .map(|s| s.to_string())
+                                .collect();
+                        } else {
+                            println!("{} failed to query updates.", "✗".red());
+                        }
                     }
 
                     if native_lines.is_empty() && aur_updates.is_empty() {
@@ -1882,7 +1960,9 @@ async fn main() -> anyhow::Result<()> {
 
                 Commands::Diff => {
                     drop(alpm_handle);
-                    core::pacnew::manage_pacnew_files();
+                    if let Err(e) = core::pacnew::manage_pacnew_files() {
+                        eprintln!("{} {}", "error:".red(), e);
+                    }
                 }
 
                 Commands::Pkgbuild { package } => {

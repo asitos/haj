@@ -179,7 +179,11 @@ pub fn render(f: &mut Frame, app: &mut App) {
         .iter()
         .filter(|p| p.is_installed)
         .collect::<Vec<_>>();
-    sorted_pkgs.sort_by(|a, b| b.size_mb.partial_cmp(&a.size_mb).unwrap());
+    sorted_pkgs.sort_by(|a, b| {
+        b.size_mb
+            .partial_cmp(&a.size_mb)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     let mut top_pkgs = Vec::new();
     for pkg in sorted_pkgs.iter().take(4) {

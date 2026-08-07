@@ -875,7 +875,7 @@ impl App {
                 .unwrap_or(0);
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_default()
                 .as_secs() as i64;
             let diff = now - ts;
             if diff < 3600 {
@@ -1130,7 +1130,7 @@ pub fn fetch_article_body(tx: mpsc::Sender<TuiEvent>, link: String) {
             .user_agent("haj/0.2.5 (https://github.com/asitos/haj)")
             .timeout(Duration::from_secs(10))
             .build()
-            .unwrap();
+            .unwrap_or_else(|_| reqwest::Client::new());
 
         if let Ok(resp) = client.get(&link).send().await {
             if resp.status().is_success() {
@@ -1204,7 +1204,7 @@ pub fn fetch_arch_news(tx: mpsc::Sender<TuiEvent>, page: usize) {
             .user_agent("haj/0.2.5 (https://github.com/asitos/haj)")
             .timeout(Duration::from_secs(10))
             .build()
-            .unwrap();
+            .unwrap_or_else(|_| reqwest::Client::new());
 
         let home = std::env::var("HOME")
             .map(std::path::PathBuf::from)
@@ -1475,7 +1475,11 @@ where
                 .spawn();
 
             if let Ok(mut child_proc) = child {
-                let mut stdout = child_proc.stdout.take().unwrap();
+                let mut stdout = if let Some(s) = child_proc.stdout.take() {
+                    s
+                } else {
+                    return;
+                };
                 let mut buf = vec![0; 8192];
                 let mut frame_buffer = Vec::new();
                 let mut first_frame = true;
@@ -1545,8 +1549,16 @@ where
 
             if let Ok(mut child) = child_res {
                 let pid = child.id();
-                let stdout = child.stdout.take().unwrap();
-                let stderr = child.stderr.take().unwrap();
+                let stdout = if let Some(s) = child.stdout.take() {
+                    s
+                } else {
+                    return;
+                };
+                let stderr = if let Some(s) = child.stderr.take() {
+                    s
+                } else {
+                    return;
+                };
 
                 let tx_out = tx_channel.clone();
                 let out_task = tokio::spawn(async move {

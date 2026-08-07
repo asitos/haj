@@ -1,7 +1,7 @@
 use crossterm::style::Stylize;
 use std::process::{Command, Stdio};
 
-pub fn manage_pacnew_files() {
+pub fn manage_pacnew_files() -> anyhow::Result<()> {
     println!("{} launching pacdiff...", "::".blue());
 
     let mut child = Command::new("sudo")
@@ -10,13 +10,22 @@ pub fn manage_pacnew_files() {
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .spawn()
-        .expect("failed to launch pacdiff. is pacman-contrib installed?");
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "failed to launch pacdiff. is pacman-contrib installed? ({})",
+                e
+            )
+        })?;
 
-    let status = child.wait().expect("failed to wait on pacdiff");
+    let status = child
+        .wait()
+        .map_err(|e| anyhow::anyhow!("failed to wait on pacdiff: {}", e))?;
 
     if status.success() {
         println!("{} pacnew management complete.", "✓".green());
     } else {
         println!("{} pacnew management aborted or failed.", "✗".red());
     }
+
+    Ok(())
 }

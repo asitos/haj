@@ -16,7 +16,8 @@ pub async fn build(pkg_name: &str, is_verbose: bool) -> anyhow::Result<PathBuf> 
 
     crate::core::escalate::ensure_sudo().await?;
 
-    let home = std::env::var("HOME").expect("HOME environment variable not set");
+    let home = std::env::var("HOME")
+        .map_err(|e| anyhow::anyhow!("HOME environment variable not set: {}", e))?;
     let aur_cache_dir = PathBuf::from(home).join(".cache/haj/aur");
     tokio::fs::create_dir_all(&aur_cache_dir).await?;
 
@@ -158,8 +159,14 @@ pub async fn build(pkg_name: &str, is_verbose: bool) -> anyhow::Result<PathBuf> 
             .stderr(Stdio::piped())
             .spawn()?;
 
-        let mut stdout = child.stdout.take().unwrap();
-        let mut stderr = child.stderr.take().unwrap();
+        let mut stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("failed to capture stdout"))?;
+        let mut stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("failed to capture stderr"))?;
 
         let err_handle = tokio::spawn(async move {
             let mut err_str = String::new();

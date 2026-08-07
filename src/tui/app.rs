@@ -250,7 +250,7 @@ impl SharedState {
         
         if let Ok(output) = std::process::Command::new("sh").arg("-c").arg("stat -c %Y /var/lib/pacman/sync/core.db 2>/dev/null").output() {
             let ts: i64 = String::from_utf8_lossy(&output.stdout).trim().parse().unwrap_or(0);
-            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
             let diff = now - ts;
             if diff < 3600 { self.last_sync = format!("{} min ago", diff / 60); }
             else if diff < 86400 { self.last_sync = format!("{} hrs ago", diff / 3600); }
