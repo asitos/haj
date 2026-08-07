@@ -101,6 +101,34 @@ cargo build --release
 sudo install -Dm755 target/release/haj /usr/bin/haj
 ```
 
+## docker
+
+you can run haj inside an arch linux container to safely test package operations without affecting your host system.
+
+to build the image:
+```bash
+docker build -t haj .
+```
+
+to run haj:
+
+```bash
+docker run --rm -it haj --help
+docker run --rm -it haj search ripgrep
+docker run --rm -it haj tui
+```
+
+**warning:** haj inside docker manages the container's arch environment, not your host. do not bind-mount the host `/`, `/etc`, `/var/lib/pacman`, or the host pacman database into it. doing so will risk corrupting your host package database.
+
+package operations performed here affect only the container. if you want to persist the container's package database and cache across runs, use named docker volumes:
+
+```bash
+docker run --rm -it \
+  -v haj-db:/var/lib/pacman \
+  -v haj-cache:/var/cache/pacman/pkg \
+  haj tui
+```
+
 ## usage & commands
 
 `haj` provides highly aliased commands for a faster typing experience, and currently supports the full day-to-day arch package management workflow through both the cli and the interactive tui
