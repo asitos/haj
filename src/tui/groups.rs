@@ -198,91 +198,91 @@ pub fn render(f: &mut Frame, app: &mut App) {
 
         f.render_stateful_widget(list, split[0], &mut app.group_state);
 
-        if let Some(idx) = app.group_state.selected() {
-            if let Some(group) = app.filtered_groups.get(idx) {
-                let total = group.packages.len();
-                let installed = group.packages.iter().filter(|p| p.1).count();
-                let pct = if total > 0 {
-                    (installed as f64 / total as f64) * 100.0
+        if let Some(idx) = app.group_state.selected()
+            && let Some(group) = app.filtered_groups.get(idx)
+        {
+            let total = group.packages.len();
+            let installed = group.packages.iter().filter(|p| p.1).count();
+            let pct = if total > 0 {
+                (installed as f64 / total as f64) * 100.0
+            } else {
+                0.0
+            };
+
+            let mut details = vec![
+                Line::from(vec![
+                    Span::styled(
+                        group.name.clone(),
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        if group.is_favorite {
+                            " ★ favorite"
+                        } else {
+                            ""
+                        },
+                        Style::default().fg(Color::Yellow),
+                    ),
+                ]),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "statistics",
+                    Style::default()
+                        .fg(Color::LightMagenta)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Line::from(format!("  packages   : {}", total)),
+                Line::from(format!("  installed  : {} / {}", installed, total)),
+                Line::from(format!("  completion : {:.0}%", pct)),
+                Line::from(format!("  progress   : {}", draw_bar(pct, 25))),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "description",
+                    Style::default()
+                        .fg(Color::LightMagenta)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Line::from(format!("  {}", group.description)),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "package preview (first 20)",
+                    Style::default()
+                        .fg(Color::LightMagenta)
+                        .add_modifier(Modifier::BOLD),
+                )),
+            ];
+
+            for (pkg, is_inst) in group.packages.iter().take(20) {
+                let icon = if *is_inst { "✓ " } else { "○ " };
+                let color = if *is_inst {
+                    Color::Green
                 } else {
-                    0.0
+                    Color::DarkGray
                 };
-
-                let mut details = vec![
-                    Line::from(vec![
-                        Span::styled(
-                            group.name.clone(),
-                            Style::default()
-                                .fg(Color::Cyan)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                        Span::styled(
-                            if group.is_favorite {
-                                " ★ favorite"
-                            } else {
-                                ""
-                            },
-                            Style::default().fg(Color::Yellow),
-                        ),
-                    ]),
-                    Line::from(""),
-                    Line::from(Span::styled(
-                        "statistics",
-                        Style::default()
-                            .fg(Color::LightMagenta)
-                            .add_modifier(Modifier::BOLD),
-                    )),
-                    Line::from(format!("  packages   : {}", total)),
-                    Line::from(format!("  installed  : {} / {}", installed, total)),
-                    Line::from(format!("  completion : {:.0}%", pct)),
-                    Line::from(format!("  progress   : {}", draw_bar(pct, 25))),
-                    Line::from(""),
-                    Line::from(Span::styled(
-                        "description",
-                        Style::default()
-                            .fg(Color::LightMagenta)
-                            .add_modifier(Modifier::BOLD),
-                    )),
-                    Line::from(format!("  {}", group.description)),
-                    Line::from(""),
-                    Line::from(Span::styled(
-                        "package preview (first 20)",
-                        Style::default()
-                            .fg(Color::LightMagenta)
-                            .add_modifier(Modifier::BOLD),
-                    )),
-                ];
-
-                for (pkg, is_inst) in group.packages.iter().take(20) {
-                    let icon = if *is_inst { "✓ " } else { "○ " };
-                    let color = if *is_inst {
-                        Color::Green
-                    } else {
-                        Color::DarkGray
-                    };
-                    details.push(Line::from(vec![
-                        Span::styled(format!("  {}", icon), Style::default().fg(color)),
-                        Span::styled(pkg.clone(), Style::default().fg(color)),
-                    ]));
-                }
-
-                if group.packages.len() > 20 {
-                    details.push(Line::from(Span::styled(
-                        format!("  ... and {} more packages", group.packages.len() - 20),
-                        Style::default().fg(Color::DarkGray),
-                    )));
-                }
-
-                let info_block = Paragraph::new(details)
-                    .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .title(" group information "),
-                    )
-                    .wrap(Wrap { trim: true });
-
-                f.render_widget(info_block, split[1]);
+                details.push(Line::from(vec![
+                    Span::styled(format!("  {}", icon), Style::default().fg(color)),
+                    Span::styled(pkg.clone(), Style::default().fg(color)),
+                ]));
             }
+
+            if group.packages.len() > 20 {
+                details.push(Line::from(Span::styled(
+                    format!("  ... and {} more packages", group.packages.len() - 20),
+                    Style::default().fg(Color::DarkGray),
+                )));
+            }
+
+            let info_block = Paragraph::new(details)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(" group information "),
+                )
+                .wrap(Wrap { trim: true });
+
+            f.render_widget(info_block, split[1]);
         }
     }
 

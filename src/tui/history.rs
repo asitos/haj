@@ -189,134 +189,124 @@ pub fn render(f: &mut Frame, app: &mut App) {
 
         f.render_stateful_widget(list, split[0], &mut app.history_state);
 
-        if let Some(idx) = app.history_state.selected() {
-            if let Some(tx) = app.filtered_transactions.get(idx) {
-                let mut details = vec![
-                    Line::from(Span::styled(
-                        match tx.primary_action {
-                            TxAction::Install => "install",
-                            TxAction::Upgrade => "upgrade",
-                            TxAction::Remove => "remove",
-                            _ => "system transaction",
-                        },
-                        Style::default()
-                            .fg(Color::Magenta)
-                            .add_modifier(Modifier::BOLD),
-                    )),
-                    Line::from(Span::styled(
-                        "──────────────────────────────────────────────",
-                        Style::default().fg(COLOR_GRAY),
-                    )),
-                    Line::from(vec![
-                        Span::styled("date      ", Style::default().fg(Color::LightMagenta)),
-                        Span::raw(format_relative_timestamp(&tx.timestamp)),
-                    ]),
-                    Line::from(vec![
-                        Span::styled("result    ", Style::default().fg(Color::LightMagenta)),
-                        Span::styled(
-                            if tx.is_success { "success" } else { "failed" },
-                            Style::default().fg(if tx.is_success {
-                                COLOR_INSTALL
-                            } else {
-                                COLOR_WARNING
-                            }),
-                        ),
-                    ]),
-                    Line::from(""),
-                    Line::from(Span::styled(
-                        "packages",
-                        Style::default()
-                            .fg(Color::LightMagenta)
-                            .add_modifier(Modifier::BOLD),
-                    )),
-                ];
+        if let Some(idx) = app.history_state.selected()
+            && let Some(tx) = app.filtered_transactions.get(idx)
+        {
+            let mut details = vec![
+                Line::from(Span::styled(
+                    match tx.primary_action {
+                        TxAction::Install => "install",
+                        TxAction::Upgrade => "upgrade",
+                        TxAction::Remove => "remove",
+                        _ => "system transaction",
+                    },
+                    Style::default()
+                        .fg(Color::Magenta)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Line::from(Span::styled(
+                    "──────────────────────────────────────────────",
+                    Style::default().fg(COLOR_GRAY),
+                )),
+                Line::from(vec![
+                    Span::styled("date      ", Style::default().fg(Color::LightMagenta)),
+                    Span::raw(format_relative_timestamp(&tx.timestamp)),
+                ]),
+                Line::from(vec![
+                    Span::styled("result    ", Style::default().fg(Color::LightMagenta)),
+                    Span::styled(
+                        if tx.is_success { "success" } else { "failed" },
+                        Style::default().fg(if tx.is_success {
+                            COLOR_INSTALL
+                        } else {
+                            COLOR_WARNING
+                        }),
+                    ),
+                ]),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "packages",
+                    Style::default()
+                        .fg(Color::LightMagenta)
+                        .add_modifier(Modifier::BOLD),
+                )),
+            ];
 
-                for pkg in &tx.packages {
-                    let icon = match pkg.action {
-                        TxAction::Install => {
-                            Span::styled("  ✓ ", Style::default().fg(COLOR_INSTALL))
-                        }
-                        TxAction::Upgrade => {
-                            Span::styled("  ↑ ", Style::default().fg(COLOR_UPGRADE))
-                        }
-                        TxAction::Remove => Span::styled("  ✗ ", Style::default().fg(COLOR_REMOVE)),
-                        _ => Span::raw("  - "),
-                    };
+            for pkg in &tx.packages {
+                let icon = match pkg.action {
+                    TxAction::Install => Span::styled("  ✓ ", Style::default().fg(COLOR_INSTALL)),
+                    TxAction::Upgrade => Span::styled("  ↑ ", Style::default().fg(COLOR_UPGRADE)),
+                    TxAction::Remove => Span::styled("  ✗ ", Style::default().fg(COLOR_REMOVE)),
+                    _ => Span::raw("  - "),
+                };
 
+                details.push(Line::from(vec![
+                    icon,
+                    Span::styled(pkg.name.clone(), Style::default().fg(Color::White)),
+                ]));
+
+                if let Some(old_v) = &pkg.old_version {
                     details.push(Line::from(vec![
-                        icon,
-                        Span::styled(pkg.name.clone(), Style::default().fg(Color::White)),
+                        Span::styled(format!("      {} ", old_v), Style::default().fg(COLOR_GRAY)),
+                        Span::styled("→ ", Style::default().fg(COLOR_UPGRADE)),
+                        Span::styled(pkg.new_version.clone(), Style::default().fg(COLOR_INSTALL)),
                     ]));
-
-                    if let Some(old_v) = &pkg.old_version {
-                        details.push(Line::from(vec![
-                            Span::styled(
-                                format!("      {} ", old_v),
-                                Style::default().fg(COLOR_GRAY),
-                            ),
-                            Span::styled("→ ", Style::default().fg(COLOR_UPGRADE)),
-                            Span::styled(
-                                pkg.new_version.clone(),
-                                Style::default().fg(COLOR_INSTALL),
-                            ),
-                        ]));
-                    } else {
-                        details.push(Line::from(Span::styled(
-                            format!("      {}", pkg.new_version),
-                            Style::default().fg(COLOR_GRAY),
-                        )));
-                    }
-                }
-
-                if !tx.warnings.is_empty() {
-                    details.push(Line::from(""));
+                } else {
                     details.push(Line::from(Span::styled(
-                        "warnings",
-                        Style::default()
-                            .fg(Color::LightMagenta)
-                            .add_modifier(Modifier::BOLD),
+                        format!("      {}", pkg.new_version),
+                        Style::default().fg(COLOR_GRAY),
                     )));
-                    for w in &tx.warnings {
-                        details.push(Line::from(vec![
-                            Span::styled("  ! ", Style::default().fg(COLOR_WARNING)),
-                            Span::raw(w),
-                        ]));
-                    }
                 }
-
-                if !tx.hooks.is_empty() {
-                    details.push(Line::from(""));
-                    details.push(Line::from(Span::styled(
-                        "hooks",
-                        Style::default()
-                            .fg(Color::LightMagenta)
-                            .add_modifier(Modifier::BOLD),
-                    )));
-                    for h in tx.hooks.iter().take(5) {
-                        details.push(Line::from(Span::styled(
-                            format!("  {}", h),
-                            Style::default().fg(COLOR_GRAY),
-                        )));
-                    }
-                    if tx.hooks.len() > 5 {
-                        details.push(Line::from(Span::styled(
-                            format!("  ... and {} more", tx.hooks.len() - 5),
-                            Style::default().fg(COLOR_GRAY),
-                        )));
-                    }
-                }
-
-                f.render_widget(
-                    Paragraph::new(details)
-                        .block(
-                            Block::default()
-                                .borders(Borders::ALL)
-                                .title(" execution details "),
-                        )
-                        .wrap(Wrap { trim: true }),
-                    split[1],
-                );
             }
+
+            if !tx.warnings.is_empty() {
+                details.push(Line::from(""));
+                details.push(Line::from(Span::styled(
+                    "warnings",
+                    Style::default()
+                        .fg(Color::LightMagenta)
+                        .add_modifier(Modifier::BOLD),
+                )));
+                for w in &tx.warnings {
+                    details.push(Line::from(vec![
+                        Span::styled("  ! ", Style::default().fg(COLOR_WARNING)),
+                        Span::raw(w),
+                    ]));
+                }
+            }
+
+            if !tx.hooks.is_empty() {
+                details.push(Line::from(""));
+                details.push(Line::from(Span::styled(
+                    "hooks",
+                    Style::default()
+                        .fg(Color::LightMagenta)
+                        .add_modifier(Modifier::BOLD),
+                )));
+                for h in tx.hooks.iter().take(5) {
+                    details.push(Line::from(Span::styled(
+                        format!("  {}", h),
+                        Style::default().fg(COLOR_GRAY),
+                    )));
+                }
+                if tx.hooks.len() > 5 {
+                    details.push(Line::from(Span::styled(
+                        format!("  ... and {} more", tx.hooks.len() - 5),
+                        Style::default().fg(COLOR_GRAY),
+                    )));
+                }
+            }
+
+            f.render_widget(
+                Paragraph::new(details)
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .title(" execution details "),
+                    )
+                    .wrap(Wrap { trim: true }),
+                split[1],
+            );
         }
     }
 
@@ -335,23 +325,23 @@ fn render_expanded(f: &mut Frame, app: &mut App) {
         .constraints([Constraint::Min(0), Constraint::Length(3)].as_ref())
         .split(f.area());
 
-    if let Some(idx) = app.history_state.selected() {
-        if let Some(tx) = app.filtered_transactions.get(idx) {
-            let lines: Vec<Line> = tx
-                .raw_log
-                .iter()
-                .map(|l| Line::from(Span::raw(l)))
-                .collect();
-            f.render_widget(
-                Paragraph::new(lines).block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_style(Style::default().fg(Color::Cyan))
-                        .title(format!(" raw log: {} ", tx.timestamp)),
-                ),
-                chunks[0],
-            );
-        }
+    if let Some(idx) = app.history_state.selected()
+        && let Some(tx) = app.filtered_transactions.get(idx)
+    {
+        let lines: Vec<Line> = tx
+            .raw_log
+            .iter()
+            .map(|l| Line::from(Span::raw(l)))
+            .collect();
+        f.render_widget(
+            Paragraph::new(lines).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Cyan))
+                    .title(format!(" raw log: {} ", tx.timestamp)),
+            ),
+            chunks[0],
+        );
     }
 
     f.render_widget(
@@ -421,11 +411,9 @@ pub fn handle_key(key: crossterm::event::KeyEvent, app: &mut App) {
                     app.history_state.select(Some(0));
                 }
             }
-            KeyCode::Char('G') => {
-                if !app.filtered_transactions.is_empty() {
-                    app.history_state
-                        .select(Some(app.filtered_transactions.len() - 1));
-                }
+            KeyCode::Char('G') if !app.filtered_transactions.is_empty() => {
+                app.history_state
+                    .select(Some(app.filtered_transactions.len() - 1));
             }
             _ => {}
         },

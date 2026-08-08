@@ -207,57 +207,57 @@ fn render_details(f: &mut Frame, app: &mut App, area: Rect) {
         return;
     }
 
-    if let Some(idx) = app.list_state.selected() {
-        if let Some(pkg) = app.filtered_packages.get(idx) {
-            if let Some(cache) = app.browser_caches.get(&pkg.name) {
-                if cache.loading_info && app.browser_tab != BrowserTab::Files {
-                    let loading_ui = Paragraph::new(vec![
-                        Line::from(""),
-                        Line::from(Span::styled(
-                            "  fetching package metadata...",
-                            Style::default().fg(Color::Cyan),
-                        )),
-                        Line::from("  ██████░░░░░"),
-                    ])
-                    .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .border_style(Style::default().fg(COLOR_MUTED)),
-                    );
-                    f.render_widget(loading_ui, chunks[1]);
-                } else if cache.loading_files && app.browser_tab == BrowserTab::Files {
-                    let loading_ui = Paragraph::new(vec![
-                        Line::from(""),
-                        Line::from(Span::styled(
-                            "  reading file list...",
-                            Style::default().fg(Color::Cyan),
-                        )),
-                        Line::from("  ██████░░░░░"),
-                    ])
-                    .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .border_style(Style::default().fg(COLOR_MUTED)),
-                    );
-                    f.render_widget(loading_ui, chunks[1]);
-                } else {
-                    match app.browser_tab {
-                        BrowserTab::Overview => render_overview_tab(f, app, pkg, cache, chunks[1]),
-                        BrowserTab::Dependencies => render_deps_tab(f, app, cache, chunks[1]),
-                        BrowserTab::Files => render_files_tab(f, app, cache, chunks[1]),
-                        _ => {}
-                    }
-                }
-            } else {
-                f.render_widget(
-                    Paragraph::new("waiting for cache...").block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .border_style(Style::default().fg(COLOR_MUTED)),
-                    ),
-                    chunks[1],
+    if let Some(idx) = app.list_state.selected()
+        && let Some(pkg) = app.filtered_packages.get(idx)
+    {
+        if let Some(cache) = app.browser_caches.get(&pkg.name) {
+            if cache.loading_info && app.browser_tab != BrowserTab::Files {
+                let loading_ui = Paragraph::new(vec![
+                    Line::from(""),
+                    Line::from(Span::styled(
+                        "  fetching package metadata...",
+                        Style::default().fg(Color::Cyan),
+                    )),
+                    Line::from("  ██████░░░░░"),
+                ])
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(COLOR_MUTED)),
                 );
+                f.render_widget(loading_ui, chunks[1]);
+            } else if cache.loading_files && app.browser_tab == BrowserTab::Files {
+                let loading_ui = Paragraph::new(vec![
+                    Line::from(""),
+                    Line::from(Span::styled(
+                        "  reading file list...",
+                        Style::default().fg(Color::Cyan),
+                    )),
+                    Line::from("  ██████░░░░░"),
+                ])
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(COLOR_MUTED)),
+                );
+                f.render_widget(loading_ui, chunks[1]);
+            } else {
+                match app.browser_tab {
+                    BrowserTab::Overview => render_overview_tab(f, app, pkg, cache, chunks[1]),
+                    BrowserTab::Dependencies => render_deps_tab(f, app, cache, chunks[1]),
+                    BrowserTab::Files => render_files_tab(f, app, cache, chunks[1]),
+                    _ => {}
+                }
             }
+        } else {
+            f.render_widget(
+                Paragraph::new("waiting for cache...").block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(COLOR_MUTED)),
+                ),
+                chunks[1],
+            );
         }
     }
 }
