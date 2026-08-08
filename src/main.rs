@@ -940,7 +940,7 @@ async fn main() -> anyhow::Result<()> {
 
                 Commands::Diff => {
                     drop(alpm_handle);
-                    if let Err(e) = core::pacnew::manage_pacnew_files() {
+                    if let Err(e) = core::manage_pacnew_files() {
                         eprintln!("{} {}", "error:".red(), e);
                     }
                 }

@@ -38,7 +38,7 @@ pub async fn process_installation(packages: Vec<String>, alpm_handle: alpm::Alpm
 
     if !native_pkgs.is_empty() {
         println!("{} resolving native dependencies...", "::".blue());
-        match core::resolver::get_install_summaries(&alpm_handle, &native_pkgs) {
+        match core::get_install_summaries(&alpm_handle, &native_pkgs) {
             Ok(summaries) => {
                 for sum in &summaries {
                     total_dl += sum.download_size_mb;

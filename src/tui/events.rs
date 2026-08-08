@@ -121,7 +121,7 @@ where
                 args.push("--color=never".into());
             }
 
-            let is_root = unsafe { libc::geteuid() == 0 };
+            let is_root = crate::core::is_root();
             let (cmd_name, final_args) = if is_root {
                 ("pacman".to_string(), args[1..].to_vec())
             } else {

@@ -1,5 +1,4 @@
 use crate::cli::Cli;
-use crate::core;
 use crate::core::ui::prompt_confirm;
 use crate::ui;
 use crossterm::style::Stylize;
@@ -26,12 +25,12 @@ pub async fn run_pacman(
         return;
     }
 
-    if let Err(e) = core::escalate::ensure_sudo().await {
+    if let Err(e) = crate::core::ensure_sudo().await {
         println!("{} {}", "✗".red(), e);
         return;
     }
 
-    let is_root = unsafe { libc::geteuid() == 0 };
+    let is_root = crate::core::is_root();
 
     let mut child_cmd = if is_root {
         tokio::process::Command::new("pacman")

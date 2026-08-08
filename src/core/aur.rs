@@ -6,15 +6,14 @@ use tokio::process::Command;
 
 pub async fn build(pkg_name: &str, is_verbose: bool) -> anyhow::Result<PathBuf> {
     // roooooot user check ahhhhh
-    let is_root = unsafe { libc::geteuid() == 0 };
-    if is_root {
+    if crate::core::is_root() {
         anyhow::bail!(
             "{} makepkg cannot run as root. please run haj as a normal user.",
             "✗".red().bold()
         );
     }
 
-    crate::core::escalate::ensure_sudo().await?;
+    crate::core::ensure_sudo().await?;
 
     let home = std::env::var("HOME")
         .map_err(|e| anyhow::anyhow!("HOME environment variable not set: {}", e))?;
