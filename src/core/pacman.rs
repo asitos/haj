@@ -78,7 +78,7 @@ pub async fn run_pacman(
 
     child_cmd.arg("--color=never");
 
-    let mut spinner = ui::progress::spinner(spinner_msg);
+    let mut spinner = ui::spinner(spinner_msg);
     let mut last_spinner_msg = spinner_msg.to_string();
     let mut context_buffer: Vec<String> = Vec::new();
     let mut in_hook_phase = false;
@@ -316,7 +316,7 @@ pub async fn run_pacman(
                     current_line.clear();
 
                     println!();
-                    spinner = ui::progress::spinner(&last_spinner_msg);
+                    spinner = ui::spinner(&last_spinner_msg);
                 }
             }
         }

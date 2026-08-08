@@ -56,7 +56,7 @@ pub async fn process_installation(packages: Vec<String>, alpm_handle: alpm::Alpm
     let mut resolved_aur_pkgs = Vec::new();
     let mut aur_conflicts_map = std::collections::HashMap::new();
     if !aur_pkgs.is_empty() {
-        let check_spinner = ui::progress::spinner("querying aur...");
+        let check_spinner = ui::spinner("querying aur...");
 
         let mut url = String::from("https://aur.archlinux.org/rpc/v5/info?");
         for (pkg, _) in &aur_pkgs {
@@ -333,7 +333,7 @@ pub async fn view_pkgbuilds(pkgs: &[String]) {
         });
 
     for pkg in pkgs {
-        let spinner = ui::progress::spinner(&format!(
+        let spinner = ui::spinner(&format!(
             "fetching PKGBUILD for {}...",
             pkg.clone().magenta()
         ));

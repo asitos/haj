@@ -108,7 +108,7 @@ pub fn prompt_install(msg: &str) -> InstallChoice {
 }
 
 pub async fn display_arch_news() {
-    let spinner = ui::progress::spinner("checking arch linux news...");
+    let spinner = ui::spinner("checking arch linux news...");
     let url = "https://archlinux.org/feeds/news/";
 
     if let Ok(response) = reqwest::get(url).await {

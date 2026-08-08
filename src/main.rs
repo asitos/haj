@@ -112,7 +112,7 @@ async fn main() -> anyhow::Result<()> {
                 Commands::Tui | Commands::Completions { .. } | Commands::Update => unreachable!(),
 
                 Commands::Install { packages } => {
-                    commands::install::process_installation(packages, alpm_handle, &cli).await;
+                    commands::process_installation(packages, alpm_handle, &cli).await;
                 }
 
                 Commands::Interactive(queries) => {
@@ -161,7 +161,7 @@ async fn main() -> anyhow::Result<()> {
                             "https://aur.archlinux.org/rpc/v5/search/{}?by=name",
                             query_str
                         );
-                        let check_spinner = ui::progress::spinner("querying aur...");
+                        let check_spinner = ui::spinner("querying aur...");
 
                         let response = reqwest::get(&aur_url).await;
                         if response.is_err() {
@@ -279,7 +279,7 @@ async fn main() -> anyhow::Result<()> {
                         pkgs_to_install.join(", ").cyan()
                     );
 
-                    commands::install::process_installation(pkgs_to_install, alpm_handle, &cli)
+                    commands::process_installation(pkgs_to_install, alpm_handle, &cli)
                         .await;
                 }
 
@@ -470,7 +470,7 @@ async fn main() -> anyhow::Result<()> {
 
                     let mut aur_updates = Vec::new();
                     if !foreign_pkgs.is_empty() && !cli.repo {
-                        let check_spinner = ui::progress::spinner("querying aur for updates...");
+                        let check_spinner = ui::spinner("querying aur for updates...");
 
                         for chunk in foreign_pkgs.chunks(50) {
                             let mut url = String::from("https://aur.archlinux.org/rpc/v5/info?");
@@ -947,7 +947,7 @@ async fn main() -> anyhow::Result<()> {
 
                 Commands::Pkgbuild { package } => {
                     drop(alpm_handle);
-                    commands::install::view_pkgbuilds(&[package]).await;
+                    commands::view_pkgbuilds(&[package]).await;
                 }
 
                 Commands::List {
@@ -1013,7 +1013,7 @@ async fn main() -> anyhow::Result<()> {
                 }
 
                 Commands::Stats => {
-                    let spinner = ui::progress::spinner("scanning system metrics...");
+                    let spinner = ui::spinner("scanning system metrics...");
 
                     let mut total_pkgs = 0;
                     let mut explicit_pkgs = 0;

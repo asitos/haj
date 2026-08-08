@@ -23,7 +23,7 @@ pub async fn build(pkg_name: &str, is_verbose: bool) -> anyhow::Result<PathBuf> 
     let pkg_dir = aur_cache_dir.join(pkg_name);
 
     let fetch_spinner =
-        crate::ui::progress::spinner(&format!("fetching {} from aur...", pkg_name.bold()));
+        crate::ui::spinner(&format!("fetching {} from aur...", pkg_name.bold()));
 
     if pkg_dir.exists() {
         let status = Command::new("git")
@@ -59,7 +59,7 @@ pub async fn build(pkg_name: &str, is_verbose: bool) -> anyhow::Result<PathBuf> 
     }
     fetch_spinner.finish_and_clear();
 
-    let dep_spinner = crate::ui::progress::spinner("resolving dependencies...");
+    let dep_spinner = crate::ui::spinner("resolving dependencies...");
 
     let srcinfo_out = Command::new("makepkg")
         .arg("--printsrcinfo")
@@ -102,7 +102,7 @@ pub async fn build(pkg_name: &str, is_verbose: bool) -> anyhow::Result<PathBuf> 
     dep_spinner.finish_and_clear();
 
     if !missing_deps.is_empty() {
-        let install_spinner = crate::ui::progress::spinner(&format!(
+        let install_spinner = crate::ui::spinner(&format!(
             "installing {} missing dependencies...",
             missing_deps.len()
         ));
@@ -148,7 +148,7 @@ pub async fn build(pkg_name: &str, is_verbose: bool) -> anyhow::Result<PathBuf> 
         }
     } else {
         let build_spinner =
-            crate::ui::progress::spinner(&format!("preparing to build {}...", pkg_name.bold()));
+            crate::ui::spinner(&format!("preparing to build {}...", pkg_name.bold()));
 
         let mut child = Command::new("makepkg")
             .current_dir(&pkg_dir)
