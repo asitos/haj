@@ -72,7 +72,7 @@ pub fn render_popup(f: &mut Frame) {
 
 fn format_bind(key: &str, desc: &str) -> Line<'static> {
     Line::from(vec![
-        Span::styled(format!("{:<14}", key), Style::default().fg(Color::Cyan)),
+        Span::styled(format!("{key:<14}"), Style::default().fg(Color::Cyan)),
         Span::styled(desc.to_string(), Style::default().fg(Color::White)),
     ])
 }

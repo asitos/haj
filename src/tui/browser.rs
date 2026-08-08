@@ -286,16 +286,13 @@ fn render_overview_tab(
     ];
 
     for line in cache.info.lines() {
-        if let Some((key, val)) = line.split_once(":") {
+        if let Some((key, val)) = line.split_once(':') {
             let key_str = key.trim();
             if key_str == "depends on" || key_str == "optional deps" || key_str == "required by" {
                 continue;
             }
             details.push(Line::from(vec![
-                Span::styled(
-                    format!("{:<18}", key_str),
-                    Style::default().fg(COLOR_HEADING),
-                ),
+                Span::styled(format!("{key_str:<18}"), Style::default().fg(COLOR_HEADING)),
                 Span::raw(format!(": {}", val.trim())),
             ]));
         }

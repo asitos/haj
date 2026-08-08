@@ -16,9 +16,7 @@ pub struct GeneralConfig {
 
 impl Default for GeneralConfig {
     fn default() -> Self {
-        let home = std::env::var("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("/"));
+        let home = std::env::var("HOME").map_or_else(|_| PathBuf::from("/"), PathBuf::from);
         Self {
             aur_only: false,
             repo_only: false,
@@ -52,7 +50,7 @@ pub fn load_config() -> HajConfig {
 
     if !config_path.exists() {
         if let Err(e) = fs::create_dir_all(&config_dir) {
-            eprintln!("\x1b[31m✗ failed to create config directory: {}\x1b[0m", e);
+            eprintln!("\x1b[31m✗ failed to create config directory: {e}\x1b[0m");
             return HajConfig::default();
         }
 
@@ -64,7 +62,7 @@ pub fn load_config() -> HajConfig {
         );
 
         if let Err(e) = fs::write(&config_path, toml_string) {
-            eprintln!("\x1b[31m✗ failed to write config.toml: {}\x1b[0m", e);
+            eprintln!("\x1b[31m✗ failed to write config.toml: {e}\x1b[0m");
         }
 
         return default_config;
@@ -80,14 +78,14 @@ pub fn load_config() -> HajConfig {
 
                 if contents != updated_toml {
                     if let Err(e) = fs::write(&config_path, &updated_toml) {
-                        eprintln!("\x1b[31m✗ failed to update config.toml: {}\x1b[0m", e);
+                        eprintln!("\x1b[31m✗ failed to update config.toml: {e}\x1b[0m");
                     }
                 }
 
                 config
             }
             Err(e) => {
-                eprintln!("\x1b[31m✗ failed to parse config.toml: {}\x1b[0m", e);
+                eprintln!("\x1b[31m✗ failed to parse config.toml: {e}\x1b[0m");
                 HajConfig::default()
             }
         },

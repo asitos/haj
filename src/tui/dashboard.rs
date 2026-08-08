@@ -51,7 +51,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
         .any(|n| n.is_critical && !app.read_news.contains(&n.link));
 
     let updates_str = if updates > 0 {
-        format!("{} update(s)", updates)
+        format!("{updates} update(s)")
     } else {
         "0 updates".to_string()
     };
@@ -70,9 +70,9 @@ pub fn render(f: &mut Frame, app: &mut App) {
     };
 
     let news_string = if has_critical {
-        format!(" {} ", news_prefix)
+        format!(" {news_prefix} ")
     } else {
-        format!(" {} {} unread ", news_prefix, unread_news)
+        format!(" {news_prefix} {unread_news} unread ")
     };
 
     let orphan_color = if app.orphan_count > 0 {
@@ -88,14 +88,14 @@ pub fn render(f: &mut Frame, app: &mut App) {
 
     let stats_text = Line::from(vec![
         Span::styled(
-            format!(" pkgs: {} ", installed_count),
+            format!(" pkgs: {installed_count} "),
             Style::default()
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(" | ", Style::default().fg(Color::DarkGray)),
         Span::styled(
-            format!(" {} ", updates_str),
+            format!(" {updates_str} "),
             Style::default()
                 .fg(updates_color)
                 .add_modifier(if updates > 0 {
@@ -113,7 +113,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
         ),
         Span::styled(" | ", Style::default().fg(Color::DarkGray)),
         Span::styled(
-            format!(" news:{} ", news_string),
+            format!(" news:{news_string} "),
             Style::default().fg(news_color).add_modifier(news_mod),
         ),
     ]);
@@ -195,7 +195,7 @@ fn render_news(f: &mut Frame, app: &App, area: Rect) {
                 ),
             ]),
             Line::from(Span::styled(
-                format!("    {}", date_str),
+                format!("    {date_str}"),
                 Style::default().fg(Color::DarkGray),
             )),
             Line::from(""),

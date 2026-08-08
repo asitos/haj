@@ -145,10 +145,10 @@ pub fn render(f: &mut Frame, app: &mut App) {
         )]),
         Line::from(vec![
             Span::styled(
-                draw_bar(health as f64, 20),
+                draw_bar(f64::from(health), 20),
                 Style::default().fg(health_color),
             ),
-            Span::styled(format!(" {}%", health), Style::default().fg(COLOR_VALUE)),
+            Span::styled(format!(" {health}%"), Style::default().fg(COLOR_VALUE)),
         ]),
         Line::from(""),
         Line::from(vec![
@@ -163,10 +163,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
         ]),
         Line::from(vec![
             Span::styled(draw_bar(exp_pct, 20), Style::default().fg(COLOR_HEADING)),
-            Span::styled(
-                format!(" {:.0}%", exp_pct),
-                Style::default().fg(COLOR_VALUE),
-            ),
+            Span::styled(format!(" {exp_pct:.0}%"), Style::default().fg(COLOR_VALUE)),
         ]),
     ];
     f.render_widget(
@@ -206,7 +203,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
         )
     } else if updates_count > 0 {
         Span::styled(
-            format!(" ⬆ {} packages can be upgraded.", updates_count),
+            format!(" ⬆ {updates_count} packages can be upgraded."),
             Style::default().fg(COLOR_HEADING),
         )
     } else {
@@ -260,9 +257,9 @@ fn create_card(title: &str) -> Block<'static> {
 
 fn format_stat(label: &str, value: &str, val_color: Color) -> Line<'static> {
     Line::from(vec![
-        Span::styled(format!(" {:<18}", label), Style::default().fg(COLOR_LABEL)),
+        Span::styled(format!(" {label:<18}"), Style::default().fg(COLOR_LABEL)),
         Span::styled(
-            format!("{:>14}", value),
+            format!("{value:>14}"),
             Style::default().fg(val_color).add_modifier(Modifier::BOLD),
         ),
     ])

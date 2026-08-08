@@ -3,7 +3,7 @@ use std::cmp::Ordering;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-/// Extracts (package_name, version_string) from standard Arch package filenames
+/// Extracts (`package_name`, `version_string`) from standard Arch package filenames
 /// e.g. "bash-5.2.026-1-x86_64.pkg.tar.zst" -> ("bash", "5.2.026-1")
 fn parse_package_filename(filename: &str) -> Option<(&str, &str)> {
     let clean = filename
@@ -67,7 +67,7 @@ pub fn select_downgrade_target(package: &str) -> Option<PathBuf> {
     }
 
     if let Ok(home) = std::env::var("HOME").map(std::path::PathBuf::from) {
-        let aur_cache = home.join(format!(".cache/haj/aur/{}", package));
+        let aur_cache = home.join(format!(".cache/haj/aur/{package}"));
         if let Ok(entries) = std::fs::read_dir(&aur_cache) {
             for entry in entries.filter_map(Result::ok) {
                 let file_name = entry.file_name().to_string_lossy().to_string();
@@ -110,7 +110,7 @@ pub fn select_downgrade_target(package: &str) -> Option<PathBuf> {
                 Ordering::Greater => " [upgrade]".green().to_string(),
             }
         } else {
-            "".to_string()
+            String::new()
         };
         println!(
             "  {}) {} v{}{}{}",

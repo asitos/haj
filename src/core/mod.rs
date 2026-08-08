@@ -51,15 +51,12 @@ pub fn manage_pacnew_files() -> anyhow::Result<()> {
         .stderr(Stdio::inherit())
         .spawn()
         .map_err(|e| {
-            anyhow::anyhow!(
-                "failed to launch pacdiff. is pacman-contrib installed? ({})",
-                e
-            )
+            anyhow::anyhow!("failed to launch pacdiff. is pacman-contrib installed? ({e})")
         })?;
 
     let status = child
         .wait()
-        .map_err(|e| anyhow::anyhow!("failed to wait on pacdiff: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("failed to wait on pacdiff: {e}"))?;
 
     if status.success() {
         println!("{} pacnew management complete.", "✓".green());
@@ -97,7 +94,7 @@ pub fn get_install_summaries(alpm: &Alpm, targets: &[String]) -> Result<Vec<Inst
         }
 
         if !found {
-            anyhow::bail!("package '{}' not found in any repository.", target);
+            anyhow::bail!("package '{target}' not found in any repository.");
         }
     }
 

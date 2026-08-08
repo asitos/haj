@@ -111,8 +111,8 @@ impl std::fmt::Display for PackageFilter {
             Self::Updates => write!(f, "updates"),
             Self::Aur => write!(f, "aur"),
             Self::Repositories => write!(f, "repositories"),
-            Self::Repo(name) => write!(f, "repo:{}", name),
-            Self::Group(name) => write!(f, "group:{}", name),
+            Self::Repo(name) => write!(f, "repo:{name}"),
+            Self::Group(name) => write!(f, "group:{name}"),
         }
     }
 }
@@ -537,22 +537,20 @@ impl App {
                     Some(0)
                 });
             self.news_scroll = 0;
-        } else {
-            if let Some(idx) = self.news_list_state.selected() {
-                let page_size = NEWS_PAGE_SIZE;
-                let start_idx = (self.news_page.saturating_sub(1)) * page_size;
-                let end_idx = (start_idx + page_size).min(self.filtered_news.len());
-                let displayed_count = end_idx.saturating_sub(start_idx);
-                if idx >= displayed_count {
-                    self.news_list_state.select(if displayed_count > 0 {
-                        Some(displayed_count - 1)
-                    } else {
-                        None
-                    });
-                }
-            } else if !self.filtered_news.is_empty() {
-                self.news_list_state.select(Some(0));
+        } else if let Some(idx) = self.news_list_state.selected() {
+            let page_size = NEWS_PAGE_SIZE;
+            let start_idx = (self.news_page.saturating_sub(1)) * page_size;
+            let end_idx = (start_idx + page_size).min(self.filtered_news.len());
+            let displayed_count = end_idx.saturating_sub(start_idx);
+            if idx >= displayed_count {
+                self.news_list_state.select(if displayed_count > 0 {
+                    Some(displayed_count - 1)
+                } else {
+                    None
+                });
             }
+        } else if !self.filtered_news.is_empty() {
+            self.news_list_state.select(Some(0));
         }
     }
 
@@ -696,7 +694,7 @@ impl App {
                             tx.packages.push(PkgChange {
                                 name: parts[3].to_string(),
                                 old_version: None,
-                                new_version: parts[4].replace("(", "").replace(")", ""),
+                                new_version: parts[4].replace(['(', ')'], ""),
                                 action: TxAction::Install,
                             });
                         }
@@ -705,8 +703,8 @@ impl App {
                         if parts.len() >= 7 {
                             tx.packages.push(PkgChange {
                                 name: parts[3].to_string(),
-                                old_version: Some(parts[4].replace("(", "")),
-                                new_version: parts[6].replace(")", ""),
+                                old_version: Some(parts[4].replace('(', "")),
+                                new_version: parts[6].replace(')', ""),
                                 action: TxAction::Upgrade,
                             });
                         }
@@ -716,7 +714,7 @@ impl App {
                             tx.packages.push(PkgChange {
                                 name: parts[3].to_string(),
                                 old_version: None,
-                                new_version: parts[4].replace("(", "").replace(")", ""),
+                                new_version: parts[4].replace(['(', ')'], ""),
                                 action: TxAction::Remove,
                             });
                         }
@@ -1008,8 +1006,8 @@ impl App {
 
 pub mod events;
 pub mod news_fetch;
-use events::*;
-use news_fetch::*;
+use events::run_app;
+use news_fetch::{fetch_arch_news, fetch_article_body};
 pub async fn run() -> Result<()> {
     let display3d = std::process::Command::new("display3d")
         .arg("--help")
@@ -1044,7 +1042,7 @@ pub async fn run() -> Result<()> {
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
     if let Err(err) = res {
-        println!("{:?}", err);
+        println!("{err:?}");
     }
     std::process::exit(0);
 }

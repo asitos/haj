@@ -1,6 +1,6 @@
 [package]
 name = "haj"
-version = "0.2.9"
+version = "0.3.0"
 edition = "2024"
 authors = ["asitos 4shut0shparashar@gmail.com"]
 description = "fast, quiet, beautiful package manager and tui for blahArch Linux."

@@ -19,13 +19,12 @@ pub fn prompt_confirm(msg: &str) -> bool {
                     break;
                 }
                 match key.code {
-                    crossterm::event::KeyCode::Char('y')
-                    | crossterm::event::KeyCode::Char('Y')
+                    crossterm::event::KeyCode::Char('y' | 'Y')
                     | crossterm::event::KeyCode::Enter => {
                         result = true;
                         break;
                     }
-                    crossterm::event::KeyCode::Char('n') | crossterm::event::KeyCode::Char('N') => {
+                    crossterm::event::KeyCode::Char('n' | 'N') => {
                         result = false;
                         break;
                     }
@@ -67,17 +66,16 @@ pub fn prompt_install(msg: &str) -> InstallChoice {
                     break;
                 }
                 match key.code {
-                    crossterm::event::KeyCode::Char('y')
-                    | crossterm::event::KeyCode::Char('Y')
+                    crossterm::event::KeyCode::Char('y' | 'Y')
                     | crossterm::event::KeyCode::Enter => {
                         result = InstallChoice::Yes;
                         break;
                     }
-                    crossterm::event::KeyCode::Char('n') | crossterm::event::KeyCode::Char('N') => {
+                    crossterm::event::KeyCode::Char('n' | 'N') => {
                         result = InstallChoice::No;
                         break;
                     }
-                    crossterm::event::KeyCode::Char('v') | crossterm::event::KeyCode::Char('V') => {
+                    crossterm::event::KeyCode::Char('v' | 'V') => {
                         result = InstallChoice::View;
                         break;
                     }
@@ -91,7 +89,7 @@ pub fn prompt_install(msg: &str) -> InstallChoice {
             InstallChoice::No => "n",
             InstallChoice::View => "v",
         };
-        println!("{}", display_str);
+        println!("{display_str}");
         result
     } else {
         let mut input = String::new();

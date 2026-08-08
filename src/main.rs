@@ -37,7 +37,7 @@ async fn main() -> anyhow::Result<()> {
         .truncate(true)
         .mode(0o666)
         .open("/tmp/haj.lock")
-        .map_err(|e| anyhow::anyhow!("failed to open lock file: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("failed to open lock file: {e}"))?;
 
     use std::os::unix::io::AsRawFd;
     let fd = lock_file.as_raw_fd();
@@ -157,10 +157,8 @@ async fn main() -> anyhow::Result<()> {
                     }
 
                     if !cli.repo {
-                        let aur_url = format!(
-                            "https://aur.archlinux.org/rpc/v5/search/{}?by=name",
-                            query_str
-                        );
+                        let aur_url =
+                            format!("https://aur.archlinux.org/rpc/v5/search/{query_str}?by=name");
                         let check_spinner = ui::spinner("querying aur...");
 
                         let response = reqwest::get(&aur_url).await;
@@ -384,7 +382,7 @@ async fn main() -> anyhow::Result<()> {
                     let stdout_str = String::from_utf8_lossy(&print_cmd.stdout);
                     let targets: Vec<&str> = stdout_str
                         .lines()
-                        .map(|l| l.trim())
+                        .map(str::trim)
                         .filter(|l| !l.is_empty())
                         .collect();
 
@@ -405,7 +403,7 @@ async fn main() -> anyhow::Result<()> {
                     drop(alpm_handle);
 
                     let mut args = vec!["-Rs", "--noconfirm"];
-                    args.extend(packages.iter().map(|s| s.as_str()));
+                    args.extend(packages.iter().map(std::string::String::as_str));
 
                     core::pacman::run_pacman(
                         &args,
@@ -467,7 +465,7 @@ async fn main() -> anyhow::Result<()> {
                         for chunk in foreign_pkgs.chunks(50) {
                             let mut url = String::from("https://aur.archlinux.org/rpc/v5/info?");
                             for (name, _) in chunk {
-                                url.push_str(&format!("arg[]={}&", name));
+                                url.push_str(&format!("arg[]={name}&"));
                             }
 
                             if let Ok(response) = reqwest::get(&url).await
@@ -498,7 +496,7 @@ async fn main() -> anyhow::Result<()> {
                             native_lines = updates
                                 .lines()
                                 .filter(|l| !l.trim().is_empty())
-                                .map(|s| s.to_string())
+                                .map(std::string::ToString::to_string)
                                 .collect();
                         } else {
                             println!("{} failed to query updates.", "✗".red());
@@ -625,10 +623,10 @@ async fn main() -> anyhow::Result<()> {
                             &args,
                             &format!(
                                 "downgrading to {}...",
-                                archive_path
-                                    .file_name()
-                                    .map(|n| n.to_string_lossy().to_string())
-                                    .unwrap_or_else(|| "package".to_string())
+                                archive_path.file_name().map_or_else(
+                                    || "package".to_string(),
+                                    |n| n.to_string_lossy().to_string()
+                                )
                             ),
                             "package downgraded successfully.",
                             cli.dry_run,
@@ -715,7 +713,7 @@ async fn main() -> anyhow::Result<()> {
 
                     if search_aur {
                         let aur_url =
-                            format!("https://aur.archlinux.org/rpc/v5/search/{}?by=name", query);
+                            format!("https://aur.archlinux.org/rpc/v5/search/{query}?by=name");
 
                         if let Ok(response) = reqwest::get(&aur_url).await
                             && let Ok(json) = response.json::<core::aur::AurResponse>().await
@@ -879,7 +877,7 @@ async fn main() -> anyhow::Result<()> {
                     drop(alpm_handle);
 
                     let mut args = vec!["-Sw", "--noconfirm"];
-                    args.extend(packages.iter().map(|s| s.as_str()));
+                    args.extend(packages.iter().map(std::string::String::as_str));
 
                     core::pacman::run_pacman(
                         &args,
@@ -894,27 +892,26 @@ async fn main() -> anyhow::Result<()> {
 
                 Commands::Mark { package } => {
                     let local_db = alpm_handle.localdb();
-                    let (reason_flag, state) = match local_db.pkg(package.as_str()) {
-                        Ok(pkg) => match pkg.reason() {
+                    let (reason_flag, state) = if let Ok(pkg) = local_db.pkg(package.as_str()) {
+                        match pkg.reason() {
                             alpm::PackageReason::Explicit => ("--asdeps", "dependency"),
                             alpm::PackageReason::Depend => ("--asexplicit", "explicit"),
-                        },
-                        Err(_) => {
-                            println!(
-                                "{} package '{}' is not installed.",
-                                "✗".red(),
-                                package.bold()
-                            );
-                            drop(alpm_handle);
-                            return Ok(());
                         }
+                    } else {
+                        println!(
+                            "{} package '{}' is not installed.",
+                            "✗".red(),
+                            package.bold()
+                        );
+                        drop(alpm_handle);
+                        return Ok(());
                     };
                     drop(alpm_handle);
 
                     core::pacman::run_pacman(
                         &["-D", reason_flag, &package],
                         "updating database records...",
-                        &format!("marked {} as {}.", package, state),
+                        &format!("marked {package} as {state}."),
                         cli.dry_run,
                         cli.verbose,
                         &cli.root,
@@ -931,7 +928,7 @@ async fn main() -> anyhow::Result<()> {
 
                 Commands::Pkgbuild { package } => {
                     drop(alpm_handle);
-                    commands::view_pkgbuilds(&[package]).await;
+                    commands::view_pkgbuilds(&[package]);
                 }
 
                 Commands::List {
@@ -1089,7 +1086,7 @@ async fn main() -> anyhow::Result<()> {
                     let lock_exists = std::path::Path::new("/var/lib/pacman/db.lck").exists();
                     let mut health_issues = Vec::new();
                     if orphan_count > 0 {
-                        health_issues.push(format!("{} orphans", orphan_count));
+                        health_issues.push(format!("{orphan_count} orphans"));
                     }
                     if lock_exists {
                         health_issues.push("stale db lock".to_string());
@@ -1115,31 +1112,35 @@ async fn main() -> anyhow::Result<()> {
                     let sync_time = std::fs::metadata("/var/lib/pacman/sync/core.db")
                         .or_else(|_| std::fs::metadata("/var/lib/pacman/sync/extra.db"))
                         .and_then(|m| m.modified())
-                        .map(|t| {
-                            if let Ok(dur) = t.elapsed() {
-                                let secs = dur.as_secs();
-                                if secs < 60 {
-                                    format!("{}s ago", secs)
-                                } else if secs < 3600 {
-                                    format!("{}m ago", secs / 60)
-                                } else if secs < 86400 {
-                                    format!("{}h ago", secs / 3600)
+                        .map_or_else(
+                            |_| "unknown".to_string(),
+                            |t| {
+                                if let Ok(dur) = t.elapsed() {
+                                    let secs = dur.as_secs();
+                                    if secs < 60 {
+                                        format!("{secs}s ago")
+                                    } else if secs < 3600 {
+                                        format!("{}m ago", secs / 60)
+                                    } else if secs < 86400 {
+                                        format!("{}h ago", secs / 3600)
+                                    } else {
+                                        format!("{}d ago", secs / 86400)
+                                    }
                                 } else {
-                                    format!("{}d ago", secs / 86400)
+                                    "unknown".to_string()
                                 }
-                            } else {
-                                "unknown".to_string()
-                            }
-                        })
-                        .unwrap_or_else(|_| "unknown".to_string());
+                            },
+                        );
 
                     let os_name = std::fs::read_to_string("/etc/os-release")
                         .unwrap_or_default()
                         .lines()
                         .find(|line| line.starts_with("PRETTY_NAME="))
                         .and_then(|line| line.split('=').nth(1))
-                        .map(|name| name.trim_matches('"').to_string())
-                        .unwrap_or_else(|| "arch linux".to_string());
+                        .map_or_else(
+                            || "arch linux".to_string(),
+                            |name| name.trim_matches('"').to_string(),
+                        );
 
                     spinner.finish_and_clear();
 
@@ -1156,7 +1157,7 @@ async fn main() -> anyhow::Result<()> {
                         "  {:<15} {} {}",
                         "packages:".bold(),
                         total_pkgs.to_string().cyan().bold(),
-                        format!("({} explicit, {} dependencies)", explicit_pkgs, dep_pkgs).dim()
+                        format!("({explicit_pkgs} explicit, {dep_pkgs} dependencies)").dim()
                     );
                     println!("  {:<15} {}", "aur:".bold(), aur_pkgs.to_string().magenta());
                     println!("  {:<15} {}", "updates:".bold(), update_str);
@@ -1180,7 +1181,7 @@ async fn main() -> anyhow::Result<()> {
                     println!(
                         "  {:<15} {}",
                         "activity:".bold(),
-                        format!("{} (newest), {} (oldest)", newest_pkg, oldest_pkg).dim()
+                        format!("{newest_pkg} (newest), {oldest_pkg} (oldest)").dim()
                     );
                     println!();
                 }
@@ -1223,7 +1224,7 @@ async fn main() -> anyhow::Result<()> {
                         let status = if *is_installed {
                             format!(" {}", "[installed]".cyan().bold())
                         } else {
-                            "".to_string()
+                            String::new()
                         };
                         println!(
                             "  {} {}{}",
@@ -1238,8 +1239,7 @@ async fn main() -> anyhow::Result<()> {
                     if !cli.noconfirm {
                         println!();
                         if !core::ui::prompt_confirm(&format!(
-                            "install all packages in group '{}'? [Y/n]",
-                            name
+                            "install all packages in group '{name}'? [Y/n]"
                         )) {
                             println!("{} aborted.", "✗".red());
                             return Ok(());
@@ -1252,7 +1252,7 @@ async fn main() -> anyhow::Result<()> {
                         group_pkgs.into_iter().map(|(n, _, _)| n).collect();
 
                     let mut args = vec!["-S", "--noconfirm"];
-                    args.extend(pkgs_to_install.iter().map(|s| s.as_str()));
+                    args.extend(pkgs_to_install.iter().map(std::string::String::as_str));
 
                     core::pacman::run_pacman(
                         &args,

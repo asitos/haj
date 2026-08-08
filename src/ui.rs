@@ -27,10 +27,16 @@ impl ProgressBar {
         self.handle = Some(tokio::spawn(async move {
             let mut i = 0;
             loop {
-                if *stop_clone.lock().unwrap_or_else(|e| e.into_inner()) {
+                if *stop_clone
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                {
                     break;
                 }
-                let msg = msg_clone.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                let msg = msg_clone
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .clone();
                 print!("\r\x1B[K{} {}", frames[i].cyan(), msg);
                 let _ = std::io::stdout().flush();
                 i = (i + 1) % frames.len();
@@ -40,11 +46,17 @@ impl ProgressBar {
     }
 
     pub fn set_message(&self, message: String) {
-        *self.message.lock().unwrap_or_else(|e| e.into_inner()) = message;
+        *self
+            .message
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = message;
     }
 
     pub fn finish_and_clear(&self) {
-        *self.stop.lock().unwrap_or_else(|e| e.into_inner()) = true;
+        *self
+            .stop
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = true;
         print!("\r\x1B[K");
         let _ = std::io::stdout().flush();
     }

@@ -64,22 +64,22 @@ pub fn render(f: &mut Frame, app: &mut App) {
         ),
         Span::styled(" | ", Style::default().fg(COLOR_GRAY)),
         Span::styled(
-            format!(" today: {} ", today_count),
+            format!(" today: {today_count} "),
             Style::default().fg(Color::Magenta),
         ),
         Span::styled(" | ", Style::default().fg(COLOR_GRAY)),
         Span::styled(
-            format!(" installs: {} ", installs),
+            format!(" installs: {installs} "),
             Style::default().fg(COLOR_INSTALL),
         ),
         Span::styled(" | ", Style::default().fg(COLOR_GRAY)),
         Span::styled(
-            format!(" upgrades: {} ", upgrades),
+            format!(" upgrades: {upgrades} "),
             Style::default().fg(COLOR_UPGRADE),
         ),
         Span::styled(" | ", Style::default().fg(COLOR_GRAY)),
         Span::styled(
-            format!(" removals: {} ", removals),
+            format!(" removals: {removals} "),
             Style::default().fg(COLOR_REMOVE),
         ),
     ]);
@@ -116,7 +116,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
                 Block::default()
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(border_color))
-                    .title_bottom(format!(" [filter: {} (tab)] ", filter_str))
+                    .title_bottom(format!(" [filter: {filter_str} (tab)] "))
                     .title_alignment(Alignment::Right),
             ),
         main_chunks[1],
@@ -152,16 +152,16 @@ pub fn render(f: &mut Frame, app: &mut App) {
                     _ => ("○", "transaction", Color::White),
                 };
 
-                let status_icon = if !tx.is_success {
-                    Span::styled(" !", Style::default().fg(COLOR_WARNING))
-                } else {
+                let status_icon = if tx.is_success {
                     Span::raw("")
+                } else {
+                    Span::styled(" !", Style::default().fg(COLOR_WARNING))
                 };
 
                 ListItem::new(vec![
                     Line::from(vec![
                         Span::styled(
-                            format!(" {} {} ", icon, label),
+                            format!(" {icon} {label} "),
                             Style::default().fg(color).add_modifier(Modifier::BOLD),
                         ),
                         Span::styled(
@@ -247,7 +247,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
 
                 if let Some(old_v) = &pkg.old_version {
                     details.push(Line::from(vec![
-                        Span::styled(format!("      {} ", old_v), Style::default().fg(COLOR_GRAY)),
+                        Span::styled(format!("      {old_v} "), Style::default().fg(COLOR_GRAY)),
                         Span::styled("→ ", Style::default().fg(COLOR_UPGRADE)),
                         Span::styled(pkg.new_version.clone(), Style::default().fg(COLOR_INSTALL)),
                     ]));
@@ -285,7 +285,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
                 )));
                 for h in tx.hooks.iter().take(5) {
                     details.push(Line::from(Span::styled(
-                        format!("  {}", h),
+                        format!("  {h}"),
                         Style::default().fg(COLOR_GRAY),
                     )));
                 }

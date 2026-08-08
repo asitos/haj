@@ -60,57 +60,46 @@ pub async fn process_installation(packages: Vec<String>, alpm_handle: alpm::Alpm
 
         let mut url = String::from("https://aur.archlinux.org/rpc/v5/info?");
         for (pkg, _) in &aur_pkgs {
-            url.push_str(&format!("arg[]={}&", pkg));
+            url.push_str(&format!("arg[]={pkg}&"));
         }
 
         if let Ok(response) = reqwest::get(&url).await
-            && let Ok(json) = response.json::<serde_json::Value>().await
-            && let Some(results) = json.get("results").and_then(|r| r.as_array())
+            && let Ok(json) = response.json::<core::aur::AurResponse>().await
         {
             check_spinner.finish_and_clear();
+            let results = json.results;
 
             for (pkg, local_ver) in aur_pkgs {
-                if let Some(result) = results
-                    .iter()
-                    .find(|r| r.get("Name").and_then(|n| n.as_str()) == Some(&pkg))
-                {
-                    if let Some(conflicts_val) = result.get("Conflicts").and_then(|c| c.as_array())
-                    {
-                        let c_list: Vec<String> = conflicts_val
-                            .iter()
-                            .filter_map(|c| c.as_str().map(|s| s.to_string()))
-                            .collect();
-                        if !c_list.is_empty() {
-                            aur_conflicts_map.insert(pkg.clone(), c_list);
+                if let Some(result) = results.iter().find(|r| r.name == pkg) {
+                    if !result.conflicts.is_empty() {
+                        aur_conflicts_map.insert(pkg.clone(), result.conflicts.clone());
+                    }
+
+                    let aur_ver = &result.version;
+                    let mut is_update = false;
+                    let mut skip = false;
+
+                    if let Some(lv) = &local_ver {
+                        if lv == aur_ver {
+                            println!(
+                                "{} {} is up to date ({}).",
+                                "✓".green(),
+                                pkg.clone().magenta().bold(),
+                                aur_ver.clone().dim()
+                            );
+                            skip = true;
+                        } else {
+                            is_update = true;
                         }
                     }
 
-                    if let Some(aur_ver) = result.get("Version").and_then(|v| v.as_str()) {
-                        let mut is_update = false;
-                        let mut skip = false;
-
-                        if let Some(lv) = &local_ver {
-                            if lv == aur_ver {
-                                println!(
-                                    "{} {} is up to date ({}).",
-                                    "✓".green(),
-                                    pkg.clone().magenta().bold(),
-                                    aur_ver.dim()
-                                );
-                                skip = true;
-                            } else {
-                                is_update = true;
-                            }
-                        }
-
-                        if !skip {
-                            resolved_aur_pkgs.push((
-                                pkg.clone(),
-                                aur_ver.to_string(),
-                                is_update,
-                                local_ver.clone(),
-                            ));
-                        }
+                    if !skip {
+                        resolved_aur_pkgs.push((
+                            pkg.clone(),
+                            aur_ver.to_string(),
+                            is_update,
+                            local_ver.clone(),
+                        ));
                     }
                 } else {
                     println!(
@@ -196,12 +185,10 @@ pub async fn process_installation(packages: Vec<String>, alpm_handle: alpm::Alpm
         loop {
             let choice = if has_aur {
                 prompt_install(&prompt_msg)
+            } else if prompt_confirm(&prompt_msg) {
+                InstallChoice::Yes
             } else {
-                if prompt_confirm(&prompt_msg) {
-                    InstallChoice::Yes
-                } else {
-                    InstallChoice::No
-                }
+                InstallChoice::No
             };
 
             match choice {
@@ -215,7 +202,7 @@ pub async fn process_installation(packages: Vec<String>, alpm_handle: alpm::Alpm
                         .iter()
                         .map(|(pkg, _, _, _)| pkg.clone())
                         .collect();
-                    view_pkgbuilds(&aur_names).await;
+                    view_pkgbuilds(&aur_names);
 
                     prompt_msg = "proceed with installation? [Y/n]".to_string();
                 }
@@ -228,7 +215,7 @@ pub async fn process_installation(packages: Vec<String>, alpm_handle: alpm::Alpm
         if allow_conflict_removal {
             args.push("--ask=4");
         }
-        args.extend(native_pkgs.iter().map(|s| s.as_str()));
+        args.extend(native_pkgs.iter().map(std::string::String::as_str));
 
         core::pacman::run_pacman(
             &args,
@@ -306,7 +293,7 @@ pub async fn process_installation(packages: Vec<String>, alpm_handle: alpm::Alpm
     }
 }
 
-pub async fn view_pkgbuilds(pkgs: &[String]) {
+pub fn view_pkgbuilds(pkgs: &[String]) {
     let editor = std::env::var("VISUAL")
         .or_else(|_| std::env::var("EDITOR"))
         .unwrap_or_else(|_| {
@@ -338,7 +325,7 @@ pub async fn view_pkgbuilds(pkgs: &[String]) {
             "fetching PKGBUILD for {}...",
             pkg.clone().magenta()
         ));
-        let tmp_dir = format!("/tmp/haj_view_{}", pkg);
+        let tmp_dir = format!("/tmp/haj_view_{pkg}");
 
         let _ = std::fs::remove_dir_all(&tmp_dir);
 
@@ -347,7 +334,7 @@ pub async fn view_pkgbuilds(pkgs: &[String]) {
                 "clone",
                 "--depth=1",
                 "--quiet",
-                &format!("https://aur.archlinux.org/{}.git", pkg),
+                &format!("https://aur.archlinux.org/{pkg}.git"),
                 &tmp_dir,
             ])
             .status();
@@ -355,10 +342,13 @@ pub async fn view_pkgbuilds(pkgs: &[String]) {
         spinner.finish_and_clear();
 
         if clone_status.is_ok_and(|s| s.success()) {
-            let pkgbuild_path = format!("{}/PKGBUILD", tmp_dir);
+            let pkgbuild_path = format!("{tmp_dir}/PKGBUILD");
 
             if std::path::Path::new(&pkgbuild_path).exists() {
-                let parts: Vec<String> = editor.split_whitespace().map(|s| s.to_string()).collect();
+                let parts: Vec<String> = editor
+                    .split_whitespace()
+                    .map(std::string::ToString::to_string)
+                    .collect();
                 if !parts.is_empty() {
                     let exec = &parts[0];
                     let mut cmd = std::process::Command::new(exec);

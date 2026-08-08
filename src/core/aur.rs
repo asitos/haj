@@ -11,7 +11,10 @@ pub struct AurPackage {
     pub name: String,
     pub version: String,
     pub description: Option<String>,
+    #[serde(default)]
     pub num_votes: u64,
+    #[serde(default, rename = "Conflicts")]
+    pub conflicts: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -31,7 +34,7 @@ pub async fn build(pkg_name: &str, is_verbose: bool) -> anyhow::Result<PathBuf> 
     crate::core::ensure_sudo().await?;
 
     let home = std::env::var("HOME")
-        .map_err(|e| anyhow::anyhow!("HOME environment variable not set: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("HOME environment variable not set: {e}"))?;
     let aur_cache_dir = PathBuf::from(home).join(".cache/haj/aur");
     tokio::fs::create_dir_all(&aur_cache_dir).await?;
 
@@ -52,10 +55,10 @@ pub async fn build(pkg_name: &str, is_verbose: bool) -> anyhow::Result<PathBuf> 
 
         if !status.success() {
             fetch_spinner.finish_and_clear();
-            anyhow::bail!("failed to pull latest changes for {}", pkg_name);
+            anyhow::bail!("failed to pull latest changes for {pkg_name}");
         }
     } else {
-        let aur_url = format!("https://aur.archlinux.org/{}.git", pkg_name);
+        let aur_url = format!("https://aur.archlinux.org/{pkg_name}.git");
         let status = Command::new("git")
             .arg("clone")
             .arg(&aur_url)
@@ -68,7 +71,7 @@ pub async fn build(pkg_name: &str, is_verbose: bool) -> anyhow::Result<PathBuf> 
 
         if !status.success() {
             fetch_spinner.finish_and_clear();
-            anyhow::bail!("failed to clone {}. does it exist?", pkg_name);
+            anyhow::bail!("failed to clone {pkg_name}. does it exist?");
         }
     }
     fetch_spinner.finish_and_clear();
@@ -83,7 +86,7 @@ pub async fn build(pkg_name: &str, is_verbose: bool) -> anyhow::Result<PathBuf> 
 
     if !srcinfo_out.status.success() {
         dep_spinner.finish_and_clear();
-        anyhow::bail!("failed to read PKGBUILD for {}", pkg_name);
+        anyhow::bail!("failed to read PKGBUILD for {pkg_name}");
     }
 
     let srcinfo_str = String::from_utf8_lossy(&srcinfo_out.stdout);

@@ -45,17 +45,17 @@ pub fn render(f: &mut Frame, app: &mut App) {
         ),
         Span::styled(" | ", Style::default().fg(Color::DarkGray)),
         Span::styled(
-            format!(" packages in groups : {} ", total_pkgs_in_groups),
+            format!(" packages in groups : {total_pkgs_in_groups} "),
             Style::default().fg(Color::Cyan),
         ),
         Span::styled(" | ", Style::default().fg(Color::DarkGray)),
         Span::styled(
-            format!(" fully installed : {} ", installed_groups),
+            format!(" fully installed : {installed_groups} "),
             Style::default().fg(Color::Green),
         ),
         Span::styled(" | ", Style::default().fg(Color::DarkGray)),
         Span::styled(
-            format!(" partial : {} ", partial_groups),
+            format!(" partial : {partial_groups} "),
             Style::default().fg(Color::Yellow),
         ),
     ]);
@@ -89,7 +89,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
                 Block::default()
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(border_color))
-                    .title_bottom(format!(" [sort: {} (S)] ", sort_str))
+                    .title_bottom(format!(" [sort: {sort_str} (S)] "))
                     .title_alignment(Alignment::Right),
             ),
         main_chunks[1],
@@ -174,10 +174,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
                             .fg(status_color)
                             .add_modifier(Modifier::BOLD),
                     ),
-                    Span::styled(
-                        format!("{:>5}", total),
-                        Style::default().fg(Color::DarkGray),
-                    ),
+                    Span::styled(format!("{total:>5}"), Style::default().fg(Color::DarkGray)),
                 ]))
             })
             .collect();
@@ -233,9 +230,9 @@ pub fn render(f: &mut Frame, app: &mut App) {
                         .fg(Color::LightMagenta)
                         .add_modifier(Modifier::BOLD),
                 )),
-                Line::from(format!("  packages   : {}", total)),
-                Line::from(format!("  installed  : {} / {}", installed, total)),
-                Line::from(format!("  completion : {:.0}%", pct)),
+                Line::from(format!("  packages   : {total}")),
+                Line::from(format!("  installed  : {installed} / {total}")),
+                Line::from(format!("  completion : {pct:.0}%")),
                 Line::from(format!("  progress   : {}", draw_bar(pct, 25))),
                 Line::from(""),
                 Line::from(Span::styled(
@@ -262,7 +259,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
                     Color::DarkGray
                 };
                 details.push(Line::from(vec![
-                    Span::styled(format!("  {}", icon), Style::default().fg(color)),
+                    Span::styled(format!("  {icon}"), Style::default().fg(color)),
                     Span::styled(pkg.clone(), Style::default().fg(color)),
                 ]));
             }

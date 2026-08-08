@@ -190,7 +190,7 @@ pub fn fetch_arch_news(tx: mpsc::Sender<TuiEvent>, page: usize) {
             items = parse_arch_xml(&xml);
         }
 
-        let url = format!("https://archlinux.org/news/?page={}", page);
+        let url = format!("https://archlinux.org/news/?page={page}");
         match client.get(&url).send().await {
             Ok(resp_idx) if resp_idx.status().is_success() => {
                 if let Ok(html_idx) = resp_idx.text().await {
@@ -200,7 +200,7 @@ pub fn fetch_arch_news(tx: mpsc::Sender<TuiEvent>, page: usize) {
                         let num_str: String = slice
                             .chars()
                             .rev()
-                            .take_while(|c| c.is_ascii_digit())
+                            .take_while(char::is_ascii_digit)
                             .collect();
                         let num_str: String = num_str.chars().rev().collect();
                         if let Ok(total) = num_str.parse::<usize>() {
@@ -232,11 +232,11 @@ pub fn fetch_arch_news(tx: mpsc::Sender<TuiEvent>, page: usize) {
                                     let td1 = tds[1];
                                     if let Some(href_start) = td1.find("href=\"") {
                                         let href_rest = &td1[href_start + 6..];
-                                        if let Some(href_end) = href_rest.find("\"") {
+                                        if let Some(href_end) = href_rest.find('"') {
                                             let path = &href_rest[..href_end];
-                                            let link = format!("https://archlinux.org{}", path);
+                                            let link = format!("https://archlinux.org{path}");
 
-                                            if let Some(title_start) = href_rest.find(">") {
+                                            if let Some(title_start) = href_rest.find('>') {
                                                 let title_rest = &href_rest[title_start + 1..];
                                                 if let Some(title_end) = title_rest.find("</a>") {
                                                     let title =
@@ -247,13 +247,11 @@ pub fn fetch_arch_news(tx: mpsc::Sender<TuiEvent>, page: usize) {
                                                             chrono::NaiveDate::parse_from_str(
                                                                 &date_str, "%Y-%m-%d",
                                                             ) {
-                                                            dt.and_hms_opt(0, 0, 0)
-                                                                .map(|dt_time| {
+                                                            dt.and_hms_opt(0, 0, 0).map_or_else(|| date_str.clone(), |dt_time| {
                                                                     dt_time
                                                                         .format("%a, %d %b %Y 00:00:00 +0000")
                                                                         .to_string()
                                                                 })
-                                                                .unwrap_or_else(|| date_str.clone())
                                                         } else {
                                                             date_str.clone()
                                                         };

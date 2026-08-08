@@ -20,7 +20,7 @@ pub async fn run_pacman(
         let cmd = args.join(" ");
         let root_arg = root
             .as_ref()
-            .map_or(String::new(), |r| format!("--root {} ", r));
+            .map_or(String::new(), |r| format!("--root {r} "));
         println!("{arrow} would execute: sudo pacman {root_arg}{cmd}");
         return;
     }
@@ -285,7 +285,7 @@ pub async fn run_pacman(
                                         }
                                         crossterm::event::KeyCode::Char(c) => {
                                             result.push(c);
-                                            print!("{}", c);
+                                            print!("{c}");
                                             let _ = std::io::stdout().flush();
 
                                             if is_yn_prompt {
@@ -324,7 +324,7 @@ pub async fn run_pacman(
 
     let status = child.wait().await;
     let err_output = err_handle.await.unwrap_or_default();
-    let is_success = status.as_ref().is_ok_and(|s| s.success());
+    let is_success = status.as_ref().is_ok_and(std::process::ExitStatus::success);
     let exit_code = status.as_ref().map_or(1, |s| s.code().unwrap_or(1));
 
     if !is_success {

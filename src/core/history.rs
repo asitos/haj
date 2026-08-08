@@ -63,7 +63,7 @@ pub fn show_history(limit: usize) {
             let formatted_ts = format_relative_timestamp(&timestamp);
             println!("  {} {}", formatted_ts.dim(), colored_action);
         } else {
-            println!("  {}", entry);
+            println!("  {entry}");
         }
     }
 }

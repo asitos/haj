@@ -1,4 +1,9 @@
-use super::*;
+use super::{
+    App, AsyncBufReadExt, AsyncReadExt, BrowserCache, BrowserTab, CurrentScreen, DashboardWidget,
+    GroupSortMode, InputMode, IntoText, NEWS_PAGE_SIZE, NewsFocus, PackageFilter, SelectionMode,
+    SortMode, Text, TuiEvent, browser, dashboard, fetch_arch_news, fetch_article_body, groups,
+    help, history, news, stats, transaction,
+};
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use ratatui::Terminal;
@@ -219,8 +224,7 @@ where
                                 };
                                 let _ = tx_out
                                     .send(TuiEvent::UpdateAction(format!(
-                                        "{} packages {}...",
-                                        counter, action
+                                        "{counter} packages {action}..."
                                     )))
                                     .await;
                             }
@@ -280,7 +284,7 @@ where
                             continue;
                         }
                         let _ = tx_err
-                            .send(TuiEvent::PacmanLog(format!("error: {}", clean)))
+                            .send(TuiEvent::PacmanLog(format!("error: {clean}")))
                             .await;
                     }
                 });
@@ -289,7 +293,7 @@ where
                 let mut aborted = false;
 
                 tokio::select! {
-                    _ = async {
+                    () = async {
                         let _ = tokio::join!(out_task, err_task);
                     } => {
                         status = Some(child.wait().await.unwrap_or_else(|_| std::os::unix::process::ExitStatusExt::from_raw(1)));
@@ -306,7 +310,7 @@ where
                                 s = child.wait() => {
                                     status = s.ok();
                                 }
-                                _ = tokio::time::sleep(Duration::from_millis(500)) => {
+                                () = tokio::time::sleep(Duration::from_millis(500)) => {
                                     let _ = tokio::process::Command::new("sudo")
                                         .args(["-n", "kill", "-KILL", &p.to_string()])
                                         .status()
@@ -315,7 +319,7 @@ where
                                         s = child.wait() => {
                                             status = s.ok();
                                         }
-                                        _ = tokio::time::sleep(Duration::from_millis(200)) => {}
+                                        () = tokio::time::sleep(Duration::from_millis(200)) => {}
                                     }
                                 }
                             }
@@ -394,7 +398,7 @@ where
                 TuiEvent::UpdateAction(action) => app.current_action = action,
                 TuiEvent::PacmanProgress(val) => app.progress = val.min(100),
                 TuiEvent::TransactionComplete => {
-                    app.current_action = "changes complete".to_string()
+                    app.current_action = "changes complete".to_string();
                 }
                 TuiEvent::TransactionFailed => app.current_action = "changes failed X".to_string(),
                 TuiEvent::CloseTransaction => {
@@ -473,7 +477,7 @@ where
 
                     if app.show_help {
                         match key.code {
-                            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') => {
+                            KeyCode::Esc | KeyCode::Char('q' | '?') => {
                                 app.show_help = false;
                             }
                             _ => {}
@@ -492,7 +496,7 @@ where
                         {
                             let _ = tx_abort.try_send(());
                             app.current_action = "aborting safely...".to_string();
-                            app.transaction_logs.push("".into());
+                            app.transaction_logs.push(String::new());
                             app.transaction_logs.push(
                                 "==> user triggered abort. sending sigint to pacman...".into(),
                             );
@@ -502,7 +506,7 @@ where
 
                     if app.show_prompt {
                         match key.code {
-                            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                            KeyCode::Char('y' | 'Y') | KeyCode::Enter => {
                                 app.show_prompt = false;
                                 app.is_installing = true;
                                 app.transaction_logs.clear();
@@ -533,7 +537,7 @@ where
                                 app.selected_packages.clear();
                                 app.prompt_targets.clear();
                             }
-                            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                            KeyCode::Char('n' | 'N') | KeyCode::Esc => {
                                 app.show_prompt = false;
                                 app.prompt_targets.clear();
                             }
@@ -545,7 +549,7 @@ where
                     match app.screen {
                         CurrentScreen::Dashboard => match key.code {
                             KeyCode::Char('q') => app.should_quit = true,
-                            KeyCode::Char('/') | KeyCode::Char('f') => {
+                            KeyCode::Char('/' | 'f') => {
                                 app.screen = CurrentScreen::Browser;
                                 app.input_mode = InputMode::Editing;
                             }
@@ -571,8 +575,10 @@ where
                                     std::process::Command::new("pacman").arg("-Qdtq").output()
                                 {
                                     let stdout = String::from_utf8_lossy(&output.stdout);
-                                    let orphans: Vec<String> =
-                                        stdout.split_whitespace().map(|s| s.to_string()).collect();
+                                    let orphans: Vec<String> = stdout
+                                        .split_whitespace()
+                                        .map(std::string::ToString::to_string)
+                                        .collect();
 
                                     app.is_installing = true;
                                     app.transaction_logs.clear();
@@ -692,8 +698,8 @@ where
                             InputMode::Normal => match key.code {
                                 KeyCode::Esc => app.screen = CurrentScreen::Dashboard,
                                 KeyCode::Char('q') => app.should_quit = true,
-                                KeyCode::Char('/') | KeyCode::Char('f') | KeyCode::Char('s') => {
-                                    app.input_mode = InputMode::Editing
+                                KeyCode::Char('/' | 'f' | 's') => {
+                                    app.input_mode = InputMode::Editing;
                                 }
                                 KeyCode::Char('r') => {
                                     app.is_fetching_news = true;
@@ -727,21 +733,14 @@ where
                                             let next_web_page = (app.news_items.len() / 50) + 1;
                                             app.is_fetching_news = true;
                                             fetch_arch_news(tx.clone(), next_web_page);
-                                        } else {
-                                            if let Some(idx) = app.news_list_state.selected() {
-                                                let actual_idx =
-                                                    (app.news_page - 1) * page_size + idx;
-                                                if let Some(item) =
-                                                    app.filtered_news.get(actual_idx)
-                                                    && (item.description
-                                                        == "loading article content..."
-                                                        || item.description.is_empty())
-                                                {
-                                                    fetch_article_body(
-                                                        tx.clone(),
-                                                        item.link.clone(),
-                                                    );
-                                                }
+                                        } else if let Some(idx) = app.news_list_state.selected() {
+                                            let actual_idx = (app.news_page - 1) * page_size + idx;
+                                            if let Some(item) = app.filtered_news.get(actual_idx)
+                                                && (item.description
+                                                    == "loading article content..."
+                                                    || item.description.is_empty())
+                                            {
+                                                fetch_article_body(tx.clone(), item.link.clone());
                                             }
                                         }
                                     }
@@ -807,7 +806,7 @@ where
                                                 }
                                             });
                                             app.current_action =
-                                                format!("copied \"{}\" to clipboard", link);
+                                                format!("copied \"{link}\" to clipboard");
                                         }
                                     }
                                 }
@@ -835,7 +834,10 @@ where
                                                 }
                                             }
                                             let cmd_to_copy = cmds.join("\n");
-                                            if !cmd_to_copy.is_empty() {
+                                            if cmd_to_copy.is_empty() {
+                                                app.current_action =
+                                                    "no command found to copy".to_string();
+                                            } else {
                                                 let cmd_clone = cmd_to_copy.clone();
                                                 tokio::spawn(async move {
                                                     if std::process::Command::new("wl-copy")
@@ -864,13 +866,9 @@ where
                                                     );
                                                 } else {
                                                     app.current_action = format!(
-                                                        "copied \"{}\" to clipboard",
-                                                        cmd_to_copy
+                                                        "copied \"{cmd_to_copy}\" to clipboard"
                                                     );
                                                 }
-                                            } else {
-                                                app.current_action =
-                                                    "no command found to copy".to_string();
                                             }
                                         }
                                     }
@@ -1190,7 +1188,7 @@ where
                             },
                             InputMode::Editing => match key.code {
                                 KeyCode::Esc | KeyCode::Enter => {
-                                    app.group_input_mode = InputMode::Normal
+                                    app.group_input_mode = InputMode::Normal;
                                 }
                                 KeyCode::Backspace | KeyCode::Delete => {
                                     app.group_search_query.pop();
@@ -1224,7 +1222,7 @@ where
                                     app.selected_packages.clear();
                                     app.deselected_packages.clear();
                                 }
-                                KeyCode::Char('A') | KeyCode::Char('c') => {
+                                KeyCode::Char('A' | 'c') => {
                                     app.selection_mode = SelectionMode::Explicit;
                                     app.selected_packages.clear();
                                     app.deselected_packages.clear();
@@ -1277,8 +1275,8 @@ where
                                 KeyCode::Char('q') => app.should_quit = true,
                                 KeyCode::Esc => app.screen = CurrentScreen::Dashboard,
 
-                                KeyCode::Char('/') | KeyCode::Char('s') | KeyCode::Char('f') => {
-                                    app.input_mode = InputMode::Editing
+                                KeyCode::Char('/' | 's' | 'f') => {
+                                    app.input_mode = InputMode::Editing;
                                 }
 
                                 KeyCode::Down | KeyCode::Char('j') => {
@@ -1453,7 +1451,7 @@ where
                                         if (line.starts_with("Depends On")
                                             || line.starts_with("Optional Deps")
                                             || line.starts_with("Required By"))
-                                            && let Some((_, val)) = line.split_once(":")
+                                            && let Some((_, val)) = line.split_once(':')
                                         {
                                             for dep in val.split_whitespace() {
                                                 if dep != "None" {

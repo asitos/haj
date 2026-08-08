@@ -40,7 +40,7 @@ fn render_search_bar(f: &mut Frame, app: &App, area: Rect) {
     };
 
     let search_display = if app.news_search_query.is_empty() {
-        format!("search (/):  {} ", cursor)
+        format!("search (/):  {cursor} ")
     } else {
         format!("search (/): {}{} ", app.news_search_query, cursor)
     };
@@ -78,9 +78,10 @@ fn render_headlines(f: &mut Frame, app: &mut App, area: Rect) {
                 ("○ ", Color::DarkGray, Modifier::empty())
             };
 
-            let date_str = chrono::DateTime::parse_from_rfc2822(&news.pub_date)
-                .map(|dt| dt.format("published %b %d, %Y").to_string())
-                .unwrap_or_else(|_| news.pub_date.clone());
+            let date_str = chrono::DateTime::parse_from_rfc2822(&news.pub_date).map_or_else(
+                |_| news.pub_date.clone(),
+                |dt| dt.format("published %b %d, %Y").to_string(),
+            );
 
             ListItem::new(vec![
                 Line::from(vec![
@@ -100,7 +101,7 @@ fn render_headlines(f: &mut Frame, app: &mut App, area: Rect) {
                     ),
                 ]),
                 Line::from(Span::styled(
-                    format!("  {}", date_str),
+                    format!("  {date_str}"),
                     Style::default().fg(Color::DarkGray),
                 )),
                 Line::from(""),
@@ -195,14 +196,14 @@ fn render_article(f: &mut Frame, app: &mut App, area: Rect) {
             let scroll_pct = if max_scroll == 0 {
                 100
             } else {
-                ((app.news_scroll as f32 / max_scroll as f32) * 100.0) as u16
+                ((f32::from(app.news_scroll) / max_scroll as f32) * 100.0) as u16
             };
 
             let block = Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(article_border))
                 .title(title)
-                .title_bottom(format!(" {}% ", scroll_pct))
+                .title_bottom(format!(" {scroll_pct}% "))
                 .title_alignment(Alignment::Right);
 
             let paragraph = Paragraph::new(article_lines)
@@ -245,9 +246,10 @@ fn format_article<'a>(article: &super::NewsItem, search_query: &str) -> Vec<Line
         lines.push(Line::from(""));
     }
 
-    let date_str = chrono::DateTime::parse_from_rfc2822(&article.pub_date)
-        .map(|dt| dt.format("%b %d, %Y").to_string())
-        .unwrap_or_else(|_| article.pub_date.clone());
+    let date_str = chrono::DateTime::parse_from_rfc2822(&article.pub_date).map_or_else(
+        |_| article.pub_date.clone(),
+        |dt| dt.format("%b %d, %Y").to_string(),
+    );
 
     lines.push(Line::from(Span::styled(
         article.title.clone(),
@@ -306,12 +308,12 @@ fn format_article<'a>(article: &super::NewsItem, search_query: &str) -> Vec<Line
 
             lines.push(Line::from(vec![
                 Span::styled(
-                    format!("  {}", cmd),
+                    format!("  {cmd}"),
                     Style::default()
                         .fg(Color::Cyan)
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(format!(" {}", args), Style::default().fg(Color::Gray)),
+                Span::styled(format!(" {args}"), Style::default().fg(Color::Gray)),
             ]));
 
             lines.push(Line::from(""));
@@ -474,7 +476,7 @@ fn render_footer(f: &mut Frame, app: &App, area: Rect) {
         Span::styled("    updated ", Style::default().fg(Color::DarkGray)),
         Span::styled(last_up, Style::default().fg(Color::White)),
         Span::styled(
-            format!("    {} unread ", unread_count),
+            format!("    {unread_count} unread "),
             Style::default().fg(if unread_count > 0 {
                 Color::Cyan
             } else {

@@ -4,8 +4,7 @@ use pacmanconf::Config;
 use std::path::Path;
 
 pub fn init_alpm() -> Result<Alpm> {
-    let config =
-        Config::new().map_err(|e| anyhow::anyhow!("failed to parse pacman.conf: {}", e))?;
+    let config = Config::new().map_err(|e| anyhow::anyhow!("failed to parse pacman.conf: {e}"))?;
 
     let handle =
         Alpm::new(config.root_dir.as_str(), config.db_path.as_str()).with_context(|| {
@@ -43,7 +42,7 @@ pub fn owns(alpm: &Alpm, file_path: &str) {
     }
 
     if !found {
-        println!("❌ no package owns {}", file_path);
+        println!("❌ no package owns {file_path}");
     }
 }
 
@@ -55,9 +54,9 @@ pub fn files(alpm: &Alpm, pkg_name: &str) {
             println!("files for {}:", pkg.name());
             for file in pkg.files().files() {
                 let file_name = String::from_utf8_lossy(file.name());
-                println!("  /{}", file_name);
+                println!("  /{file_name}");
             }
         }
-        Err(_) => println!("❌ package '{}' not found in local database.", pkg_name),
+        Err(_) => println!("❌ package '{pkg_name}' not found in local database."),
     }
 }
