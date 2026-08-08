@@ -3,6 +3,21 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
+use serde::Deserialize;
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct AurPackage {
+    pub name: String,
+    pub version: String,
+    pub description: Option<String>,
+    pub num_votes: u64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AurResponse {
+    pub results: Vec<AurPackage>,
+}
 
 pub async fn build(pkg_name: &str, is_verbose: bool) -> anyhow::Result<PathBuf> {
     // roooooot user check ahhhhh

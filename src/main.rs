@@ -171,26 +171,16 @@ async fn main() -> anyhow::Result<()> {
                                 "✗".red()
                             ));
                         } else if let Ok(resp) = response
-                            && let Ok(json) = resp.json::<serde_json::Value>().await
-                            && let Some(aur_results) =
-                                json.get("results").and_then(|r| r.as_array())
+                            && let Ok(json) = resp.json::<core::aur::AurResponse>().await
                         {
                             check_spinner.finish_and_clear();
-                            for pkg in aur_results {
-                                let name = pkg
-                                    .get("Name")
-                                    .and_then(|n| n.as_str())
-                                    .unwrap_or("unknown");
-                                let version =
-                                    pkg.get("Version").and_then(|v| v.as_str()).unwrap_or("");
-                                let desc = pkg
-                                    .get("Description")
-                                    .and_then(|d| d.as_str())
-                                    .unwrap_or("no description provided.");
-                                let votes =
-                                    pkg.get("NumVotes").and_then(|v| v.as_u64()).unwrap_or(0);
+                            for pkg in json.results {
+                                let name = pkg.name;
+                                let version = pkg.version;
+                                let desc = pkg.description.unwrap_or_else(|| "no description provided.".to_string());
+                                let votes = pkg.num_votes;
 
-                                let is_installed = local_db.pkg(name).is_ok();
+                                let is_installed = local_db.pkg(name.as_str()).is_ok();
                                 let status = if is_installed {
                                     format!(
                                         "{} (+{}) {}",
@@ -203,10 +193,10 @@ async fn main() -> anyhow::Result<()> {
                                 };
 
                                 results.push((
-                                    name.to_string(),
-                                    version.to_string(),
+                                    name,
+                                    version,
                                     status,
-                                    desc.to_string(),
+                                    desc,
                                 ));
                             }
                         } else {
@@ -479,23 +469,20 @@ async fn main() -> anyhow::Result<()> {
                             }
 
                             if let Ok(response) = reqwest::get(&url).await
-                                && let Ok(json) = response.json::<serde_json::Value>().await
-                                && let Some(results) =
-                                    json.get("results").and_then(|r| r.as_array())
+                                && let Ok(json) = response.json::<core::aur::AurResponse>().await
                             {
-                                for result in results {
-                                    if let Some(name) = result.get("Name").and_then(|n| n.as_str())
-                                        && let Some(new_ver) =
-                                            result.get("Version").and_then(|v| v.as_str())
-                                        && let Some((_, local_ver)) =
-                                            chunk.iter().find(|(n, _)| n == name)
-                                        && alpm::vercmp(local_ver.as_str(), new_ver)
+                                for result in json.results {
+                                    let name = result.name;
+                                    let new_ver = result.version;
+                                    if let Some((_, local_ver)) =
+                                        chunk.iter().find(|(n, _)| **n == name)
+                                        && alpm::vercmp(local_ver.as_str(), new_ver.as_str())
                                             == std::cmp::Ordering::Less
                                     {
                                         aur_updates.push((
-                                            name.to_string(),
+                                            name,
                                             local_ver.clone(),
-                                            new_ver.to_string(),
+                                            new_ver,
                                         ));
                                     }
                                 }
@@ -727,28 +714,19 @@ async fn main() -> anyhow::Result<()> {
                             format!("https://aur.archlinux.org/rpc/v5/search/{}?by=name", query);
 
                         if let Ok(response) = reqwest::get(&aur_url).await
-                            && let Ok(json) = response.json::<serde_json::Value>().await
-                            && let Some(results) = json.get("results").and_then(|r| r.as_array())
-                            && !results.is_empty()
+                            && let Ok(json) = response.json::<core::aur::AurResponse>().await
+                            && !json.results.is_empty()
                         {
                             found = true;
                             print_header();
 
-                            for pkg in results {
-                                let name = pkg
-                                    .get("Name")
-                                    .and_then(|n| n.as_str())
-                                    .unwrap_or("unknown");
-                                let version =
-                                    pkg.get("Version").and_then(|v| v.as_str()).unwrap_or("");
-                                let desc = pkg
-                                    .get("Description")
-                                    .and_then(|d| d.as_str())
-                                    .unwrap_or("no description provided.");
-                                let votes =
-                                    pkg.get("NumVotes").and_then(|v| v.as_u64()).unwrap_or(0);
+                            for pkg in json.results {
+                                let name = pkg.name;
+                                let version = pkg.version;
+                                let desc = pkg.description.unwrap_or_else(|| "no description provided.".to_string());
+                                let votes = pkg.num_votes;
 
-                                let is_installed = local_db.pkg(name).is_ok();
+                                let is_installed = local_db.pkg(name.as_str()).is_ok();
                                 let status = if is_installed {
                                     format!(
                                         "{} (+{}) {}",
