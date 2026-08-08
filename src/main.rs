@@ -293,12 +293,18 @@ async fn main() -> anyhow::Result<()> {
                         return Ok(());
                     }
 
-                    let print_cmd = std::process::Command::new("pacman")
+                    let print_cmd = match std::process::Command::new("pacman")
                         .env("LC_ALL", "C")
                         .arg("-Rsp")
                         .args(&packages)
-                        .output()
-                        .expect("failed to execute pacman");
+                        .output() 
+                    {
+                        Ok(cmd) => cmd,
+                        Err(e) => {
+                            eprintln!("{} failed to execute pacman: {}", "error:".red(), e);
+                            return Ok(());
+                        }
+                    };
 
                     if !print_cmd.status.success() {
                         let stdout_str = String::from_utf8_lossy(&print_cmd.stdout);
@@ -452,7 +458,7 @@ async fn main() -> anyhow::Result<()> {
                             .args(["pacman", "-Sy"])
                             .stdout(std::process::Stdio::null())
                             .status();
-                        if status.is_err() || !status.as_ref().unwrap().success() {
+                        if status.map_or(true, |s| !s.success()) {
                             println!("{} failed to sync databases.", "✗".red());
                             return Ok(());
                         }
@@ -588,7 +594,7 @@ async fn main() -> anyhow::Result<()> {
                                         new_ver.dim()
                                     );
                                     let pacman_args =
-                                        vec!["-U", pkg_path.to_str().unwrap(), "--noconfirm"];
+                                        vec!["-U", pkg_path.to_str().unwrap_or_default(), "--noconfirm"];
 
                                     core::pacman::run_pacman(
                                         &pacman_args,
@@ -615,7 +621,7 @@ async fn main() -> anyhow::Result<()> {
                     drop(alpm_handle);
 
                     if let Some(archive_path) = core::downgrade::select_downgrade_target(&package) {
-                        let mut args = vec!["-U", archive_path.to_str().unwrap()];
+                        let mut args = vec!["-U", archive_path.to_str().unwrap_or_default()];
                         if cli.noconfirm {
                             args.push("--noconfirm");
                         }
@@ -624,7 +630,7 @@ async fn main() -> anyhow::Result<()> {
                             &args,
                             &format!(
                                 "downgrading to {}...",
-                                archive_path.file_name().unwrap().to_string_lossy()
+                                archive_path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "package".to_string())
                             ),
                             "package downgraded successfully.",
                             cli.dry_run,
@@ -1268,11 +1274,17 @@ async fn main() -> anyhow::Result<()> {
                         query.clone().cyan()
                     );
 
-                    let status = std::process::Command::new("pacman")
+                    let status = match std::process::Command::new("pacman")
                         .arg("-F")
                         .arg(query)
                         .status()
-                        .expect("failed to execute pacman -F");
+                    {
+                        Ok(s) => s,
+                        Err(e) => {
+                            eprintln!("{} failed to execute pacman -F: {}", "error:".red(), e);
+                            return Ok(());
+                        }
+                    };
 
                     if !status.success() {
                         println!(

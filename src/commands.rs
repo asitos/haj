@@ -165,7 +165,7 @@ pub async fn process_installation(packages: Vec<String>, alpm_handle: alpm::Alpm
                 println!(
                     "    {:<25} {} -> {}",
                     pkg.clone().magenta().bold(),
-                    local_ver.as_ref().unwrap().clone().red(),
+                    local_ver.as_deref().unwrap_or_default().red(),
                     aur_ver.clone().green()
                 );
             } else {
@@ -284,7 +284,7 @@ pub async fn process_installation(packages: Vec<String>, alpm_handle: alpm::Alpm
                         )
                     };
 
-                    let mut pacman_args = vec!["-U", pkg_path.to_str().unwrap(), "--noconfirm"];
+                    let mut pacman_args = vec!["-U", pkg_path.to_str().unwrap_or_default(), "--noconfirm"];
                     if allow_conflict_removal {
                         pacman_args.push("--ask=4");
                     }
