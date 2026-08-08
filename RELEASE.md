@@ -1,35 +1,29 @@
-# haj v0.2.9
+# haj v0.3.0
 
-This release focuses on a faster, safer day-to-day package-management experience, a substantial internal cleanup, and a reproducible Docker distribution.
+This release focuses on modularization, robust error handling, security hardening, and code quality improvements across the codebase.
 
-## Highlights
+## 🚀 Features & Enhancements
 
-- Added Docker support for running haj in an isolated Arch Linux container. The image includes the required `display3d` renderer and supports normal CLI and TUI invocation.
-- Added a source-release bundle that ships HAJ alongside the pinned `display3d` v0.2.3 source and its license information.
-- Added an interactive PKGBUILD viewer for auditing AUR package builds before installation.
-- Added offline and unavailable-AUR warnings, plus clearer handling of stale package databases and install-time repository synchronization.
-- Improved CLI responsiveness and reduced dependency overhead through targeted refactors and removal of unused code.
+### 📦 Codebase Modularization & Consolidation
+- **TUI Architecture Modularized**: Split `src/tui/mod.rs` into logical files (`news_fetch.rs` and `events.rs`) for cleaner navigation and easier open-source contributions.
+- **Inlined Premature Modules**:
+  - `commands/install.rs` moved to `src/commands.rs`.
+  - `ui/progress.rs` moved to `src/ui.rs`.
+  - Removed premature directory-nesting for single-file modules.
+- **Core Files Consolidated**: Inlined tiny, single-function files (`escalate.rs`, `resolver.rs`, and `pacnew.rs`) into `src/core/mod.rs` to streamline the core library design.
 
-## Reliability and safety
+### 🛡️ Hardening & Safety (Zero-Panic Policy)
+- **Consolidated Root Check**: Replaced duplicated root verification logic (`unsafe { libc::geteuid() == 0 }`) across 4 files (`escalate.rs`, `pacman.rs`, `aur.rs`, `tui/events.rs`) with a unified, public `crate::core::is_root()` utility.
+- **Removed Unsafe Panics**: Replaced 8 dangerous `.unwrap()` and `.expect()` calls inside `src/main.rs` and `src/commands.rs` with graceful error handling and user-facing diagnostics. A package manager should never panic.
+- **Non-blocking Sudo / CLI Tests**: Handled terminal and interactive prompts in tests to prevent hanging test runners.
 
-- Reworked transaction, conflict, cache, pacnew, history, downgrade, and escalation paths to reduce redundant work and improve error handling.
-- Improved progress and package-manager output handling for cleaner, more reliable terminal feedback.
-- Fixed configuration handling, shell-completion details, CLI version coverage, and several edge cases across package operations.
-- `haj tui` now checks that its required `display3d` renderer is available before starting.
+### ⚡ Typed API Design
+- **Eliminated Untyped JSON**: Replaced all raw `serde_json::Value` parsing across three AUR query sites in `src/main.rs` and `src/commands.rs` with a strongly-typed `AurPackage` and `AurResponse` deserialization scheme in `src/core/aur.rs`.
 
-## Codebase and tests
+### 🤖 CI & Release Automation
+- Added GitHub Actions release workflow for fully automated tagging, build validation, and deployment.
 
-- Modularized the former large `main.rs` implementation into focused command and core modules, including dedicated pacman, UI, install, and conflict handling code.
-- Removed obsolete network and UI modules, unused dependencies, and redundant code paths.
-- Added focused coverage for CLI behavior, configuration, package features, libalpm integration, network availability, stale databases, and transaction safety.
-
-## Installation notes
-
-`display3d` is required for `haj tui`:
-
-```bash
-cargo install display3d --version 0.2.3
-cargo install haj
-```
-
-For Docker and source-release instructions, see the README included with this release.
+## 🐛 Bug Fixes & Refactoring
+- Removed blanket `#![allow(dead_code)]` lints to highlight and clean up unused code and imports.
+- Removed spurious `async` keyword and `.await` from `view_pkgbuilds` since it is entirely synchronous.
+- Fixed version display constants to correctly reference the current version `0.3.0`.
