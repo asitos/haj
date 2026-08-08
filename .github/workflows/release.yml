@@ -1,0 +1,89 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: lint and test
+    container: archlinux:latest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install arch dependencies
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm rustup gcc pkgconf pacman
+
+      - name: setup rust toolchain
+        run: |
+          rustup default stable
+          rustup component add rustfmt clippy
+
+      - name: check formatting
+        run: cargo fmt -- --check
+
+      - name: run clippy
+        run: cargo clippy -- -D warnings
+
+      - name: run tests
+        run: cargo test --verbose
+
+  github-release:
+    name: github release
+    needs: check
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install dependencies
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm rustup gcc pkgconf pacman
+
+      - name: setup rust
+        run: rustup default stable
+
+      - name: build release binary
+        run: cargo build --release --locked
+
+      - name: package binary
+        run: |
+          tar czf haj-${{ github.ref_name }}-x86_64-linux.tar.gz \
+          -C target/release haj
+
+      - name: create github release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: haj-*.tar.gz
+          body_path: RELEASE.md
+
+  cargo-publish:
+    name: publish to crates.io
+    needs: check
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install dependencies
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm rustup gcc pkgconf pacman
+
+      - name: setup rust
+        run: rustup default stable
+
+      - name: publish
+        run: cargo publish --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

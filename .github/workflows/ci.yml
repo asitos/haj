@@ -30,19 +30,21 @@ jobs:
         rustup component add rustfmt clippy
         
     - name: cache cargo registry
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
           target
         key: arch-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          arch-cargo-
         
     - name: check formatting
       run: cargo fmt -- --check
       
     - name: run clippy (linter)
       run: cargo clippy -- -D warnings
-      
-    - name: build (debug)
-      run: cargo build --verbose
+
+    - name: run tests
+      run: cargo test --verbose
