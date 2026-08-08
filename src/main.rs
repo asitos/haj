@@ -177,7 +177,9 @@ async fn main() -> anyhow::Result<()> {
                             for pkg in json.results {
                                 let name = pkg.name;
                                 let version = pkg.version;
-                                let desc = pkg.description.unwrap_or_else(|| "no description provided.".to_string());
+                                let desc = pkg
+                                    .description
+                                    .unwrap_or_else(|| "no description provided.".to_string());
                                 let votes = pkg.num_votes;
 
                                 let is_installed = local_db.pkg(name.as_str()).is_ok();
@@ -192,12 +194,7 @@ async fn main() -> anyhow::Result<()> {
                                     format!("{} (+{})", "aur".magenta(), votes)
                                 };
 
-                                results.push((
-                                    name,
-                                    version,
-                                    status,
-                                    desc,
-                                ));
+                                results.push((name, version, status, desc));
                             }
                         } else {
                             check_spinner.finish_and_clear();
@@ -269,8 +266,7 @@ async fn main() -> anyhow::Result<()> {
                         pkgs_to_install.join(", ").cyan()
                     );
 
-                    commands::process_installation(pkgs_to_install, alpm_handle, &cli)
-                        .await;
+                    commands::process_installation(pkgs_to_install, alpm_handle, &cli).await;
                 }
 
                 Commands::Remove { packages } => {
@@ -297,7 +293,7 @@ async fn main() -> anyhow::Result<()> {
                         .env("LC_ALL", "C")
                         .arg("-Rsp")
                         .args(&packages)
-                        .output() 
+                        .output()
                     {
                         Ok(cmd) => cmd,
                         Err(e) => {
@@ -485,11 +481,7 @@ async fn main() -> anyhow::Result<()> {
                                         && alpm::vercmp(local_ver.as_str(), new_ver.as_str())
                                             == std::cmp::Ordering::Less
                                     {
-                                        aur_updates.push((
-                                            name,
-                                            local_ver.clone(),
-                                            new_ver,
-                                        ));
+                                        aur_updates.push((name, local_ver.clone(), new_ver));
                                     }
                                 }
                             }
@@ -593,8 +585,11 @@ async fn main() -> anyhow::Result<()> {
                                         name.magenta().bold(),
                                         new_ver.dim()
                                     );
-                                    let pacman_args =
-                                        vec!["-U", pkg_path.to_str().unwrap_or_default(), "--noconfirm"];
+                                    let pacman_args = vec![
+                                        "-U",
+                                        pkg_path.to_str().unwrap_or_default(),
+                                        "--noconfirm",
+                                    ];
 
                                     core::pacman::run_pacman(
                                         &pacman_args,
@@ -630,7 +625,10 @@ async fn main() -> anyhow::Result<()> {
                             &args,
                             &format!(
                                 "downgrading to {}...",
-                                archive_path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "package".to_string())
+                                archive_path
+                                    .file_name()
+                                    .map(|n| n.to_string_lossy().to_string())
+                                    .unwrap_or_else(|| "package".to_string())
                             ),
                             "package downgraded successfully.",
                             cli.dry_run,
@@ -729,7 +727,9 @@ async fn main() -> anyhow::Result<()> {
                             for pkg in json.results {
                                 let name = pkg.name;
                                 let version = pkg.version;
-                                let desc = pkg.description.unwrap_or_else(|| "no description provided.".to_string());
+                                let desc = pkg
+                                    .description
+                                    .unwrap_or_else(|| "no description provided.".to_string());
                                 let votes = pkg.num_votes;
 
                                 let is_installed = local_db.pkg(name.as_str()).is_ok();

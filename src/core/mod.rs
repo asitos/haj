@@ -7,11 +7,11 @@ pub mod history;
 pub mod pacman;
 pub mod ui;
 
-use crossterm::style::Stylize;
-use tokio::process::Command;
-use std::process::Stdio;
 use alpm::Alpm;
 use anyhow::Result;
+use crossterm::style::Stylize;
+use std::process::Stdio;
+use tokio::process::Command;
 
 pub fn is_root() -> bool {
     unsafe { libc::geteuid() == 0 }
@@ -50,9 +50,16 @@ pub fn manage_pacnew_files() -> anyhow::Result<()> {
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .spawn()
-        .map_err(|e| anyhow::anyhow!("failed to launch pacdiff. is pacman-contrib installed? ({})", e))?;
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "failed to launch pacdiff. is pacman-contrib installed? ({})",
+                e
+            )
+        })?;
 
-    let status = child.wait().map_err(|e| anyhow::anyhow!("failed to wait on pacdiff: {}", e))?;
+    let status = child
+        .wait()
+        .map_err(|e| anyhow::anyhow!("failed to wait on pacdiff: {}", e))?;
 
     if status.success() {
         println!("{} pacnew management complete.", "✓".green());

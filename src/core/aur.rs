@@ -1,9 +1,9 @@
 use crossterm::style::Stylize;
+use serde::Deserialize;
 use std::path::PathBuf;
 use std::process::Stdio;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
-use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -37,8 +37,7 @@ pub async fn build(pkg_name: &str, is_verbose: bool) -> anyhow::Result<PathBuf> 
 
     let pkg_dir = aur_cache_dir.join(pkg_name);
 
-    let fetch_spinner =
-        crate::ui::spinner(&format!("fetching {} from aur...", pkg_name.bold()));
+    let fetch_spinner = crate::ui::spinner(&format!("fetching {} from aur...", pkg_name.bold()));
 
     if pkg_dir.exists() {
         let status = Command::new("git")

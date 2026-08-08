@@ -284,7 +284,8 @@ pub async fn process_installation(packages: Vec<String>, alpm_handle: alpm::Alpm
                         )
                     };
 
-                    let mut pacman_args = vec!["-U", pkg_path.to_str().unwrap_or_default(), "--noconfirm"];
+                    let mut pacman_args =
+                        vec!["-U", pkg_path.to_str().unwrap_or_default(), "--noconfirm"];
                     if allow_conflict_removal {
                         pacman_args.push("--ask=4");
                     }
