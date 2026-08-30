@@ -53,7 +53,15 @@ async fn main() -> anyhow::Result<()> {
 
     let _haj_lock = lock_file;
 
-    let mut cli = Cli::parse();
+    let cli = Cli::try_parse().unwrap_or_else(|e| {
+        if e.kind() == clap::error::ErrorKind::DisplayHelp
+            || e.kind() == clap::error::ErrorKind::DisplayVersion
+        {
+            println!("\n{}\n", include_str!("../resources/title.txt").cyan().bold());
+        }
+        e.exit();
+    });
+    let mut cli = cli;
     let config = config::load_config();
     cli.aur = cli.aur || config.general.aur_only;
     cli.repo = cli.repo || config.general.repo_only;
@@ -61,9 +69,14 @@ async fn main() -> anyhow::Result<()> {
 
     let active_command = cli.command.clone().unwrap_or_else(|| {
         use clap::CommandFactory;
+        println!("\n{}\n", include_str!("../resources/title.txt").cyan().bold());
         let _ = Cli::command().print_help();
         std::process::exit(0);
     });
+
+    if !matches!(active_command, Commands::Tui | Commands::Completions { .. }) {
+        println!("\n{}\n", include_str!("../resources/title.txt").cyan().bold());
+    }
 
     match active_command {
         Commands::Tui => {

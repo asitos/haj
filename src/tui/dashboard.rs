@@ -1,43 +1,81 @@
 use super::{App, DashboardWidget};
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    widgets::Paragraph,
 };
 
 pub fn render(f: &mut Frame, app: &mut App) {
+    let area = f.area();
+    
+    // 1. Title & Subtitle
+    let title_str = include_str!("../../resources/title.txt");
+    let mut header_lines: Vec<Line> = title_str
+        .lines()
+        .map(|line| {
+            Line::from(Span::styled(
+                line,
+                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            ))
+        })
+        .collect();
+    
+    header_lines.push(Line::from(""));
+    header_lines.push(Line::from(Span::styled(
+        "bla(haj) :3",
+        Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
+    )));
+    header_lines.push(Line::from(""));
+
+    let header_height = header_lines.len() as u16;
+    let show_shark = app.active_widget == DashboardWidget::Blahaj;
+    
+    let shark_height_fixed = if show_shark { 28 } else { 0 };
+    let stats_actions_height = 4; // 1 spacer + 1 stats + 1 spacer + 1 actions
+    let total_fixed = header_height + shark_height_fixed + stats_actions_height;
+    
+    // Only apply padding if there's excess space to center it all
+    let padding = if area.height > total_fixed { (area.height - total_fixed) / 2 } else { 0 };
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .margin(1)
-        .constraints(
-            [
-                Constraint::Length(3),
-                Constraint::Length(3),
-                Constraint::Length(3),
+        .constraints([
+            Constraint::Length(padding),           // [0] dynamic top padding
+            Constraint::Length(header_height),     // [1] title + subtitle
+            if show_shark { Constraint::Min(0) } else { Constraint::Length(0) }, // [2] Shark
+            Constraint::Length(1),                 // [3] spacer
+            Constraint::Length(1),                 // [4] stats
+            Constraint::Length(1),                 // [5] spacer between stats and actions
+            Constraint::Length(1),                 // [6] actions
+            Constraint::Length(padding),           // [7] bottom padding
+        ])
+        .split(area);
+
+    let header = Paragraph::new(header_lines).alignment(Alignment::Center);
+    f.render_widget(header, chunks[1]);
+
+    if show_shark && chunks[2].height > 0 {
+        let art_height = app.dashboard_art.lines.len() as u16;
+        let chunk_height = chunks[2].height;
+        let v_pad = if chunk_height > art_height { (chunk_height - art_height) / 2 } else { 0 };
+        
+        let inner_layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(v_pad),
+                Constraint::Length(art_height),
                 Constraint::Min(0),
-                Constraint::Length(1),
-            ]
-            .as_ref(),
-        )
-        .split(f.area());
+            ])
+            .split(chunks[2]);
 
-    let header_text = vec![Line::from(Span::styled(
-        "(blah) haj :3",
-        Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD),
-    ))];
-    let header = Paragraph::new(header_text)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::DarkGray)),
-        )
-        .alignment(Alignment::Center);
-    f.render_widget(header, chunks[0]);
+        let blahaj_box = Paragraph::new(app.dashboard_art.clone())
+            .alignment(Alignment::Center);
+        f.render_widget(blahaj_box, inner_layout[1]);
+    }
 
+    // 3. Stats
     let installed_count = app.package_list.iter().filter(|p| p.is_installed).count();
     let updates = app.package_list.iter().filter(|p| p.is_upgradable).count();
     let unread_news = app
@@ -51,183 +89,52 @@ pub fn render(f: &mut Frame, app: &mut App) {
         .any(|n| n.is_critical && !app.read_news.contains(&n.link));
 
     let updates_str = if updates > 0 {
-        format!("{updates} update(s)")
+        format!("󰚰 {} updates", updates)
     } else {
-        "0 updates".to_string()
+        "󰚰 0 updates".to_string()
     };
-    let updates_color = if updates > 0 {
-        Color::Green
-    } else {
-        Color::DarkGray
-    };
+    let updates_color = if updates > 0 { Color::LightGreen } else { Color::DarkGray };
 
-    let (news_prefix, news_color, news_mod) = if has_critical {
-        ("!! manual intervention", Color::Red, Modifier::BOLD)
-    } else if unread_news > 0 {
-        ("●", Color::Yellow, Modifier::BOLD)
+    let news_str = if has_critical {
+        "󰎞 !! manual intervention !!".to_string()
     } else {
-        ("○", Color::DarkGray, Modifier::empty())
+        format!("󰎞 {} unread news", unread_news)
     };
+    let news_color = if has_critical { Color::LightRed } else if unread_news > 0 { Color::LightYellow } else { Color::DarkGray };
 
-    let news_string = if has_critical {
-        format!(" {news_prefix} ")
-    } else {
-        format!(" {news_prefix} {unread_news} unread ")
-    };
-
-    let orphan_color = if app.orphan_count > 0 {
-        Color::Red
-    } else {
-        Color::Yellow
-    };
-    let orphan_modifier = if app.orphan_count > 0 {
-        Modifier::BOLD
-    } else {
-        Modifier::empty()
-    };
+    let orphan_color = if app.orphan_count > 0 { Color::LightRed } else { Color::DarkGray };
 
     let stats_text = Line::from(vec![
-        Span::styled(
-            format!(" pkgs: {installed_count} "),
-            Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(" | ", Style::default().fg(Color::DarkGray)),
-        Span::styled(
-            format!(" {updates_str} "),
-            Style::default()
-                .fg(updates_color)
-                .add_modifier(if updates > 0 {
-                    Modifier::BOLD
-                } else {
-                    Modifier::empty()
-                }),
-        ),
-        Span::styled(" | ", Style::default().fg(Color::DarkGray)),
-        Span::styled(
-            format!(" {} orphan(s) ", app.orphan_count),
-            Style::default()
-                .fg(orphan_color)
-                .add_modifier(orphan_modifier),
-        ),
-        Span::styled(" | ", Style::default().fg(Color::DarkGray)),
-        Span::styled(
-            format!(" news:{news_string} "),
-            Style::default().fg(news_color).add_modifier(news_mod),
-        ),
+        Span::styled(format!("󰏗 {} pkgs", installed_count), Style::default().fg(Color::LightCyan)),
+        Span::styled("   ·   ", Style::default().fg(Color::DarkGray)),
+        Span::styled(updates_str, Style::default().fg(updates_color)),
+        Span::styled("   ·   ", Style::default().fg(Color::DarkGray)),
+        Span::styled(format!("󰆴 {} orphans", app.orphan_count), Style::default().fg(orphan_color)),
+        Span::styled("   ·   ", Style::default().fg(Color::DarkGray)),
+        Span::styled(news_str, Style::default().fg(news_color)),
     ]);
 
-    let stats = Paragraph::new(stats_text)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::DarkGray)),
-        )
-        .alignment(Alignment::Center);
-    f.render_widget(stats, chunks[1]);
+    let stats = Paragraph::new(stats_text).alignment(Alignment::Center);
+    f.render_widget(stats, chunks[4]);
 
-    let search_bar = Paragraph::new(" search packages... (f or /)")
-        .style(Style::default().fg(Color::DarkGray))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Cyan)),
-        );
-    f.render_widget(search_bar, chunks[2]);
-
-    match app.active_widget {
-        DashboardWidget::Blahaj => render_blahaj(f, app, chunks[3]),
-        DashboardWidget::News => render_news(f, app, chunks[3]),
+    // 4. Actions
+    let actions = vec![
+        ("search", "f / /"),
+        ("news", "n"),
+        ("toggle shark", "b"),
+        ("help", "?"),
+        ("quit", "q"),
+    ];
+    let mut action_spans = Vec::new();
+    for (idx, (label, key)) in actions.iter().enumerate() {
+        if idx > 0 {
+            action_spans.push(Span::raw("    "));
+        }
+        action_spans.push(Span::styled(*label, Style::default().fg(Color::White)));
+        action_spans.push(Span::styled(" [", Style::default().fg(Color::DarkGray)));
+        action_spans.push(Span::styled(*key, Style::default().fg(Color::Yellow).bold()));
+        action_spans.push(Span::styled("]", Style::default().fg(Color::DarkGray)));
     }
-
-    let footer_str = match app.active_widget {
-        DashboardWidget::Blahaj => " tab next • f or / search • n news • ? help • q quit ",
-        DashboardWidget::News => " enter open • tab next • / search • b blahaj • ? help • q quit ",
-    };
-
-    let footer = Paragraph::new(Span::styled(
-        footer_str,
-        Style::default().fg(Color::DarkGray),
-    ))
-    .alignment(Alignment::Center);
-    f.render_widget(footer, chunks[4]);
-}
-
-fn render_blahaj(f: &mut Frame, app: &App, area: Rect) {
-    let blahaj_box = Paragraph::new(app.dashboard_art.clone())
-        .alignment(Alignment::Center)
-        .block(Block::default().borders(Borders::NONE));
-    f.render_widget(blahaj_box, area);
-}
-
-fn render_news(f: &mut Frame, app: &App, area: Rect) {
-    let mut items = Vec::new();
-    items.push(ListItem::new(Line::from("")));
-
-    for news in app.news_items.iter().take(5) {
-        let is_read = app.read_news.contains(&news.link);
-        let (prefix, color, modifier) = if news.is_critical {
-            ("!! ", Color::Red, Modifier::BOLD)
-        } else if !is_read {
-            ("● ", Color::White, Modifier::BOLD)
-        } else {
-            ("○ ", Color::DarkGray, Modifier::empty())
-        };
-
-        let date_str = chrono::DateTime::parse_from_rfc2822(&news.pub_date)
-            .map(|dt| dt.format("%b %d").to_string())
-            .unwrap_or_default();
-
-        items.push(ListItem::new(vec![
-            Line::from(vec![
-                Span::styled("  ", Style::default()),
-                Span::styled(prefix, Style::default().fg(color).add_modifier(modifier)),
-                Span::styled(
-                    news.title.clone(),
-                    Style::default()
-                        .fg(if is_read {
-                            Color::DarkGray
-                        } else {
-                            Color::White
-                        })
-                        .add_modifier(modifier),
-                ),
-            ]),
-            Line::from(Span::styled(
-                format!("    {date_str}"),
-                Style::default().fg(Color::DarkGray),
-            )),
-            Line::from(""),
-        ]));
-    }
-
-    items.push(ListItem::new(Line::from(Span::styled(
-        "  ────────────────────────────────────────────────────────────",
-        Style::default().fg(Color::DarkGray),
-    ))));
-    items.push(ListItem::new(Line::from(Span::styled(
-        "  press enter to open full news reader",
-        Style::default().fg(Color::Cyan),
-    ))));
-
-    let list = List::new(items).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Cyan))
-            .title(" arch linux news "),
-    );
-
-    let layout = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints(
-            [
-                Constraint::Percentage(15),
-                Constraint::Percentage(70),
-                Constraint::Percentage(15),
-            ]
-            .as_ref(),
-        )
-        .split(area);
-    f.render_widget(list, layout[1]);
+    let actions_p = Paragraph::new(Line::from(action_spans)).alignment(Alignment::Center);
+    f.render_widget(actions_p, chunks[6]);
 }

@@ -109,7 +109,7 @@ where
             }
         }
 
-        let fallback_str = include_str!("../../resources/ascii.txt");
+        let fallback_str = include_str!("../../resources/title.txt");
         let text = fallback_str
             .as_bytes()
             .into_text()
@@ -639,28 +639,28 @@ where
                             }
 
                             KeyCode::Char('n') => {
-                                if app.active_widget == DashboardWidget::News {
-                                    app.screen = CurrentScreen::News;
-                                    if let Some(idx) = app.news_list_state.selected() {
-                                        let page_size = NEWS_PAGE_SIZE;
-                                        let actual_idx =
-                                            (app.news_page.saturating_sub(1)) * page_size + idx;
-                                        if let Some(item) = app.filtered_news.get(actual_idx)
-                                            && (item.description == "loading article content..."
-                                                || item.description.is_empty())
-                                        {
-                                            fetch_article_body(tx.clone(), item.link.clone());
-                                        }
+                                app.screen = CurrentScreen::News;
+                                if let Some(idx) = app.news_list_state.selected() {
+                                    let page_size = NEWS_PAGE_SIZE;
+                                    let actual_idx =
+                                        (app.news_page.saturating_sub(1)) * page_size + idx;
+                                    if let Some(item) = app.filtered_news.get(actual_idx)
+                                        && (item.description == "loading article content..."
+                                            || item.description.is_empty())
+                                    {
+                                        fetch_article_body(tx.clone(), item.link.clone());
                                     }
-                                } else {
-                                    app.active_widget = DashboardWidget::News;
                                 }
                             }
                             KeyCode::Char('t') => app.screen = CurrentScreen::Stats,
                             KeyCode::Char('h') => app.screen = CurrentScreen::History,
                             KeyCode::Char('g') => app.screen = CurrentScreen::Groups,
                             KeyCode::Char('b') => {
-                                app.active_widget = DashboardWidget::Blahaj;
+                                if app.active_widget == DashboardWidget::Blahaj {
+                                    app.active_widget = DashboardWidget::News; // used as hidden state
+                                } else {
+                                    app.active_widget = DashboardWidget::Blahaj;
+                                }
                             }
                             KeyCode::Enter => match app.active_widget {
                                 DashboardWidget::News => {
