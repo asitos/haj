@@ -57,7 +57,13 @@ async fn main() -> anyhow::Result<()> {
         if e.kind() == clap::error::ErrorKind::DisplayHelp
             || e.kind() == clap::error::ErrorKind::DisplayVersion
         {
-            println!("\n{}\n", include_str!("../resources/title.txt").cyan().bold());
+            println!(
+                "\n{}",
+                include_str!("../resources/title.txt")
+                    .trim_end()
+                    .cyan()
+                    .bold()
+            );
         }
         e.exit();
     });
@@ -69,14 +75,16 @@ async fn main() -> anyhow::Result<()> {
 
     let active_command = cli.command.clone().unwrap_or_else(|| {
         use clap::CommandFactory;
-        println!("\n{}\n", include_str!("../resources/title.txt").cyan().bold());
+        println!(
+            "\n{}",
+            include_str!("../resources/title.txt")
+                .trim_end()
+                .cyan()
+                .bold()
+        );
         let _ = Cli::command().print_help();
         std::process::exit(0);
     });
-
-    if !matches!(active_command, Commands::Tui | Commands::Completions { .. }) {
-        println!("\n{}\n", include_str!("../resources/title.txt").cyan().bold());
-    }
 
     match active_command {
         Commands::Tui => {
