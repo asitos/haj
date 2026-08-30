@@ -1,15 +1,21 @@
+<div align="center">
+
 # haj
 
 [![AUR](https://img.shields.io/aur/version/haj?logo=archlinux)](https://aur.archlinux.org/packages/haj)
 [![Crates.io](https://img.shields.io/crates/v/haj?logo=rust)](https://crates.io/crates/haj)
 [![Rust](https://img.shields.io/badge/built_with-Rust-dca282.svg?logo=rust)](https://www.rust-lang.org/)
 
-fast, quiet, beautiful package manager for blahArch Linux.
+**the beautiful, cross-distro package manager and tui.**
 *(and yes, it is named after the ikea shark. all hail blahaj. 🦈)*
+
+</div>
 
 `haj` is a modern, memory-safe wrapper for `pacman` written in rust. It replaces arch's notoriously loud and verbose terminal output with the clean, minimalistic aesthetic of modern package managers like `cargo` and `bun`, without compromising on speed or safety. also comes with love from the supreme plushie shark.
 
-works on virtually every `pacman`-based distro: arch, blahArch, artix, endeavourOS, garuda, manjaro, cachyOS, and 25+ more.
+currently works on virtually every `pacman`-based distro: arch, blahArch, artix, endeavourOS, garuda, manjaro, cachyOS, and 25+ more.
+
+support for `apt` is being worked upon.
 
 <img alt="haj demo" src="assets/cli-demo.gif" width="100%" />
 
