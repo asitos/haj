@@ -4,8 +4,8 @@ use clap::{Parser, Subcommand};
 #[command(
     name = "haj",
     author = "asitos",
-    version = "0.3.0",
-    about = "fast, quiet, beautiful package manager and tui for blahArch Linux.",
+    version = "0.3.1",
+    about = "the beautiful, cross-distro package manager and tui.",
     long_about = None,
     disable_help_subcommand = true,
     disable_version_flag = true,
@@ -46,7 +46,7 @@ Options:
 #[command(
     name = "haj",
     version,
-    about = "fast, quiet, beautiful package manager for blahArch."
+    about = "the beautiful, cross-distro package manager and tui."
 )]
 pub struct Cli {
     #[command(subcommand)]

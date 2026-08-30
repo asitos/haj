@@ -1,3 +1,24 @@
+# haj v0.3.1
+
+this release brings a massive visual overhaul to the TUI dashboard, introduces a new CLI identity, and lays the groundwork for cross-distro package management (APT support coming soon).
+
+## tui & aesthetics
+
+- **Dashboard Rework:** Completely redesigned the TUI dashboard to be borderless and clean (inspired by WikiTUI). 
+- **Stats Bar Upgrade:** The package stats bar now uses a pastel color scheme with proper icons and margin spacing.
+- **Spinning Shark Fix:** The 3D spinning blahaj model (`display3d`) is now perfectly centered in its TUI frame without jittering or clipping.
+- **ASCII Logo:** Added a custom ASCII art logo (`resources/title.txt`) that gracefully prints above the CLI output when running `haj --help` or `haj --version`.
+
+## cross-distro preparation
+
+- **Universal Tagline:** Updated the project description across the CLI and `Cargo.toml` from being Arch-specific to: *"the beautiful, cross-distro package manager and tui."*
+- **Architecture Audit:** A comprehensive architectural audit was performed to decouple the core from `libalpm` and prepare a generic `Backend` trait for APT, DNF, and Portage.
+
+## ci & correctness
+
+- Fixed `cargo fmt` deviations.
+- Resolved `cargo clippy` warnings (`useless_vec` replaced with static arrays in action menus).
+
 # haj v0.3.0
 
 internal refactor release. no new user-facing commands; focus is correctness, safety, and making it easier for other people to contribute.
