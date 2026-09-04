@@ -136,15 +136,6 @@ impl std::fmt::Display for SortMode {
     }
 }
 
-#[derive(Clone)]
-pub struct PackageInfo {
-    pub name: String,
-    pub version: String,
-    pub repo: String,
-    pub is_installed: bool,
-    pub is_upgradable: bool,
-    pub size_mb: f64,
-}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NewsItem {
@@ -226,8 +217,8 @@ pub struct App {
     pub filter_idx: usize,
     pub sort_mode: SortMode,
     pub pending_g: bool,
-    pub package_list: Vec<PackageInfo>,
-    pub filtered_packages: Vec<PackageInfo>,
+    pub package_list: Vec<crate::core::package::PackageModel>,
+    pub filtered_packages: Vec<crate::core::package::PackageModel>,
     pub search_query: String,
     pub list_state: ListState,
     pub selected_packages: HashSet<String>,
@@ -566,62 +557,11 @@ impl App {
             self.orphan_count = 0;
         }
 
-        let mut package_list = Vec::new();
-        let mut installed_count = 0;
-        let mut updates_count = 0;
-
         if let Ok(alpm) = core::alpm_init::init_alpm() {
-            let local_db = alpm.localdb();
-            let mut seen_packages = HashSet::new();
-
-            for db in alpm.syncdbs() {
-                for pkg in db.pkgs() {
-                    let name = pkg.name().to_string();
-                    let local_pkg = local_db.pkg(name.as_str());
-                    let is_installed = local_pkg.is_ok();
-                    let mut is_upgradable = false;
-
-                    if let Ok(l_pkg) = local_pkg {
-                        installed_count += 1;
-                        if alpm::vercmp(pkg.version().to_string(), l_pkg.version().to_string())
-                            == std::cmp::Ordering::Greater
-                        {
-                            is_upgradable = true;
-                            updates_count += 1;
-                        }
-                    }
-
-                    seen_packages.insert(name.clone());
-                    package_list.push(PackageInfo {
-                        name,
-                        version: pkg.version().to_string(),
-                        repo: db.name().to_string(),
-                        is_installed,
-                        is_upgradable,
-                        size_mb: pkg.isize() as f64 / 1_048_576.0,
-                    });
-                }
-            }
-
-            for pkg in local_db.pkgs() {
-                let name = pkg.name().to_string();
-                if !seen_packages.contains(&name) {
-                    installed_count += 1;
-                    package_list.push(PackageInfo {
-                        name,
-                        version: pkg.version().to_string(),
-                        repo: "local/aur".to_string(),
-                        is_installed: true,
-                        is_upgradable: false,
-                        size_mb: pkg.isize() as f64 / 1_048_576.0,
-                    });
-                }
-            }
-
-            package_list.sort_by(|a, b| a.name.cmp(&b.name));
-            self.package_list = package_list;
-            self.installed_count = installed_count;
-            self.updates_count = updates_count;
+            let (packages, installed, updates) = crate::core::pacman::get_all_packages(&alpm);
+            self.package_list = packages;
+            self.installed_count = installed;
+            self.updates_count = updates;
         }
 
         self.transactions.clear();

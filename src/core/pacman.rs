@@ -431,3 +431,59 @@ pub fn print_network_error(fallback_msg: &str) {
     let is_connected = ping_status.is_ok_and(|s| s.success());
     println!("{}", network_error_message(fallback_msg, is_connected));
 }
+
+pub fn get_all_packages(alpm: &alpm::Alpm) -> (Vec<crate::core::package::PackageModel>, usize, usize) {
+    let mut package_list = Vec::new();
+    let mut installed_count = 0;
+    let mut updates_count = 0;
+
+    let local_db = alpm.localdb();
+    let mut seen_packages = std::collections::HashSet::new();
+
+    for db in alpm.syncdbs() {
+        for pkg in db.pkgs() {
+            let name = pkg.name().to_string();
+            let local_pkg = local_db.pkg(name.as_str());
+            let is_installed = local_pkg.is_ok();
+            let mut is_upgradable = false;
+
+            if let Ok(l_pkg) = local_pkg {
+                installed_count += 1;
+                if alpm::vercmp(pkg.version().to_string(), l_pkg.version().to_string())
+                    == std::cmp::Ordering::Greater
+                {
+                    is_upgradable = true;
+                    updates_count += 1;
+                }
+            }
+
+            seen_packages.insert(name.clone());
+            package_list.push(crate::core::package::PackageModel {
+                name,
+                version: pkg.version().to_string(),
+                repo: db.name().to_string(),
+                is_installed,
+                is_upgradable,
+                size_mb: pkg.isize() as f64 / 1_048_576.0,
+            });
+        }
+    }
+
+    for pkg in local_db.pkgs() {
+        let name = pkg.name().to_string();
+        if !seen_packages.contains(&name) {
+            installed_count += 1;
+            package_list.push(crate::core::package::PackageModel {
+                name,
+                version: pkg.version().to_string(),
+                repo: "local/aur".to_string(),
+                is_installed: true,
+                is_upgradable: false,
+                size_mb: pkg.isize() as f64 / 1_048_576.0,
+            });
+        }
+    }
+
+    package_list.sort_by(|a, b| a.name.cmp(&b.name));
+    (package_list, installed_count, updates_count)
+}

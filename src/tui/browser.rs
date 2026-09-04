@@ -265,7 +265,7 @@ fn render_details(f: &mut Frame, app: &mut App, area: Rect) {
 fn render_overview_tab(
     f: &mut Frame,
     app: &App,
-    pkg: &crate::tui::PackageInfo,
+    pkg: &crate::core::package::PackageModel,
     cache: &BrowserCache,
     area: Rect,
 ) {
