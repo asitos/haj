@@ -1,5 +1,6 @@
 pub mod backend;
 mod cli;
+#[cfg(feature = "pacman")]
 pub mod commands;
 mod config;
 mod core;
@@ -99,7 +100,7 @@ async fn main() -> anyhow::Result<()> {
         tui::run().await?;
         return Ok(());
     }
-    
+
     if let Commands::Completions { shell } = active_command {
         match shell {
             clap_complete::Shell::Bash => print!("{}", include_str!("completions/bash.sh")),
@@ -119,25 +120,57 @@ async fn main() -> anyhow::Result<()> {
         match active_command {
             Commands::Update => {
                 let plan = backend.build_update()?;
-                crate::core::process::execute_plan(&plan, "updating repositories...", "updated successfully.", cli.dry_run, cli.verbose).await?;
+                crate::core::process::execute_plan(
+                    &plan,
+                    "updating repositories...",
+                    "updated successfully.",
+                    cli.dry_run,
+                    cli.verbose,
+                )
+                .await?;
             }
             Commands::Install { packages } => {
                 let pkgs: Vec<&str> = packages.iter().map(|s| s.as_str()).collect();
                 let plan = backend.build_install(&pkgs)?;
-                crate::core::process::execute_plan(&plan, "installing packages...", "installed successfully.", cli.dry_run, cli.verbose).await?;
+                crate::core::process::execute_plan(
+                    &plan,
+                    "installing packages...",
+                    "installed successfully.",
+                    cli.dry_run,
+                    cli.verbose,
+                )
+                .await?;
             }
             Commands::Remove { packages, .. } => {
                 let pkgs: Vec<&str> = packages.iter().map(|s| s.as_str()).collect();
                 let plan = backend.build_remove(&pkgs)?;
-                crate::core::process::execute_plan(&plan, "removing packages...", "removed successfully.", cli.dry_run, cli.verbose).await?;
+                crate::core::process::execute_plan(
+                    &plan,
+                    "removing packages...",
+                    "removed successfully.",
+                    cli.dry_run,
+                    cli.verbose,
+                )
+                .await?;
             }
             _ => {
-                println!("{} command not yet implemented for generic backend.", "✗".red());
+                println!(
+                    "{} command not yet implemented for generic backend.",
+                    "✗".red()
+                );
             }
         }
         return Ok(());
     }
 
+    #[cfg(feature = "pacman")]
+    legacy_pacman_handler(cli, active_command).await?;
+
+    Ok(())
+}
+
+#[cfg(feature = "pacman")]
+async fn legacy_pacman_handler(cli: Cli, active_command: Commands) -> anyhow::Result<()> {
     match active_command {
         Commands::Tui | Commands::Completions { .. } => unreachable!(),
         Commands::Update => {
@@ -1468,4 +1501,9 @@ mod tests {
             )
         );
     }
+}
+
+#[cfg(not(feature = "pacman"))]
+async fn legacy_pacman_handler(_cli: Cli, _active_command: Commands) -> anyhow::Result<()> {
+    unreachable!("pacman support is disabled in this build.");
 }

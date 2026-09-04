@@ -31,7 +31,11 @@ impl PackageManager for PacmanBackend {
         for db in alpm_handle.syncdbs() {
             for pkg in db.pkgs() {
                 if pkg.name().to_lowercase().contains(&query.to_lowercase())
-                    || pkg.desc().unwrap_or("").to_lowercase().contains(&query.to_lowercase())
+                    || pkg
+                        .desc()
+                        .unwrap_or("")
+                        .to_lowercase()
+                        .contains(&query.to_lowercase())
                 {
                     results.push(PackageModel {
                         name: pkg.name().to_string(),

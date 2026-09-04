@@ -1,3 +1,4 @@
+#![cfg(feature = "pacman")]
 use crate::cli::Cli;
 use crate::core;
 use crate::core::ui::prompt_confirm;

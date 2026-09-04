@@ -130,7 +130,7 @@ impl PackageManager for AptBackend {
                 let name = parts[0].to_string();
                 let version = parts[1].to_string();
                 let size_kb = parts[2].parse::<f64>().unwrap_or(0.0);
-                
+
                 results.push(PackageModel {
                     name,
                     version,
@@ -159,10 +159,14 @@ impl PackageManager for AptBackend {
     fn build_remove(&self, packages: &[&str]) -> Result<CommandPlan, BackendError> {
         Ok(CommandPlan {
             executable: "apt-get".to_string(),
-            args: vec!["remove".to_string(), "--auto-remove".to_string(), "-y".to_string()]
-                .into_iter()
-                .chain(packages.iter().map(|s| s.to_string()))
-                .collect(),
+            args: vec![
+                "remove".to_string(),
+                "--auto-remove".to_string(),
+                "-y".to_string(),
+            ]
+            .into_iter()
+            .chain(packages.iter().map(|s| s.to_string()))
+            .collect(),
             requires_root: true,
         })
     }

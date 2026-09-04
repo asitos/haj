@@ -1,14 +1,20 @@
+#[cfg(feature = "pacman")]
 pub mod alpm_init;
+#[cfg(feature = "pacman")]
 pub mod aur;
 pub mod cache;
+#[cfg(feature = "pacman")]
 pub mod conflicts;
+#[cfg(feature = "pacman")]
 pub mod downgrade;
 pub mod history;
 pub mod package;
+#[cfg(feature = "pacman")]
 pub mod pacman;
 pub mod process;
 pub mod ui;
 
+#[cfg(feature = "pacman")]
 use alpm::Alpm;
 use anyhow::Result;
 use crossterm::style::Stylize;
@@ -43,6 +49,7 @@ pub async fn ensure_sudo() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "pacman")]
 pub fn manage_pacnew_files() -> anyhow::Result<()> {
     println!("{} launching pacdiff...", "::".blue());
 
@@ -69,6 +76,7 @@ pub fn manage_pacnew_files() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "pacman")]
 pub struct InstallSummary {
     pub name: String,
     pub version: String,
@@ -76,6 +84,7 @@ pub struct InstallSummary {
     pub install_size_mb: f64,
 }
 
+#[cfg(feature = "pacman")]
 pub fn get_install_summaries(alpm: &Alpm, targets: &[String]) -> Result<Vec<InstallSummary>> {
     let mut summaries = Vec::new();
 

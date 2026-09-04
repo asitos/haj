@@ -291,6 +291,7 @@ impl App {
             PackageFilter::Repositories,
         ];
 
+        #[cfg(feature = "pacman")]
         if let Ok(alpm) = core::alpm_init::init_alpm() {
             for db in alpm.syncdbs() {
                 dynamic_filters.push(PackageFilter::Repo(db.name().to_string()));
@@ -556,6 +557,7 @@ impl App {
             self.orphan_count = 0;
         }
 
+        #[cfg(feature = "pacman")]
         if let Ok(alpm) = core::alpm_init::init_alpm() {
             let (packages, installed, updates) = crate::core::pacman::get_all_packages(&alpm);
             self.package_list = packages;
