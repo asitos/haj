@@ -1,3 +1,4 @@
+pub mod process;
 pub mod package;
 pub mod alpm_init;
 pub mod aur;
