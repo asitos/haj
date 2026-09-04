@@ -9,7 +9,6 @@ use std::{collections::HashSet, io, time::Instant};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt};
 use tokio::sync::mpsc;
 
-use crate::core;
 use ansi_to_tui::IntoText;
 
 pub const NEWS_PAGE_SIZE: usize = 25;
@@ -83,6 +82,7 @@ pub enum PackageFilter {
     Updates,
     Aur,
     Repositories,
+    #[allow(dead_code)]
     Repo(String),
     Group(String),
 }
@@ -283,7 +283,7 @@ pub struct App {
 
 impl App {
     pub fn new() -> Self {
-        let mut dynamic_filters = vec![
+        let dynamic_filters = vec![
             PackageFilter::All,
             PackageFilter::Installed,
             PackageFilter::NotInstalled,

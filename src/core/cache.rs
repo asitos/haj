@@ -1,6 +1,7 @@
 use crossterm::style::Stylize;
 use std::process::Command;
 
+#[allow(dead_code)]
 pub fn scrub(keep: usize) {
     println!(
         "{} scrubbing package cache (keeping last {} versions)...",

@@ -3,6 +3,7 @@ use crossterm::style::Stylize;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 
+#[allow(dead_code)]
 pub fn show_history(limit: usize) {
     let file = match File::open("/var/log/pacman.log") {
         Ok(f) => f,
@@ -68,6 +69,7 @@ pub fn show_history(limit: usize) {
     }
 }
 
+#[allow(dead_code)]
 fn format_relative_timestamp(ts: &str) -> String {
     let short_ts = if ts.len() >= 16 { &ts[..16] } else { ts };
     if let Ok(naive_dt) = chrono::NaiveDateTime::parse_from_str(short_ts, "%Y-%m-%dT%H:%M") {

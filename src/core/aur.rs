@@ -14,6 +14,7 @@ pub struct AurPackage {
     #[serde(default)]
     pub num_votes: u64,
     #[serde(default, rename = "Conflicts")]
+    #[allow(dead_code)]
     pub conflicts: Vec<String>,
 }
 

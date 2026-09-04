@@ -10,6 +10,7 @@ use clap::Parser;
 use cli::{Cli, Commands};
 use crossterm::style::Stylize;
 use std::fs::OpenOptions;
+#[allow(unused_imports)]
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 
@@ -160,6 +161,7 @@ async fn main() -> anyhow::Result<()> {
 }
 
 #[cfg(feature = "pacman")]
+#[allow(dead_code)]
 async fn legacy_pacman_handler(
     cli: Cli,
     active_command: Commands,
@@ -1498,6 +1500,7 @@ mod tests {
 }
 
 #[cfg(not(feature = "pacman"))]
+#[allow(dead_code)]
 async fn legacy_pacman_handler(
     _cli: Cli,
     _active_command: Commands,

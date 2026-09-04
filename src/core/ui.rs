@@ -1,4 +1,3 @@
-use crate::core;
 use crate::ui;
 use crossterm::style::Stylize;
 use std::io::Write;
@@ -105,6 +104,7 @@ pub fn prompt_install(msg: &str) -> InstallChoice {
     }
 }
 
+#[allow(dead_code)]
 pub async fn display_arch_news() {
     let spinner = ui::spinner("checking arch linux news...");
     let url = "https://archlinux.org/feeds/news/";

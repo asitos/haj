@@ -16,6 +16,7 @@ pub mod ui;
 
 #[cfg(feature = "pacman")]
 use alpm::Alpm;
+#[allow(unused_imports)]
 use anyhow::Result;
 use crossterm::style::Stylize;
 use std::process::Stdio;

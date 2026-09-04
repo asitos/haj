@@ -1,5 +1,4 @@
 use crate::cli::Cli;
-use crate::core;
 use crate::core::ui::prompt_confirm;
 use crate::core::ui::{InstallChoice, handle_conflicts_ui, prompt_install};
 use crate::ui;

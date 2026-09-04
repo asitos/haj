@@ -85,10 +85,10 @@ impl PackageManager for AptBackend {
                 if version.is_empty() {
                     version = v.trim().to_string();
                 }
-            } else if let Some(s) = line.strip_prefix("Size: ") {
-                if let Ok(bytes) = s.trim().parse::<f64>() {
-                    size_mb = bytes / 1_048_576.0;
-                }
+            } else if let Some(s) = line.strip_prefix("Size: ")
+                && let Ok(bytes) = s.trim().parse::<f64>()
+            {
+                size_mb = bytes / 1_048_576.0;
             }
         }
 
