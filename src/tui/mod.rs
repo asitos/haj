@@ -278,6 +278,7 @@ pub struct App {
 
     pub deselected_packages: HashSet<String>,
     pub selection_mode: SelectionMode,
+    pub needs_refresh: bool,
 }
 
 impl App {
@@ -290,13 +291,6 @@ impl App {
             PackageFilter::Aur,
             PackageFilter::Repositories,
         ];
-
-        #[cfg(feature = "pacman")]
-        if let Ok(alpm) = core::alpm_init::init_alpm() {
-            for db in alpm.syncdbs() {
-                dynamic_filters.push(PackageFilter::Repo(db.name().to_string()));
-            }
-        }
 
         let home = std::env::var("HOME")
             .map(std::path::PathBuf::from)
@@ -394,6 +388,7 @@ impl App {
 
             deselected_packages: HashSet::new(),
             selection_mode: SelectionMode::Explicit,
+            needs_refresh: true,
         };
 
         app.refresh_state();
@@ -546,6 +541,10 @@ impl App {
     }
 
     pub fn refresh_state(&mut self) {
+        self.needs_refresh = true;
+    }
+
+    pub async fn do_refresh(&mut self, backend: &dyn crate::backend::traits::PackageManager) {
         if let Ok(output) = std::process::Command::new("sudo")
             .args(["pacman", "-Qdtq"])
             .output()
@@ -555,14 +554,11 @@ impl App {
                 .count();
         } else {
             self.orphan_count = 0;
-        }
-
-        #[cfg(feature = "pacman")]
-        if let Ok(alpm) = core::alpm_init::init_alpm() {
-            let (packages, installed, updates) = crate::core::pacman::get_all_packages(&alpm);
-            self.package_list = packages;
-            self.installed_count = installed;
-            self.updates_count = updates;
+            if let Ok((packages, installed, updates)) = backend.get_all_packages().await {
+                self.package_list = packages;
+                self.installed_count = installed;
+                self.updates_count = updates;
+            }
         }
 
         self.transactions.clear();
@@ -949,7 +945,7 @@ pub mod events;
 pub mod news_fetch;
 use events::run_app;
 use news_fetch::{fetch_arch_news, fetch_article_body};
-pub async fn run() -> Result<()> {
+pub async fn run(backend_pkg_mgr: &dyn crate::backend::traits::PackageManager) -> Result<()> {
     let display3d = std::process::Command::new("display3d")
         .arg("--help")
         .output()
@@ -978,7 +974,7 @@ pub async fn run() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
     let mut app = App::new();
-    let res = run_app(&mut terminal, &mut app).await;
+    let res = run_app(&mut terminal, &mut app, backend_pkg_mgr).await;
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;

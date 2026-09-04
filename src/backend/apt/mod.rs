@@ -179,11 +179,64 @@ impl PackageManager for AptBackend {
         })
     }
 
+    fn build_install_local(&self, path: &std::path::Path) -> Result<CommandPlan, BackendError> {
+        Ok(CommandPlan {
+            executable: "apt".to_string(),
+            args: vec![
+                "install".to_string(),
+                "-y".to_string(),
+                path.to_string_lossy().to_string(),
+            ],
+            requires_root: true,
+        })
+    }
     fn build_upgrade(&self) -> Result<CommandPlan, BackendError> {
         Ok(CommandPlan {
             executable: "apt-get".to_string(),
             args: vec!["upgrade".to_string(), "-y".to_string()],
             requires_root: true,
         })
+    }
+
+    async fn get_all_packages(&self) -> Result<(Vec<PackageModel>, usize, usize), BackendError> {
+        // Return installed packages for the TUI until we optimize full search
+        let installed = self.list_installed().await?;
+        let count = installed.len();
+        // Since we didn't calculate updates yet for APT:
+        Ok((installed, count, 0))
+    }
+
+    async fn get_install_summaries(
+        &self,
+        _packages: &[&str],
+    ) -> Result<Vec<crate::backend::traits::InstallSummary>, BackendError> {
+        Ok(Vec::new())
+    }
+
+    async fn detect_conflicts(
+        &self,
+        _packages: &[&str],
+    ) -> Result<Vec<crate::backend::traits::ConflictInfo>, BackendError> {
+        Ok(Vec::new())
+    }
+
+    async fn resolve_aur(
+        &self,
+        _packages: &[&str],
+    ) -> Result<crate::backend::traits::AurResolution, BackendError> {
+        Ok(crate::backend::traits::AurResolution {
+            packages: Vec::new(),
+        })
+    }
+
+    async fn build_aur_package(
+        &self,
+        _package: &str,
+        _verbose: bool,
+    ) -> Result<std::path::PathBuf, BackendError> {
+        Err(BackendError::ExecutionError(
+            1,
+            "AUR not supported by APT".to_string(),
+        ))
     }
 }

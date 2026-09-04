@@ -10,8 +10,11 @@ use ratatui::Terminal;
 use ratatui::backend::Backend;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
-
-pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
+pub async fn run_app<B: Backend>(
+    terminal: &mut Terminal<B>,
+    app: &mut App,
+    backend_pkg_mgr: &dyn crate::backend::traits::PackageManager,
+) -> Result<()>
 where
     <B as Backend>::Error: Send + Sync + 'static,
 {
@@ -352,6 +355,10 @@ where
     };
 
     loop {
+        if app.needs_refresh {
+            app.needs_refresh = false;
+            app.do_refresh(backend_pkg_mgr).await;
+        }
         terminal.draw(|f| {
             match app.screen {
                 CurrentScreen::Dashboard => dashboard::render(f, app),

@@ -1,35 +1,25 @@
-#![cfg(feature = "pacman")]
 use crate::cli::Cli;
 use crate::core;
 use crate::core::ui::prompt_confirm;
 use crate::core::ui::{InstallChoice, handle_conflicts_ui, prompt_install};
 use crate::ui;
 use crossterm::style::Stylize;
-pub async fn process_installation(packages: Vec<String>, alpm_handle: alpm::Alpm, cli: &Cli) {
-    let mut native_pkgs = Vec::new();
-    let mut aur_pkgs = Vec::new();
+pub async fn process_installation(
+    packages: Vec<String>,
+    backend: &dyn crate::backend::traits::PackageManager,
+    cli: &Cli,
+) {
+    let mut native_pkgs: Vec<String> = Vec::new();
+    let mut aur_pkgs: Vec<String> = Vec::new();
 
-    for pkg in packages {
-        let mut found_in_repo = false;
-
-        if !cli.aur {
-            for db in alpm_handle.syncdbs() {
-                if db.pkg(pkg.as_str()).is_ok() {
-                    found_in_repo = true;
-                    break;
-                }
-            }
-        }
-
-        if found_in_repo || cli.repo {
+    for pkg in &packages {
+        if cli.repo || backend.info(pkg).await.is_ok() {
             native_pkgs.push(pkg.clone());
+        } else if backend.capabilities().supports_aur {
+            aur_pkgs.push(pkg.clone());
         } else {
-            let local_ver = alpm_handle
-                .localdb()
-                .pkg(pkg.as_str())
-                .map(|p| p.version().to_string())
-                .ok();
-            aur_pkgs.push((pkg.clone(), local_ver));
+            println!("{} package '{}' not found", "✗".red(), pkg.clone().bold());
+            return;
         }
     }
 
@@ -39,7 +29,8 @@ pub async fn process_installation(packages: Vec<String>, alpm_handle: alpm::Alpm
 
     if !native_pkgs.is_empty() {
         println!("{} resolving native dependencies...", "::".blue());
-        match core::get_install_summaries(&alpm_handle, &native_pkgs) {
+        let native_pkgs_str: Vec<&str> = native_pkgs.iter().map(|s| s.as_str()).collect();
+        match backend.get_install_summaries(&native_pkgs_str).await {
             Ok(summaries) => {
                 for sum in &summaries {
                     total_dl += sum.download_size_mb;
@@ -48,78 +39,29 @@ pub async fn process_installation(packages: Vec<String>, alpm_handle: alpm::Alpm
                 native_summaries = summaries;
             }
             Err(e) => {
-                core::pacman::print_network_error(&format!("{} {}", "✗".red(), e));
+                println!("{} {}", "✗".red(), e);
                 native_pkgs.clear();
             }
         }
     }
 
     let mut resolved_aur_pkgs = Vec::new();
-    let mut aur_conflicts_map = std::collections::HashMap::new();
     if !aur_pkgs.is_empty() {
-        let check_spinner = ui::spinner("querying aur...");
-
-        let mut url = String::from("https://aur.archlinux.org/rpc/v5/info?");
-        for (pkg, _) in &aur_pkgs {
-            url.push_str(&format!("arg[]={pkg}&"));
-        }
-
-        if let Ok(response) = reqwest::get(&url).await
-            && let Ok(json) = response.json::<core::aur::AurResponse>().await
-        {
-            check_spinner.finish_and_clear();
-            let results = json.results;
-
-            for (pkg, local_ver) in aur_pkgs {
-                if let Some(result) = results.iter().find(|r| r.name == pkg) {
-                    if !result.conflicts.is_empty() {
-                        aur_conflicts_map.insert(pkg.clone(), result.conflicts.clone());
-                    }
-
-                    let aur_ver = &result.version;
-                    let mut is_update = false;
-                    let mut skip = false;
-
-                    if let Some(lv) = &local_ver {
-                        if lv == aur_ver {
-                            println!(
-                                "{} {} is up to date ({}).",
-                                "✓".green(),
-                                pkg.clone().magenta().bold(),
-                                aur_ver.clone().dim()
-                            );
-                            skip = true;
-                        } else {
-                            is_update = true;
-                        }
-                    }
-
-                    if !skip {
-                        resolved_aur_pkgs.push((
-                            pkg.clone(),
-                            aur_ver.to_string(),
-                            is_update,
-                            local_ver.clone(),
-                        ));
-                    }
-                } else {
-                    println!(
-                        "{} package '{}' not found on the aur.",
-                        "✗".red(),
-                        pkg.bold()
-                    );
-                }
+        let aur_pkgs_str: Vec<&str> = aur_pkgs.iter().map(|s| s.as_str()).collect();
+        match backend.resolve_aur(&aur_pkgs_str).await {
+            Ok(resolution) => resolved_aur_pkgs = resolution.packages,
+            Err(e) => {
+                println!("{} failed to resolve aur packages: {}", "✗".red(), e);
+                return;
             }
-        } else {
-            check_spinner.finish_and_clear();
-            core::pacman::print_network_error(&format!("{} failed to query the aur.", "✗".red()));
         }
     }
 
-    let conflicts =
-        core::conflicts::detect_conflicts(&alpm_handle, &native_pkgs, &aur_conflicts_map);
-
-    drop(alpm_handle);
+    let native_pkgs_str: Vec<&str> = native_pkgs.iter().map(|s| s.as_str()).collect();
+    let conflicts = backend
+        .detect_conflicts(&native_pkgs_str)
+        .await
+        .unwrap_or_default();
 
     let allow_conflict_removal =
         match handle_conflicts_ui(&conflicts, cli.dry_run, cli.noconfirm, prompt_confirm) {
@@ -212,21 +154,20 @@ pub async fn process_installation(packages: Vec<String>, alpm_handle: alpm::Alpm
     }
 
     if !native_pkgs.is_empty() {
-        let mut args = vec!["-S", "--noconfirm"];
-        if allow_conflict_removal {
-            args.push("--ask=4");
+        let native_pkgs_str: Vec<&str> = native_pkgs.iter().map(|s| s.as_str()).collect();
+        if let Ok(mut plan) = backend.build_install(&native_pkgs_str) {
+            if allow_conflict_removal {
+                plan.args.push("--ask=4".to_string());
+            }
+            let _ = crate::core::process::execute_plan(
+                &plan,
+                "installing native packages...",
+                "native packages installed successfully.",
+                cli.dry_run,
+                cli.verbose,
+            )
+            .await;
         }
-        args.extend(native_pkgs.iter().map(std::string::String::as_str));
-
-        core::pacman::run_pacman(
-            &args,
-            "installing native packages...",
-            "native packages installed successfully.",
-            cli.dry_run,
-            cli.verbose,
-            &cli.root,
-        )
-        .await;
     }
 
     if !resolved_aur_pkgs.is_empty() {
@@ -247,7 +188,7 @@ pub async fn process_installation(packages: Vec<String>, alpm_handle: alpm::Alpm
                 aur_ver.clone().green()
             );
 
-            match core::aur::build(&pkg, cli.verbose).await {
+            match backend.build_aur_package(&pkg, cli.verbose).await {
                 Ok(pkg_path) => {
                     let spinner_msg = if is_update {
                         format!("updating built package {}...", pkg.clone().magenta().bold())
@@ -257,7 +198,6 @@ pub async fn process_installation(packages: Vec<String>, alpm_handle: alpm::Alpm
                             pkg.clone().magenta().bold()
                         )
                     };
-
                     let success_msg = if is_update {
                         format!(
                             "{} updated successfully ({}).",
@@ -271,22 +211,20 @@ pub async fn process_installation(packages: Vec<String>, alpm_handle: alpm::Alpm
                             aur_ver.dim()
                         )
                     };
-
-                    let mut pacman_args =
-                        vec!["-U", pkg_path.to_str().unwrap_or_default(), "--noconfirm"];
-                    if allow_conflict_removal {
-                        pacman_args.push("--ask=4");
+                    if let Ok(mut plan) = backend.build_install_local(&pkg_path) {
+                        if allow_conflict_removal {
+                            plan.args.push("--ask=4".to_string());
+                        }
+                        let _ = crate::core::process::execute_plan(
+                            &plan,
+                            &spinner_msg,
+                            &success_msg,
+                            cli.dry_run,
+                            cli.verbose,
+                        )
+                        .await;
+                        println!("{}", success_msg.green());
                     }
-
-                    core::pacman::run_pacman(
-                        &pacman_args,
-                        &spinner_msg,
-                        &success_msg,
-                        cli.dry_run,
-                        cli.verbose,
-                        &cli.root,
-                    )
-                    .await;
                 }
                 Err(e) => eprintln!("{} {}", "error:".red().bold(), e),
             }

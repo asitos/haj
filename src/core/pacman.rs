@@ -489,3 +489,7 @@ pub fn get_all_packages(
     package_list.sort_by(|a, b| a.name.cmp(&b.name));
     (package_list, installed_count, updates_count)
 }
+
+pub fn vercmp(a: &str, b: &str) -> std::cmp::Ordering {
+    alpm::vercmp(a, b)
+}

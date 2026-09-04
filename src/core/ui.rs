@@ -153,10 +153,9 @@ pub async fn display_arch_news() {
         spinner.finish_and_clear();
     }
 }
-#[cfg(feature = "pacman")]
 
 pub fn handle_conflicts_ui<F>(
-    conflicts: &[core::conflicts::ConflictInfo],
+    conflicts: &[crate::backend::traits::ConflictInfo],
     dry_run: bool,
     noconfirm: bool,
     mut prompter: F,

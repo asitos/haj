@@ -1,6 +1,5 @@
 pub mod backend;
 mod cli;
-#[cfg(feature = "pacman")]
 pub mod commands;
 mod config;
 mod core;
@@ -97,7 +96,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     if matches!(active_command, Commands::Tui) {
-        tui::run().await?;
+        tui::run(backend.as_ref()).await?;
         return Ok(());
     }
 
@@ -130,16 +129,7 @@ async fn main() -> anyhow::Result<()> {
                 .await?;
             }
             Commands::Install { packages } => {
-                let pkgs: Vec<&str> = packages.iter().map(|s| s.as_str()).collect();
-                let plan = backend.build_install(&pkgs)?;
-                crate::core::process::execute_plan(
-                    &plan,
-                    "installing packages...",
-                    "installed successfully.",
-                    cli.dry_run,
-                    cli.verbose,
-                )
-                .await?;
+                commands::process_installation(packages, backend.as_ref(), &cli).await;
             }
             Commands::Remove { packages, .. } => {
                 let pkgs: Vec<&str> = packages.iter().map(|s| s.as_str()).collect();
@@ -164,13 +154,17 @@ async fn main() -> anyhow::Result<()> {
     }
 
     #[cfg(feature = "pacman")]
-    legacy_pacman_handler(cli, active_command).await?;
+    legacy_pacman_handler(cli, active_command, backend.as_ref()).await?;
 
     Ok(())
 }
 
 #[cfg(feature = "pacman")]
-async fn legacy_pacman_handler(cli: Cli, active_command: Commands) -> anyhow::Result<()> {
+async fn legacy_pacman_handler(
+    cli: Cli,
+    active_command: Commands,
+    pkg_manager: &dyn crate::backend::traits::PackageManager,
+) -> anyhow::Result<()> {
     match active_command {
         Commands::Tui | Commands::Completions { .. } => unreachable!(),
         Commands::Update => {
@@ -199,7 +193,7 @@ async fn legacy_pacman_handler(cli: Cli, active_command: Commands) -> anyhow::Re
                 Commands::Tui | Commands::Completions { .. } | Commands::Update => unreachable!(),
 
                 Commands::Install { packages } => {
-                    commands::process_installation(packages, alpm_handle, &cli).await;
+                    commands::process_installation(packages, pkg_manager, &cli).await;
                 }
 
                 Commands::Interactive(queries) => {
@@ -351,7 +345,7 @@ async fn legacy_pacman_handler(cli: Cli, active_command: Commands) -> anyhow::Re
                         pkgs_to_install.join(", ").cyan()
                     );
 
-                    commands::process_installation(pkgs_to_install, alpm_handle, &cli).await;
+                    commands::process_installation(pkgs_to_install, pkg_manager, &cli).await;
                 }
 
                 Commands::Remove { packages } => {
@@ -1504,6 +1498,10 @@ mod tests {
 }
 
 #[cfg(not(feature = "pacman"))]
-async fn legacy_pacman_handler(_cli: Cli, _active_command: Commands) -> anyhow::Result<()> {
+async fn legacy_pacman_handler(
+    _cli: Cli,
+    _active_command: Commands,
+    _pkg_manager: &dyn crate::backend::traits::PackageManager,
+) -> anyhow::Result<()> {
     unreachable!("pacman support is disabled in this build.");
 }

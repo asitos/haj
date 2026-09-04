@@ -264,3 +264,14 @@ pub async fn build(pkg_name: &str, is_verbose: bool) -> anyhow::Result<PathBuf> 
         None => anyhow::bail!("build succeeded but could not locate the .pkg.tar archive"),
     }
 }
+
+pub async fn search(query: &str) -> anyhow::Result<AurResponse> {
+    let url = format!("https://aur.archlinux.org/rpc/v5/search/{}", query);
+    let response = reqwest::get(&url).await?;
+    let data = response.json::<AurResponse>().await?;
+    Ok(data)
+}
+
+pub fn is_newer(remote: &str, local: &str) -> bool {
+    crate::core::pacman::vercmp(remote, local) == std::cmp::Ordering::Greater
+}
