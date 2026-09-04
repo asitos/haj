@@ -1,3 +1,4 @@
+#![allow(dead_code, clippy::collapsible_if)]
 use crate::backend::traits::{BackendError, CommandPlan};
 use crate::ui;
 use crossterm::style::Stylize;
@@ -64,7 +65,10 @@ pub async fn execute_plan(
             }
         };
 
-        let status = child.wait().await.unwrap_or_else(|_| std::process::ExitStatus::default());
+        let status = child
+            .wait()
+            .await
+            .unwrap_or_else(|_| std::process::ExitStatus::default());
         if status.success() {
             println!("{} {}", "✓".green(), success_msg);
             return Ok(());
@@ -79,7 +83,7 @@ pub async fn execute_plan(
 
     child_cmd.arg("--color=never");
 
-    let mut spinner = ui::spinner(spinner_msg);
+    let spinner = ui::spinner(spinner_msg);
 
     let mut child = match child_cmd
         .args(&plan.args)
@@ -114,7 +118,6 @@ pub async fn execute_plan(
 
     let mut buf = [0u8; 128];
     let mut current_line = String::new();
-    let mut last_status = spinner_msg.to_string();
 
     while let Ok(n) = stdout.read(&mut buf).await {
         if n == 0 {
@@ -129,12 +132,12 @@ pub async fn execute_plan(
                     current_line.clear();
                     continue;
                 }
-                
+
                 // Extremely simple spinner update based on current line.
                 // Pacman's complex hook parsing remains in run_pacman if we don't fully migrate it,
                 // but a generic executor should just show the latest output.
                 if clean.len() > 3 {
-                    last_status = clean.chars().take(60).collect::<String>();
+                    let last_status: String = clean.chars().take(60).collect();
                     spinner.set_message(format!("{}...", last_status));
                 }
                 current_line.clear();
@@ -145,7 +148,10 @@ pub async fn execute_plan(
     }
 
     spinner.finish_and_clear();
-    let status = child.wait().await.unwrap_or_else(|_| std::process::ExitStatus::default());
+    let status = child
+        .wait()
+        .await
+        .unwrap_or_else(|_| std::process::ExitStatus::default());
     let err_output = err_handle.await.unwrap_or_default();
 
     if status.success() {
