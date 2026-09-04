@@ -23,12 +23,47 @@ impl PackageManager for PacmanBackend {
         }
     }
 
-    async fn search(&self, _query: &str) -> Result<Vec<PackageModel>, BackendError> {
-        todo!()
+    async fn search(&self, query: &str) -> Result<Vec<PackageModel>, BackendError> {
+        let alpm_handle = crate::core::alpm_init::init_alpm()
+            .map_err(|e| BackendError::ExecutionError(1, e.to_string()))?;
+        let local_db = alpm_handle.localdb();
+        let mut results = Vec::new();
+        for db in alpm_handle.syncdbs() {
+            for pkg in db.pkgs() {
+                if pkg.name().to_lowercase().contains(&query.to_lowercase())
+                    || pkg.desc().unwrap_or("").to_lowercase().contains(&query.to_lowercase())
+                {
+                    results.push(PackageModel {
+                        name: pkg.name().to_string(),
+                        version: pkg.version().to_string(),
+                        repo: db.name().to_string(),
+                        is_installed: local_db.pkg(pkg.name()).is_ok(),
+                        is_upgradable: false,
+                        size_mb: pkg.isize() as f64 / 1_048_576.0,
+                    });
+                }
+            }
+        }
+        Ok(results)
     }
 
-    async fn info(&self, _package: &str) -> Result<Option<PackageModel>, BackendError> {
-        todo!()
+    async fn info(&self, package: &str) -> Result<Option<PackageModel>, BackendError> {
+        let alpm_handle = crate::core::alpm_init::init_alpm()
+            .map_err(|e| BackendError::ExecutionError(1, e.to_string()))?;
+        let local_db = alpm_handle.localdb();
+        for db in alpm_handle.syncdbs() {
+            if let Ok(pkg) = db.pkg(package) {
+                return Ok(Some(PackageModel {
+                    name: pkg.name().to_string(),
+                    version: pkg.version().to_string(),
+                    repo: db.name().to_string(),
+                    is_installed: local_db.pkg(pkg.name()).is_ok(),
+                    is_upgradable: false,
+                    size_mb: pkg.isize() as f64 / 1_048_576.0,
+                }));
+            }
+        }
+        Ok(None)
     }
 
     async fn list_installed(&self) -> Result<Vec<PackageModel>, BackendError> {
