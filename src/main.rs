@@ -87,27 +87,59 @@ async fn main() -> anyhow::Result<()> {
         std::process::exit(0);
     });
 
-    match active_command {
-        Commands::Tui => {
-            tui::run().await?;
+    let backend = match crate::backend::detect_backend() {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("{} {}", "error:".red().bold(), e);
+            std::process::exit(1);
         }
-        Commands::Completions { shell } => match shell {
-            clap_complete::Shell::Bash => {
-                print!("{}", include_str!("completions/bash.sh"));
-            }
-            clap_complete::Shell::Zsh => {
-                print!("{}", include_str!("completions/zsh.sh"));
-            }
-            clap_complete::Shell::Fish => {
-                print!("{}", include_str!("completions/fish.sh"));
-            }
+    };
+
+    if matches!(active_command, Commands::Tui) {
+        tui::run().await?;
+        return Ok(());
+    }
+    
+    if let Commands::Completions { shell } = active_command {
+        match shell {
+            clap_complete::Shell::Bash => print!("{}", include_str!("completions/bash.sh")),
+            clap_complete::Shell::Zsh => print!("{}", include_str!("completions/zsh.sh")),
+            clap_complete::Shell::Fish => print!("{}", include_str!("completions/fish.sh")),
             _ => {
                 use clap::CommandFactory;
                 let mut cmd = Cli::command();
                 let bin_name = cmd.get_name().to_string();
                 clap_complete::generate(shell, &mut cmd, bin_name, &mut std::io::stdout());
             }
-        },
+        }
+        return Ok(());
+    }
+
+    if backend.name() != "pacman" {
+        match active_command {
+            Commands::Update => {
+                let plan = backend.build_update()?;
+                crate::core::process::execute_plan(&plan, "updating repositories...", "updated successfully.", cli.dry_run, cli.verbose).await?;
+            }
+            Commands::Install { packages } => {
+                let pkgs: Vec<&str> = packages.iter().map(|s| s.as_str()).collect();
+                let plan = backend.build_install(&pkgs)?;
+                crate::core::process::execute_plan(&plan, "installing packages...", "installed successfully.", cli.dry_run, cli.verbose).await?;
+            }
+            Commands::Remove { packages, .. } => {
+                let pkgs: Vec<&str> = packages.iter().map(|s| s.as_str()).collect();
+                let plan = backend.build_remove(&pkgs)?;
+                crate::core::process::execute_plan(&plan, "removing packages...", "removed successfully.", cli.dry_run, cli.verbose).await?;
+            }
+            _ => {
+                println!("{} command not yet implemented for generic backend.", "✗".red());
+            }
+        }
+        return Ok(());
+    }
+
+    match active_command {
+        Commands::Tui | Commands::Completions { .. } => unreachable!(),
         Commands::Update => {
             core::pacman::run_pacman(
                 &["-Sy", "--noconfirm"],
