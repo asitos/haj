@@ -554,11 +554,12 @@ impl App {
                 .count();
         } else {
             self.orphan_count = 0;
-            if let Ok((packages, installed, updates)) = backend.get_all_packages().await {
-                self.package_list = packages;
-                self.installed_count = installed;
-                self.updates_count = updates;
-            }
+        }
+
+        if let Ok((packages, installed, updates)) = backend.get_all_packages().await {
+            self.package_list = packages;
+            self.installed_count = installed;
+            self.updates_count = updates;
         }
 
         self.transactions.clear();
