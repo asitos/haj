@@ -136,7 +136,6 @@ impl std::fmt::Display for SortMode {
     }
 }
 
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NewsItem {
     pub title: String,

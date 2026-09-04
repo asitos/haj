@@ -14,7 +14,9 @@ impl std::fmt::Display for BackendError {
         match self {
             Self::NotFound(pkg) => write!(f, "Package not found: {}", pkg),
             Self::NetworkError(err) => write!(f, "Network error: {}", err),
-            Self::ExecutionError(code, stderr) => write!(f, "Execution failed ({}): {}", code, stderr),
+            Self::ExecutionError(code, stderr) => {
+                write!(f, "Execution failed ({}): {}", code, stderr)
+            }
             Self::ParseError(err) => write!(f, "Parse error: {}", err),
         }
     }

@@ -1,12 +1,12 @@
-pub mod process;
-pub mod package;
 pub mod alpm_init;
 pub mod aur;
 pub mod cache;
 pub mod conflicts;
 pub mod downgrade;
 pub mod history;
+pub mod package;
 pub mod pacman;
+pub mod process;
 pub mod ui;
 
 use alpm::Alpm;

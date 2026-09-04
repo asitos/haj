@@ -432,7 +432,9 @@ pub fn print_network_error(fallback_msg: &str) {
     println!("{}", network_error_message(fallback_msg, is_connected));
 }
 
-pub fn get_all_packages(alpm: &alpm::Alpm) -> (Vec<crate::core::package::PackageModel>, usize, usize) {
+pub fn get_all_packages(
+    alpm: &alpm::Alpm,
+) -> (Vec<crate::core::package::PackageModel>, usize, usize) {
     let mut package_list = Vec::new();
     let mut installed_count = 0;
     let mut updates_count = 0;
