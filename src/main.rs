@@ -1416,7 +1416,7 @@ mod tests {
     }
 
     #[test]
-    fn test_conflict_ui_no_conflict() {
+    fn test_conflict_ui_no_conflicts() {
         let conflicts = vec![];
         let res = core::ui::handle_conflicts_ui(&conflicts, false, false, |_| true);
         assert_eq!(res, Ok(false));
@@ -1424,7 +1424,7 @@ mod tests {
 
     #[test]
     fn test_conflict_ui_accepted() {
-        let conflicts = vec![core::conflicts::ConflictInfo {
+        let conflicts = vec![crate::backend::traits::ConflictInfo {
             incoming_pkg: "nvidia-dkms".to_string(),
             installed_pkg: "nvidia".to_string(),
             constraint: None,
@@ -1435,7 +1435,7 @@ mod tests {
 
     #[test]
     fn test_conflict_ui_declined() {
-        let conflicts = vec![core::conflicts::ConflictInfo {
+        let conflicts = vec![crate::backend::traits::ConflictInfo {
             incoming_pkg: "nvidia-dkms".to_string(),
             installed_pkg: "nvidia".to_string(),
             constraint: None,
@@ -1447,12 +1447,12 @@ mod tests {
     #[test]
     fn test_conflict_ui_multiple() {
         let conflicts = vec![
-            core::conflicts::ConflictInfo {
+            crate::backend::traits::ConflictInfo {
                 incoming_pkg: "a".to_string(),
                 installed_pkg: "b".to_string(),
                 constraint: None,
             },
-            core::conflicts::ConflictInfo {
+            crate::backend::traits::ConflictInfo {
                 incoming_pkg: "c".to_string(),
                 installed_pkg: "d".to_string(),
                 constraint: None,
@@ -1469,7 +1469,7 @@ mod tests {
 
     #[test]
     fn test_conflict_ui_dry_run() {
-        let conflicts = vec![core::conflicts::ConflictInfo {
+        let conflicts = vec![crate::backend::traits::ConflictInfo {
             incoming_pkg: "nvidia-dkms".to_string(),
             installed_pkg: "nvidia".to_string(),
             constraint: None,
@@ -1482,7 +1482,7 @@ mod tests {
 
     #[test]
     fn test_conflict_ui_noconfirm() {
-        let conflicts = vec![core::conflicts::ConflictInfo {
+        let conflicts = vec![crate::backend::traits::ConflictInfo {
             incoming_pkg: "nvidia-dkms".to_string(),
             installed_pkg: "nvidia".to_string(),
             constraint: None,
