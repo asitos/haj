@@ -23,6 +23,7 @@ pub fn init_alpm() -> Result<Alpm> {
     Ok(handle)
 }
 
+#[allow(dead_code)]
 pub fn owns(alpm: &Alpm, file_path: &str) {
     let local_db = alpm.localdb();
     let target = Path::new(file_path)
@@ -46,6 +47,7 @@ pub fn owns(alpm: &Alpm, file_path: &str) {
     }
 }
 
+#[allow(dead_code)]
 pub fn files(alpm: &Alpm, pkg_name: &str) {
     let local_db = alpm.localdb();
 

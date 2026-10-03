@@ -1,8 +1,9 @@
 use crate::cli::Cli;
-use crate::core::ui::prompt_confirm;
+
 use crate::ui;
 use crossterm::style::Stylize;
 
+#[allow(dead_code)]
 pub async fn run_pacman(
     args: &[&str],
     spinner_msg: &str,
@@ -364,8 +365,8 @@ pub async fn check_and_offer_sync(cli: &Cli) {
         return;
     }
 
-    let mut needs_sync = false;
     let mut missing = true;
+    let mut newest_mtime: Option<std::time::SystemTime> = None;
     let sync_dir =
         std::path::Path::new(cli.root.as_deref().unwrap_or("/")).join("var/lib/pacman/sync");
 
@@ -373,14 +374,24 @@ pub async fn check_and_offer_sync(cli: &Cli) {
         for entry in entries.flatten() {
             if entry.path().extension().and_then(|s| s.to_str()) == Some("db") {
                 missing = false;
-                if let Ok(metadata) = entry.metadata()
-                    && let Ok(modified) = metadata.modified()
-                    && let Ok(duration) = std::time::SystemTime::now().duration_since(modified)
-                    && duration.as_secs() > 7 * 24 * 60 * 60
-                {
-                    needs_sync = true;
-                    break;
+                if let Ok(metadata) = entry.metadata() {
+                    if let Ok(modified) = metadata.modified() {
+                        match newest_mtime {
+                            Some(newest) if modified > newest => newest_mtime = Some(modified),
+                            None => newest_mtime = Some(modified),
+                            _ => {}
+                        }
+                    }
                 }
+            }
+        }
+    }
+
+    let mut needs_sync = false;
+    if let Some(newest) = newest_mtime {
+        if let Ok(duration) = std::time::SystemTime::now().duration_since(newest) {
+            if duration.as_secs() > 7 * 24 * 60 * 60 {
+                needs_sync = true;
             }
         }
     }
@@ -391,21 +402,11 @@ pub async fn check_and_offer_sync(cli: &Cli) {
         } else {
             "package databases are stale (older than 7 days)."
         };
-        println!("\n{} {}", "::".blue(), msg);
-        if cli.noconfirm || prompt_confirm("run 'haj sync' now? [Y/n]") {
-            run_pacman(
-                &["-Sy"],
-                "syncing package databases from mirrors...",
-                "repositories synced successfully.",
-                cli.dry_run,
-                cli.verbose,
-                &cli.root,
-            )
-            .await;
-        }
+        println!("{} {} (run 'haj sync' to update)", "::".yellow(), msg);
     }
 }
 
+#[allow(dead_code)]
 pub fn network_error_message(fallback_msg: &str, is_connected: bool) -> String {
     if is_connected {
         fallback_msg.to_string()
@@ -417,6 +418,7 @@ pub fn network_error_message(fallback_msg: &str, is_connected: bool) -> String {
     }
 }
 
+#[allow(dead_code)]
 pub fn print_network_error(fallback_msg: &str) {
     let ping_status = std::process::Command::new("ping")
         .arg("-c")

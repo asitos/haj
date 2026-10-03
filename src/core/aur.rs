@@ -10,8 +10,10 @@ use tokio::process::Command;
 pub struct AurPackage {
     pub name: String,
     pub version: String,
+    #[allow(dead_code)]
     pub description: Option<String>,
     #[serde(default)]
+    #[allow(dead_code)]
     pub num_votes: u64,
     #[serde(default, rename = "Conflicts")]
     #[allow(dead_code)]

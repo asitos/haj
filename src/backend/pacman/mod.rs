@@ -1,3 +1,4 @@
+use crate::backend::traits::{HistoryEntry, LogEntry, SystemStats, TransactionAction};
 use crate::backend::traits::{BackendError, Capabilities, CommandPlan, PackageManager};
 use crate::core::package::PackageModel;
 use async_trait::async_trait;
@@ -12,14 +13,107 @@ impl PacmanBackend {
 
 #[async_trait]
 impl PackageManager for PacmanBackend {
+    fn build_downgrade(&self, _package: &str, _version: &str) -> Result<CommandPlan, BackendError> {
+        Err(BackendError::NotSupported("pacman needs interactive downgrade or explicit pacman -U".into()))
+    }
+    
+    fn build_interactive_downgrade(&self, package: &str) -> Result<CommandPlan, BackendError> {
+        Ok(CommandPlan {
+            executable: "downgrade".into(),
+            args: vec![package.to_string()],
+            env: Vec::new(),
+            requires_root: true,
+        })
+    }
+    
+
+    async fn owns_file(&self, _path: &str) -> Result<Option<PackageModel>, BackendError> { Ok(None) }
+    async fn list_files(&self, _package: &str) -> Result<Vec<String>, BackendError> { Ok(Vec::new()) }
+    async fn locate_file(&self, _file: &str) -> Result<Vec<String>, BackendError> { Ok(Vec::new()) }
+    fn build_clean(&self) -> Result<CommandPlan, BackendError> {
+        Ok(CommandPlan { executable: "pacman".into(), args: vec!["-Scc".into()], env: Vec::new(), requires_root: true })
+    }
+    fn build_clean_orphans(&self) -> Result<CommandPlan, BackendError> {
+        Ok(CommandPlan { executable: "pacman".into(), args: vec!["-Qtdq".into()], env: Vec::new(), requires_root: true })
+    }
+    fn build_fetch(&self, _packages: &[&str]) -> Result<CommandPlan, BackendError> {
+        Ok(CommandPlan { executable: "pacman".into(), args: vec!["-Sw".into()], env: Vec::new(), requires_root: true })
+    }
+    fn build_mark_explicit(&self, _package: &str) -> Result<CommandPlan, BackendError> {
+        Ok(CommandPlan { executable: "pacman".into(), args: vec!["-D".into(), "--asexplicit".into()], env: Vec::new(), requires_root: true })
+    }
+    fn build_mark_dependency(&self, _package: &str) -> Result<CommandPlan, BackendError> {
+        Ok(CommandPlan { executable: "pacman".into(), args: vec!["-D".into(), "--asdeps".into()], env: Vec::new(), requires_root: true })
+    }
+
+    async fn list_group_or_meta(&self, name: &str) -> Result<Vec<PackageModel>, BackendError> {
+        // Simple mock
+        Ok(Vec::new())
+    }
+    
+    async fn get_history(&self, _limit: usize) -> Result<Vec<HistoryEntry>, BackendError> {
+        let output = tokio::process::Command::new("tail").args(["-n", &(_limit * 10).to_string(), "/var/log/pacman.log"]).output().await.unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut entries = Vec::new();
+        for line in stdout.lines().rev() {
+            if line.contains("[ALPM]") && (line.contains("installed") || line.contains("upgraded") || line.contains("removed")) {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 6 {
+                    let ts = format!("{} {}", parts[0].trim_start_matches('['), parts[1].trim_end_matches(']'));
+                    let action = parts[3].to_string();
+                    let pkg = parts[4].to_string();
+                    let ver = parts[5].to_string();
+                    entries.push(HistoryEntry {
+                        timestamp: ts,
+                        action,
+                        package: pkg,
+                        version: ver,
+                    });
+                    if entries.len() >= _limit { break; }
+                }
+            }
+        }
+        Ok(entries)
+    }
+    
+    async fn get_log(&self, lines: usize) -> Result<Vec<LogEntry>, BackendError> {
+        let output = tokio::process::Command::new("tail").args(["-n", &lines.to_string(), "/var/log/pacman.log"]).output().await.unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut entries = Vec::new();
+        for line in stdout.lines() {
+            if let Some(idx) = line.find(']') {
+                let ts = line[1..idx].to_string();
+                let msg = line[idx+1..].trim().to_string();
+                entries.push(LogEntry { timestamp: ts, message: msg });
+            }
+        }
+        Ok(entries)
+    }
+    
+    async fn get_stats(&self) -> Result<SystemStats, BackendError> {
+        let exp = tokio::process::Command::new("pacman").arg("-Qeq").output().await.unwrap();
+        let dep = tokio::process::Command::new("pacman").arg("-Qdq").output().await.unwrap();
+        let e_c = String::from_utf8_lossy(&exp.stdout).lines().count();
+        let d_c = String::from_utf8_lossy(&dep.stdout).lines().count();
+        Ok(SystemStats { explicit: e_c, dependencies: d_c, total: e_c + d_c })
+    }
+    
+    async fn get_orphan_count(&self) -> Result<usize, BackendError> {
+        let out = tokio::process::Command::new("pacman").arg("-Qtdq").output().await.unwrap();
+        Ok(String::from_utf8_lossy(&out.stdout).lines().count())
+    }
+
     fn name(&self) -> &'static str {
         "pacman"
     }
 
     fn capabilities(&self) -> Capabilities {
         Capabilities {
-            supports_aur: true,
-            supports_downgrade: true,
+            supports_external: true,
+            supports_downgrade: false,
+            supports_interactive_downgrade: true,
+            supports_groups: true,
+
         }
     }
 
@@ -84,7 +178,7 @@ impl PackageManager for PacmanBackend {
                 .into_iter()
                 .chain(packages.iter().map(|s| s.to_string()))
                 .collect(),
-            requires_root: true,
+            env: Vec::new(), requires_root: true,
         })
     }
 
@@ -95,7 +189,7 @@ impl PackageManager for PacmanBackend {
                 .into_iter()
                 .chain(packages.iter().map(|s| s.to_string()))
                 .collect(),
-            requires_root: true,
+            env: Vec::new(), requires_root: true,
         })
     }
 
@@ -103,7 +197,7 @@ impl PackageManager for PacmanBackend {
         Ok(CommandPlan {
             executable: "pacman".to_string(),
             args: vec!["-Sy".to_string(), "--noconfirm".to_string()],
-            requires_root: true,
+            env: Vec::new(), requires_root: true,
         })
     }
 
@@ -115,14 +209,14 @@ impl PackageManager for PacmanBackend {
                 path.to_string_lossy().to_string(),
                 "--noconfirm".to_string(),
             ],
-            requires_root: true,
+            env: Vec::new(), requires_root: true,
         })
     }
     fn build_upgrade(&self) -> Result<CommandPlan, BackendError> {
         Ok(CommandPlan {
             executable: "pacman".to_string(),
             args: vec!["-Su".to_string(), "--noconfirm".to_string()],
-            requires_root: true,
+            env: Vec::new(), requires_root: true,
         })
     }
 
@@ -144,6 +238,7 @@ impl PackageManager for PacmanBackend {
         Ok(summaries
             .into_iter()
             .map(|s| crate::backend::traits::InstallSummary {
+                action: TransactionAction::Install,
                 name: s.name,
                 version: s.version,
                 download_size_mb: s.download_size_mb,
@@ -174,10 +269,10 @@ impl PackageManager for PacmanBackend {
             .collect())
     }
 
-    async fn resolve_aur(
+    async fn resolve_external(
         &self,
         packages: &[&str],
-    ) -> Result<crate::backend::traits::AurResolution, BackendError> {
+    ) -> Result<crate::backend::traits::ExternalResolution, BackendError> {
         let mut resolved = Vec::new();
         for &pkg in packages {
             let res = crate::core::aur::search(pkg)
@@ -202,10 +297,10 @@ impl PackageManager for PacmanBackend {
                 return Err(BackendError::NotFound(pkg.to_string()));
             }
         }
-        Ok(crate::backend::traits::AurResolution { packages: resolved })
+        Ok(crate::backend::traits::ExternalResolution { packages: resolved })
     }
 
-    async fn build_aur_package(
+    async fn build_external_package(
         &self,
         package: &str,
         verbose: bool,

@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 /// Extracts (`package_name`, `version_string`) from standard Arch package filenames
 /// e.g. "bash-5.2.026-1-x86_64.pkg.tar.zst" -> ("bash", "5.2.026-1")
+#[allow(dead_code)]
 fn parse_package_filename(filename: &str) -> Option<(&str, &str)> {
     let clean = filename
         .strip_suffix(".pkg.tar.zst")
@@ -27,6 +28,7 @@ fn parse_package_filename(filename: &str) -> Option<(&str, &str)> {
     Some((pkg_name, version_str))
 }
 
+#[allow(dead_code)]
 pub fn select_downgrade_target(package: &str) -> Option<PathBuf> {
     println!(
         "{} searching caches for '{}'...",

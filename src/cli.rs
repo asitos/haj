@@ -360,6 +360,8 @@ Options:
     Downgrade {
         /// package to downgrade
         package: String,
+        /// optional target version
+        version: Option<String>,
     },
 
     #[command(

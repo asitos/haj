@@ -693,7 +693,7 @@ async fn legacy_pacman_handler(
                     core::history::show_history(limit);
                 }
 
-                Commands::Downgrade { package } => {
+                Commands::Downgrade { package, version } => {
                     drop(alpm_handle);
 
                     if let Some(archive_path) = core::downgrade::select_downgrade_target(&package) {

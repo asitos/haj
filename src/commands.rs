@@ -14,7 +14,7 @@ pub async fn process_installation(
     for pkg in &packages {
         if cli.repo || backend.info(pkg).await.is_ok() {
             native_pkgs.push(pkg.clone());
-        } else if backend.capabilities().supports_aur {
+        } else if backend.capabilities().supports_external {
             aur_pkgs.push(pkg.clone());
         } else {
             println!("{} package '{}' not found", "✗".red(), pkg.clone().bold());
@@ -47,7 +47,7 @@ pub async fn process_installation(
     let mut resolved_aur_pkgs = Vec::new();
     if !aur_pkgs.is_empty() {
         let aur_pkgs_str: Vec<&str> = aur_pkgs.iter().map(|s| s.as_str()).collect();
-        match backend.resolve_aur(&aur_pkgs_str).await {
+        match backend.resolve_external(&aur_pkgs_str).await {
             Ok(resolution) => resolved_aur_pkgs = resolution.packages,
             Err(e) => {
                 println!("{} failed to resolve aur packages: {}", "✗".red(), e);
@@ -116,7 +116,7 @@ pub async fn process_installation(
         println!();
     }
 
-    if !cli.noconfirm {
+    if !cli.noconfirm && !cli.dry_run {
         let has_aur = !resolved_aur_pkgs.is_empty();
         let mut prompt_msg = if has_aur {
             "proceed with installation? [Y/n/v] (v = view PKGBUILDs)".to_string()
@@ -187,7 +187,7 @@ pub async fn process_installation(
                 aur_ver.clone().green()
             );
 
-            match backend.build_aur_package(&pkg, cli.verbose).await {
+            match backend.build_external_package(&pkg, cli.verbose).await {
                 Ok(pkg_path) => {
                     let spinner_msg = if is_update {
                         format!("updating built package {}...", pkg.clone().magenta().bold())

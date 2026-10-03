@@ -51,6 +51,7 @@ pub async fn ensure_sudo() -> anyhow::Result<()> {
 }
 
 #[cfg(feature = "pacman")]
+#[allow(dead_code)]
 pub fn manage_pacnew_files() -> anyhow::Result<()> {
     println!("{} launching pacdiff...", "::".blue());
 

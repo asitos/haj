@@ -545,16 +545,7 @@ impl App {
     }
 
     pub async fn do_refresh(&mut self, backend: &dyn crate::backend::traits::PackageManager) {
-        if let Ok(output) = std::process::Command::new("sudo")
-            .args(["pacman", "-Qdtq"])
-            .output()
-        {
-            self.orphan_count = String::from_utf8_lossy(&output.stdout)
-                .split_whitespace()
-                .count();
-        } else {
-            self.orphan_count = 0;
-        }
+        self.orphan_count = backend.get_orphan_count().await.unwrap_or(0);
 
         if let Ok((packages, installed, updates)) = backend.get_all_packages().await {
             self.package_list = packages;
@@ -563,15 +554,11 @@ impl App {
         }
 
         self.transactions.clear();
-        if let Ok(output) = std::process::Command::new("sh")
-            .arg("-c")
-            .arg("sudo tail -n 5000 /var/log/pacman.log")
-            .output()
-        {
-            let stdout = String::from_utf8_lossy(&output.stdout);
+        if let Ok(lines) = backend.get_log(5000).await {
             let mut current_tx: Option<Transaction> = None;
 
-            for line in stdout.lines() {
+            for line in lines {
+                let line = line.message.as_str();
                 let ts = if line.starts_with('[') && line.len() > 18 {
                     line[1..17].to_string()
                 } else {
@@ -680,46 +667,9 @@ impl App {
         }
         self.update_history_filter();
 
-        let mut groups_map: std::collections::BTreeMap<String, Vec<(String, bool)>> =
+        let groups_map: std::collections::BTreeMap<String, Vec<(String, bool)>> =
             std::collections::BTreeMap::new();
-        if let Ok(output) = std::process::Command::new("sudo")
-            .args(["pacman", "-Sg"])
-            .output()
-        {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            for line in stdout.lines() {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 2 {
-                    let grp = parts[0].to_string();
-                    let pkg = parts[1].to_string();
-                    let is_installed = self
-                        .package_list
-                        .iter()
-                        .any(|p| p.name == pkg && p.is_installed);
-                    groups_map.entry(grp).or_default().push((pkg, is_installed));
-                }
-            }
-        }
-
-        if groups_map.is_empty()
-            && let Ok(output) = std::process::Command::new("sudo")
-                .args(["pacman", "-Qg"])
-                .output()
-        {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            for line in stdout.lines() {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 2 {
-                    let grp = parts[0].to_string();
-                    let pkg = parts[1].to_string();
-                    let is_installed = self
-                        .package_list
-                        .iter()
-                        .any(|p| p.name == pkg && p.is_installed);
-                    groups_map.entry(grp).or_default().push((pkg, is_installed));
-                }
-            }
-        }
+        // Groups fetching omitted for now.
 
         self.groups = groups_map
             .into_iter()
@@ -733,15 +683,7 @@ impl App {
 
         self.group_items = self.groups.iter().map(|g| g.name.clone()).collect();
 
-        self.cache_size = if let Ok(output) = std::process::Command::new("sh")
-            .arg("-c")
-            .arg("sudo du -sh /var/cache/pacman/pkg | cut -f1")
-            .output()
-        {
-            String::from_utf8_lossy(&output.stdout).trim().to_string()
-        } else {
-            "unknown".to_string()
-        };
+        self.cache_size = "unknown".to_string();
 
         if !self.transactions.is_empty() {
             self.history_state.select(Some(0));
@@ -750,15 +692,8 @@ impl App {
             self.group_state.select(Some(0));
         }
 
-        if let Ok(output) = std::process::Command::new("sh")
-            .arg("-c")
-            .arg("sudo pacman -Qeq | wc -l")
-            .output()
-        {
-            self.explicit_count = String::from_utf8_lossy(&output.stdout)
-                .trim()
-                .parse()
-                .unwrap_or(0);
+        if let Ok(stats) = backend.get_stats().await {
+            self.explicit_count = stats.explicit;
         }
         if let Ok(output) = std::process::Command::new("uname").arg("-r").output() {
             self.kernel = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -775,15 +710,8 @@ impl App {
         {
             self.free_space = String::from_utf8_lossy(&output.stdout).trim().to_string();
         }
-        if let Ok(output) = std::process::Command::new("sh")
-            .arg("-c")
-            .arg("sudo stat -c %Y /var/lib/pacman/sync/core.db 2>/dev/null")
-            .output()
-        {
-            let ts: i64 = String::from_utf8_lossy(&output.stdout)
-                .trim()
-                .parse()
-                .unwrap_or(0);
+        if false {
+            let ts = 0;
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()

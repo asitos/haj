@@ -40,7 +40,13 @@ pub async fn execute_plan(
         c.arg(&plan.executable);
         c
     } else {
-        tokio::process::Command::new(&plan.executable)
+        {
+        let mut cmd = tokio::process::Command::new(&plan.executable);
+        for (k, v) in &plan.env {
+            cmd.env(k, v);
+        }
+        cmd
+    }
     };
 
     if is_verbose {
