@@ -315,7 +315,7 @@ verbose = false
 
 ## license (BORING)
 
-MIT license. see `LICENSE` for more information.
+GPL-3.0 license. see `LICENSE` for more information.
 
 ---
 
