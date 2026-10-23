@@ -46,7 +46,7 @@ impl PackageManager for PacmanBackend {
         Ok(CommandPlan { executable: "pacman".into(), args: vec!["-D".into(), "--asdeps".into()], env: Vec::new(), requires_root: true })
     }
 
-    async fn list_group_or_meta(&self, name: &str) -> Result<Vec<PackageModel>, BackendError> {
+    async fn list_group_or_meta(&self, _name: &str) -> Result<Vec<PackageModel>, BackendError> {
         // Simple mock
         Ok(Vec::new())
     }
@@ -118,26 +118,47 @@ impl PackageManager for PacmanBackend {
     }
 
     async fn search(&self, query: &str) -> Result<Vec<PackageModel>, BackendError> {
-        let alpm_handle = crate::core::alpm_init::init_alpm()
-            .map_err(|e| BackendError::ExecutionError(1, e.to_string()))?;
-        let local_db = alpm_handle.localdb();
         let mut results = Vec::new();
-        for db in alpm_handle.syncdbs() {
-            for pkg in db.pkgs() {
-                if pkg.name().to_lowercase().contains(&query.to_lowercase())
-                    || pkg
-                        .desc()
-                        .unwrap_or("")
-                        .to_lowercase()
-                        .contains(&query.to_lowercase())
-                {
+        let mut installed_pkgs = std::collections::HashSet::new();
+
+        {
+            let alpm_handle = crate::core::alpm_init::init_alpm()
+                .map_err(|e| BackendError::ExecutionError(1, e.to_string()))?;
+            let local_db = alpm_handle.localdb();
+            
+            for pkg in local_db.pkgs() {
+                installed_pkgs.insert(pkg.name().to_string());
+            }
+
+            for db in alpm_handle.syncdbs() {
+                for pkg in db.pkgs() {
+                    if pkg.name().to_lowercase().contains(&query.to_lowercase()) {
+                        results.push(PackageModel {
+                            name: pkg.name().to_string(),
+                            version: pkg.version().to_string(),
+                            repo: db.name().to_string(),
+                            desc: pkg.desc().map(|s| s.to_string()),
+                            is_installed: local_db.pkg(pkg.name()).is_ok(),
+                            is_upgradable: false,
+                            size_mb: pkg.isize() as f64 / 1_048_576.0,
+                        });
+                    }
+                }
+            }
+        }
+
+        let config = crate::config::load_config();
+        if !config.general.repo_only {
+            if let Ok(aur_res) = crate::core::aur::search(query).await {
+                for pkg in aur_res.results {
                     results.push(PackageModel {
-                        name: pkg.name().to_string(),
-                        version: pkg.version().to_string(),
-                        repo: db.name().to_string(),
-                        is_installed: local_db.pkg(pkg.name()).is_ok(),
+                        name: pkg.name.clone(),
+                        version: pkg.version,
+                        repo: "aur".to_string(),
+                        desc: pkg.description.map(|s| s.to_string()),
+                        is_installed: installed_pkgs.contains(&pkg.name),
                         is_upgradable: false,
-                        size_mb: pkg.isize() as f64 / 1_048_576.0,
+                        size_mb: 0.0,
                     });
                 }
             }
@@ -155,6 +176,7 @@ impl PackageManager for PacmanBackend {
                     name: pkg.name().to_string(),
                     version: pkg.version().to_string(),
                     repo: db.name().to_string(),
+                    desc: pkg.desc().map(|s| s.to_string()),
                     is_installed: local_db.pkg(pkg.name()).is_ok(),
                     is_upgradable: false,
                     size_mb: pkg.isize() as f64 / 1_048_576.0,

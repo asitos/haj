@@ -16,6 +16,7 @@ pub fn parse_apt_cache_search(stdout: &str) -> Vec<PackageModel> {
                 is_installed: false,
                 is_upgradable: false,
                 size_mb: 0.0,
+                desc: Some(_desc.to_string()),
             });
         }
     }
@@ -53,7 +54,7 @@ pub fn parse_apt_cache_show(stdout: &str, package: &str) -> Option<PackageModel>
             repo: "apt".to_string(),
             is_installed: false,
             is_upgradable: false,
-            size_mb,
+            size_mb, desc: None,
         })
     }
 }
@@ -70,6 +71,7 @@ pub fn parse_dpkg_query_list(stdout: &str) -> Vec<PackageModel> {
                 is_installed: true,
                 is_upgradable: false,
                 size_mb: 0.0,
+                desc: None,
             });
         }
     }

@@ -469,6 +469,7 @@ pub fn get_all_packages(
                 is_installed,
                 is_upgradable,
                 size_mb: pkg.isize() as f64 / 1_048_576.0,
+                desc: None,
             });
         }
     }
@@ -484,6 +485,7 @@ pub fn get_all_packages(
                 is_installed: true,
                 is_upgradable: false,
                 size_mb: pkg.isize() as f64 / 1_048_576.0,
+                desc: None,
             });
         }
     }

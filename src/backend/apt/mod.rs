@@ -37,6 +37,7 @@ impl PackageManager for AptBackend {
     async fn search(&self, query: &str) -> Result<Vec<PackageModel>, BackendError> {
         let output = Command::new("apt-cache")
             .arg("search")
+            .arg("--names-only")
             .arg(query)
             .stdout(Stdio::piped())
             .output()
