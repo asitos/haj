@@ -878,21 +878,6 @@ pub mod news_fetch;
 use events::run_app;
 use news_fetch::{fetch_arch_news, fetch_article_body};
 pub async fn run(backend_pkg_mgr: &dyn crate::backend::traits::PackageManager) -> Result<()> {
-    let display3d = std::process::Command::new("display3d")
-        .arg("--help")
-        .output()
-        .map_err(|_| {
-            anyhow::anyhow!(
-                "display3d is required for `haj tui` but was not found in PATH. \\\n+                 Install it with: cargo install display3d"
-            )
-        })?;
-
-    if !display3d.status.success() {
-        return Err(anyhow::anyhow!(
-            "display3d is required for `haj tui` but could not be started successfully."
-        ));
-    }
-
     println!("🦈 haj requires root privileges for package management.");
     let status = std::process::Command::new("sudo").arg("-v").status()?;
     if !status.success() {

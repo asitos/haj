@@ -191,4 +191,8 @@ pub trait PackageManager: Send + Sync {
     async fn check_external_updates(&self) -> Result<Vec<(String, String, String)>, BackendError> {
         Ok(Vec::new())
     }
+
+    fn lock_file_path(&self) -> Option<&'static str> {
+        None
+    }
 }

@@ -19,6 +19,7 @@ exclude = [
 [features]
 default = ["pacman"]
 pacman = ["dep:alpm", "dep:pacmanconf"]
+alpm = ["pacman"]
 
 [dependencies]
 clap = { version = "4.4", features = ["derive"] }
@@ -47,3 +48,7 @@ async-trait = "0.1.92"
 opt-level = 3
 lto = true
 codegen-units = 1
+
+[[test]]
+name = "alpm_integration_tests"
+required-features = ["pacman"]

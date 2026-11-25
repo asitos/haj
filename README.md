@@ -59,7 +59,7 @@ support for `apt` is being worked upon.
 
 ## installation
 
-### aur (currently down for maintenance)
+### aur
 
 you can install [haj](https://aur.archlinux.org/packages/haj) using your favorite aur helper:
 
@@ -68,19 +68,6 @@ yay -S haj
 # or
 paru -S haj
 ```
-
-### pacman (blaharch-repo)
-
-install `haj` from the [official blahArch repo](https://asitos.github.io/blaharch-repo/) for future updates through `pacman`,
-add this to the bottom of your `/etc/pacman.conf`:
-
-```bash
-[blaharch]
-SigLevel = Optional TrustAll
-Server = https://asitos.github.io/blaharch-repo/$arch
-```
-
-then just sync and install normally (or update `haj` if it is already installed):
 
 ```bash
 sudo pacman -Syu haj
@@ -102,12 +89,40 @@ requires the rust toolchain (`cargo`).
 ```bash
 git clone https://github.com/asitos/haj.git
 cd haj
-cargo install display3d
-cargo build --release
-
-# install the binary to your system path
-sudo install -Dm755 target/release/haj /usr/bin/haj
+./install.sh
 ```
+
+the install script builds `haj` in release mode, auto-detects `libalpm` (falling back to `--no-default-features` when unavailable), and installs the binary + shell completions to `/usr/local`.
+
+useful flags:
+
+```bash
+# also install optional 3d rotating shark renderer
+./install.sh --with-display3d
+
+# build without libalpm bindings
+./install.sh --no-alpm
+
+# install to custom prefix (e.g. ~/.local without sudo)
+./install.sh --prefix ~/.local
+
+# uninstall haj binary and completions
+./install.sh --uninstall
+```
+
+### pacman (blaharch-repo)
+
+install `haj` from the [official blahArch repo](https://asitos.github.io/blaharch-repo/) for future updates through `pacman`,
+add this to the bottom of your `/etc/pacman.conf`:
+
+```bash
+[blaharch]
+SigLevel = Optional TrustAll
+Server = https://asitos.github.io/blaharch-repo/$arch
+```
+
+then just sync and install normally (or update `haj` if it is already installed):
+
 
 ### source release bundle
 

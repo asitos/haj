@@ -116,6 +116,8 @@ async fn run_orphan_sweep(backend_ref: &dyn crate::backend::traits::PackageManag
     }
 }
 
+static ACTIVE_LOCK_FILE: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tokio::spawn(async move {
@@ -125,9 +127,13 @@ async fn main() -> anyhow::Result<()> {
                 "✗".red().bold()
             );
 
-            let _ = std::process::Command::new("sudo")
-                .args(["rm", "-f", "/var/lib/pacman/db.lck"])
-                .status();
+            if let Some(&lock_path) = ACTIVE_LOCK_FILE.get()
+                && std::path::Path::new(lock_path).exists()
+            {
+                let _ = std::process::Command::new("sudo")
+                    .args(["rm", "-f", lock_path])
+                    .status();
+            }
 
             let _ = std::fs::remove_file("/tmp/haj.lock");
             std::process::exit(130);
@@ -203,6 +209,10 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
+    if let Some(lock_path) = backend.lock_file_path() {
+        let _ = ACTIVE_LOCK_FILE.set(lock_path);
+    }
+
     if matches!(active_command, Commands::Tui) {
         tui::run(backend.as_ref()).await?;
         return Ok(());
@@ -225,7 +235,6 @@ async fn main() -> anyhow::Result<()> {
 
     let backend_ref = backend.as_ref();
 
-    #[cfg(feature = "pacman")]
     if backend.name() == "pacman" {
         match active_command {
             Commands::Install { .. } | Commands::Interactive(_) | Commands::Search { .. } => {
@@ -532,7 +541,6 @@ async fn main() -> anyhow::Result<()> {
                     Err(e) => println!("{} {}", "✗".red(), e),
                 }
             } else {
-                #[cfg(feature = "pacman")]
                 if backend_ref.name() == "pacman" {
                     let candidates = crate::core::downgrade::list_candidates(&package);
                     if !candidates.is_empty() {
@@ -1091,7 +1099,6 @@ async fn main() -> anyhow::Result<()> {
         },
 
         Commands::Diff => {
-            #[cfg(feature = "pacman")]
             if backend_ref.name() == "pacman" {
                 if cli.dry_run {
                     println!(

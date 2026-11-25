@@ -1,15 +1,12 @@
 #[cfg(feature = "pacman")]
 pub mod alpm_init;
-#[cfg(feature = "pacman")]
 pub mod aur;
 pub mod cache;
 #[cfg(feature = "pacman")]
 pub mod conflicts;
-#[cfg(feature = "pacman")]
 pub mod downgrade;
 pub mod history;
 pub mod package;
-#[cfg(feature = "pacman")]
 pub mod pacman;
 pub mod process;
 pub mod ui;
@@ -50,7 +47,6 @@ pub async fn ensure_sudo() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[cfg(feature = "pacman")]
 #[allow(dead_code)]
 pub fn manage_pacnew_files() -> anyhow::Result<()> {
     println!("{} launching pacdiff...", "::".blue());

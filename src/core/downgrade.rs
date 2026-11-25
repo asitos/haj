@@ -51,10 +51,12 @@ pub fn list_candidates(package: &str) -> Vec<(PathBuf, String)> {
         scan_dir(&aur_cache, &mut candidate_entries);
     }
 
-    candidate_entries.sort_by(|a, b| match alpm::vercmp(a.1.as_str(), b.1.as_str()) {
-        Ordering::Greater => Ordering::Less,
-        Ordering::Less => Ordering::Greater,
-        Ordering::Equal => Ordering::Equal,
+    candidate_entries.sort_by(|a, b| {
+        match crate::core::pacman::vercmp(a.1.as_str(), b.1.as_str()) {
+            Ordering::Greater => Ordering::Less,
+            Ordering::Less => Ordering::Greater,
+            Ordering::Equal => Ordering::Equal,
+        }
     });
 
     candidate_entries
@@ -75,6 +77,7 @@ pub fn select_downgrade_target(package: &str) -> Option<PathBuf> {
         package.bold()
     );
 
+    #[cfg(feature = "pacman")]
     let current_version = if let Ok(alpm) = crate::core::alpm_init::init_alpm() {
         alpm.localdb()
             .pkg(package)
@@ -83,6 +86,18 @@ pub fn select_downgrade_target(package: &str) -> Option<PathBuf> {
     } else {
         None
     };
+    #[cfg(not(feature = "pacman"))]
+    let current_version = std::process::Command::new("pacman")
+        .args(["-Q", package])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .split_whitespace()
+                .nth(1)
+                .map(|s| s.to_string())
+        });
 
     if let Some(ref cur_ver) = current_version {
         println!(
@@ -100,7 +115,7 @@ pub fn select_downgrade_target(package: &str) -> Option<PathBuf> {
         let is_aur = path.to_string_lossy().contains(".cache/haj");
         let tag = if is_aur { " (aur)" } else { "" };
         let status_tag = if let Some(ref cur_ver) = current_version {
-            let cmp = alpm::vercmp(ver.as_str(), cur_ver.as_str());
+            let cmp = crate::core::pacman::vercmp(ver.as_str(), cur_ver.as_str());
             match cmp {
                 Ordering::Equal => " [current]".yellow().to_string(),
                 Ordering::Less => " [downgrade]".cyan().to_string(),

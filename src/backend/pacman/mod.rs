@@ -1,12 +1,22 @@
 use crate::backend::traits::{
     BackendError, Capabilities, CommandPlan, ConflictInfo, ExternalResolution, HistoryEntry,
-    InstallSummary, LogEntry, PackageDetails, PackageManager, SystemStats, TransactionAction,
+    InstallSummary, LogEntry, PackageDetails, PackageManager, SystemStats,
 };
 use crate::core::package::PackageModel;
 use async_trait::async_trait;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
+
+#[cfg(feature = "pacman")]
+mod alpm_ops;
+#[cfg(feature = "pacman")]
+use alpm_ops as ops;
+
+#[cfg(not(feature = "pacman"))]
+mod cli_ops;
+#[cfg(not(feature = "pacman"))]
+use cli_ops as ops;
 
 fn parse_pacman_history_lines<I>(lines: I, limit: usize) -> Vec<HistoryEntry>
 where
@@ -56,34 +66,6 @@ impl PacmanBackend {
     }
 }
 
-fn init_alpm_backend() -> Result<alpm::Alpm, BackendError> {
-    crate::core::alpm_init::init_alpm().map_err(|e| BackendError::ExecutionError(1, e.to_string()))
-}
-
-fn is_orphan(pkg: &alpm::Package) -> bool {
-    pkg.reason() == alpm::PackageReason::Depend
-        && pkg.required_by().is_empty()
-        && pkg.optional_for().is_empty()
-}
-
-fn collect_orphans(alpm_handle: &alpm::Alpm) -> Vec<PackageModel> {
-    alpm_handle
-        .localdb()
-        .pkgs()
-        .iter()
-        .filter(|pkg| is_orphan(pkg))
-        .map(|pkg| PackageModel {
-            name: pkg.name().to_string(),
-            version: pkg.version().to_string(),
-            repo: "local".to_string(),
-            is_installed: true,
-            is_upgradable: false,
-            size_mb: pkg.isize() as f64 / 1_048_576.0,
-            desc: pkg.desc().map(|s| s.to_string()),
-        })
-        .collect()
-}
-
 fn has_paccache() -> bool {
     std::process::Command::new("paccache")
         .arg("--version")
@@ -97,6 +79,10 @@ fn has_paccache() -> bool {
 impl PackageManager for PacmanBackend {
     fn name(&self) -> &'static str {
         "pacman"
+    }
+
+    fn lock_file_path(&self) -> Option<&'static str> {
+        Some("/var/lib/pacman/db.lck")
     }
 
     fn capabilities(&self) -> Capabilities {
@@ -120,36 +106,9 @@ impl PackageManager for PacmanBackend {
         repo_only: bool,
         aur_only: bool,
     ) -> Result<Vec<PackageModel>, BackendError> {
-        let mut results = Vec::new();
-        let mut installed_pkgs = HashSet::new();
         let query_lower = query.to_lowercase();
-
-        {
-            let alpm_handle = init_alpm_backend()?;
-            let local_db = alpm_handle.localdb();
-
-            for pkg in local_db.pkgs() {
-                installed_pkgs.insert(pkg.name().to_string());
-            }
-
-            if !aur_only || repo_only {
-                for db in alpm_handle.syncdbs() {
-                    for pkg in db.pkgs() {
-                        if pkg.name().to_lowercase().contains(&query_lower) {
-                            results.push(PackageModel {
-                                name: pkg.name().to_string(),
-                                version: pkg.version().to_string(),
-                                repo: db.name().to_string(),
-                                desc: pkg.desc().map(|s| s.to_string()),
-                                is_installed: local_db.pkg(pkg.name()).is_ok(),
-                                is_upgradable: false,
-                                size_mb: pkg.isize() as f64 / 1_048_576.0,
-                            });
-                        }
-                    }
-                }
-            }
-        }
+        let (mut results, installed_pkgs) =
+            ops::search_native_and_installed(&query_lower, !aur_only || repo_only)?;
 
         if !repo_only {
             match crate::core::aur::search(query).await {
@@ -183,71 +142,8 @@ impl PackageManager for PacmanBackend {
     }
 
     async fn details(&self, package: &str) -> Result<Option<PackageDetails>, BackendError> {
-        {
-            let alpm_handle = init_alpm_backend()?;
-            let local_db = alpm_handle.localdb();
-
-            for db in alpm_handle.syncdbs() {
-                if let Ok(pkg) = db.pkg(package) {
-                    let local_pkg = local_db.pkg(package).ok();
-                    let install_reason = local_pkg.as_ref().map(|lp| match lp.reason() {
-                        alpm::PackageReason::Explicit => "explicitly installed".to_string(),
-                        alpm::PackageReason::Depend => "installed as a dependency".to_string(),
-                    });
-                    let required_by = local_pkg
-                        .as_ref()
-                        .map(|lp| lp.required_by().iter().map(|s| s.to_string()).collect())
-                        .unwrap_or_default();
-
-                    return Ok(Some(PackageDetails {
-                        package: PackageModel {
-                            name: pkg.name().to_string(),
-                            version: pkg.version().to_string(),
-                            repo: db.name().to_string(),
-                            desc: pkg.desc().map(|s| s.to_string()),
-                            is_installed: local_pkg.is_some(),
-                            is_upgradable: false,
-                            size_mb: pkg.isize() as f64 / 1_048_576.0,
-                        },
-                        install_reason,
-                        depends: pkg.depends().iter().map(|d| d.name().to_string()).collect(),
-                        required_by,
-                        opt_depends: pkg
-                            .optdepends()
-                            .iter()
-                            .map(|d| d.name().to_string())
-                            .collect(),
-                        votes: None,
-                    }));
-                }
-            }
-
-            if let Ok(pkg) = local_db.pkg(package) {
-                let reason = match pkg.reason() {
-                    alpm::PackageReason::Explicit => "explicitly installed".to_string(),
-                    alpm::PackageReason::Depend => "installed as a dependency".to_string(),
-                };
-                return Ok(Some(PackageDetails {
-                    package: PackageModel {
-                        name: pkg.name().to_string(),
-                        version: pkg.version().to_string(),
-                        repo: "local/aur".to_string(),
-                        desc: pkg.desc().map(|s| s.to_string()),
-                        is_installed: true,
-                        is_upgradable: false,
-                        size_mb: pkg.isize() as f64 / 1_048_576.0,
-                    },
-                    install_reason: Some(reason),
-                    depends: pkg.depends().iter().map(|d| d.name().to_string()).collect(),
-                    required_by: pkg.required_by().iter().map(|s| s.to_string()).collect(),
-                    opt_depends: pkg
-                        .optdepends()
-                        .iter()
-                        .map(|d| d.name().to_string())
-                        .collect(),
-                    votes: None,
-                }));
-            }
+        if let Some(details) = ops::native_or_local_details(package)? {
+            return Ok(Some(details));
         }
 
         let config = crate::config::load_config();
@@ -286,79 +182,22 @@ impl PackageManager for PacmanBackend {
         deps: bool,
         foreign: bool,
     ) -> Result<Vec<PackageModel>, BackendError> {
-        let alpm_handle = init_alpm_backend()?;
-        let local_db = alpm_handle.localdb();
-        let mut results = Vec::new();
-
-        for pkg in local_db.pkgs() {
-            let is_explicit = pkg.reason() == alpm::PackageReason::Explicit;
-            if explicit && !is_explicit {
-                continue;
-            }
-            if deps && is_explicit {
-                continue;
-            }
-
-            let found_in_repo = alpm_handle
-                .syncdbs()
-                .iter()
-                .any(|db| db.pkg(pkg.name()).is_ok());
-            if foreign && found_in_repo {
-                continue;
-            }
-
-            results.push(PackageModel {
-                name: pkg.name().to_string(),
-                version: pkg.version().to_string(),
-                repo: if found_in_repo { "native" } else { "aur" }.to_string(),
-                is_installed: true,
-                is_upgradable: false,
-                size_mb: pkg.isize() as f64 / 1_048_576.0,
-                desc: pkg.desc().map(|s| s.to_string()),
-            });
-        }
-
-        Ok(results)
+        ops::list_installed_filtered(explicit, deps, foreign)
     }
 
     async fn get_all_packages(&self) -> Result<(Vec<PackageModel>, usize, usize), BackendError> {
-        let alpm_handle = init_alpm_backend()?;
-        Ok(crate::core::pacman::get_all_packages(&alpm_handle))
+        ops::get_all_packages()
     }
 
     async fn get_install_summaries(
         &self,
         packages: &[&str],
     ) -> Result<Vec<InstallSummary>, BackendError> {
-        let alpm_handle = init_alpm_backend()?;
-        let pkgs = packages.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        let summaries = crate::core::get_install_summaries(&alpm_handle, &pkgs)
-            .map_err(|e| BackendError::ExecutionError(1, e.to_string()))?;
-        Ok(summaries
-            .into_iter()
-            .map(|s| InstallSummary {
-                action: TransactionAction::Install,
-                name: s.name,
-                version: s.version,
-                download_size_mb: s.download_size_mb,
-                install_size_mb: s.install_size_mb,
-            })
-            .collect())
+        ops::get_install_summaries(packages)
     }
 
     async fn detect_conflicts(&self, packages: &[&str]) -> Result<Vec<ConflictInfo>, BackendError> {
-        let alpm_handle = init_alpm_backend()?;
-        let pkgs = packages.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        let conflicts =
-            crate::core::conflicts::detect_conflicts(&alpm_handle, &pkgs, &HashMap::new());
-        Ok(conflicts
-            .into_iter()
-            .map(|c| ConflictInfo {
-                incoming_pkg: c.incoming_pkg,
-                installed_pkg: c.installed_pkg,
-                constraint: c.constraint,
-            })
-            .collect())
+        ops::detect_conflicts(packages)
     }
 
     async fn resolve_external(
@@ -369,7 +208,7 @@ impl PackageManager for PacmanBackend {
             .await
             .map_err(|e| BackendError::NetworkError(e.to_string()))?;
 
-        let alpm_handle = init_alpm_backend().ok();
+        let local_versions = ops::local_versions(packages);
         let mut by_name: HashMap<String, crate::core::aur::AurPackage> = res
             .results
             .into_iter()
@@ -379,9 +218,7 @@ impl PackageManager for PacmanBackend {
         let mut resolved = Vec::new();
         for &pkg in packages {
             if let Some(r) = by_name.remove(pkg) {
-                let local_ver = alpm_handle
-                    .as_ref()
-                    .and_then(|h| h.localdb().pkg(pkg).map(|p| p.version().to_string()).ok());
+                let local_ver = local_versions.get(pkg).cloned();
                 let is_update = local_ver
                     .as_ref()
                     .is_some_and(|lv| crate::core::aur::is_newer(&r.version, lv));
@@ -478,59 +315,7 @@ impl PackageManager for PacmanBackend {
     }
 
     async fn list_group_or_meta(&self, name: &str) -> Result<Vec<PackageModel>, BackendError> {
-        let alpm_handle = init_alpm_backend()?;
-        let local_db = alpm_handle.localdb();
-        let mut seen = HashSet::new();
-        let mut group_pkgs = Vec::new();
-
-        for db in alpm_handle.syncdbs() {
-            for pkg in db.pkgs() {
-                if pkg.groups().iter().any(|g| g == name) && seen.insert(pkg.name().to_string()) {
-                    group_pkgs.push(PackageModel {
-                        name: pkg.name().to_string(),
-                        version: pkg.version().to_string(),
-                        repo: db.name().to_string(),
-                        is_installed: local_db.pkg(pkg.name()).is_ok(),
-                        is_upgradable: false,
-                        size_mb: pkg.isize() as f64 / 1_048_576.0,
-                        desc: pkg.desc().map(|s| s.to_string()),
-                    });
-                }
-            }
-        }
-
-        if group_pkgs.is_empty() {
-            for db in alpm_handle.syncdbs() {
-                if let Ok(meta) = db.pkg(name)
-                    && meta.isize() == 0
-                    && !meta.depends().is_empty()
-                {
-                    for dep in meta.depends() {
-                        let dep_name = dep.name();
-                        if !seen.insert(dep_name.to_string()) {
-                            continue;
-                        }
-                        for dep_db in alpm_handle.syncdbs() {
-                            if let Ok(pkg) = dep_db.pkg(dep_name) {
-                                group_pkgs.push(PackageModel {
-                                    name: pkg.name().to_string(),
-                                    version: pkg.version().to_string(),
-                                    repo: dep_db.name().to_string(),
-                                    is_installed: local_db.pkg(pkg.name()).is_ok(),
-                                    is_upgradable: false,
-                                    size_mb: pkg.isize() as f64 / 1_048_576.0,
-                                    desc: pkg.desc().map(|s| s.to_string()),
-                                });
-                                break;
-                            }
-                        }
-                    }
-                    break;
-                }
-            }
-        }
-
-        Ok(group_pkgs)
+        ops::list_group_or_meta(name)
     }
 
     async fn get_history(&self, limit: usize) -> Result<Vec<HistoryEntry>, BackendError> {
@@ -571,77 +356,23 @@ impl PackageManager for PacmanBackend {
     }
 
     async fn get_stats(&self) -> Result<SystemStats, BackendError> {
-        let alpm_handle = init_alpm_backend()?;
-        let mut explicit = 0usize;
-        let mut dependencies = 0usize;
-        for pkg in alpm_handle.localdb().pkgs() {
-            match pkg.reason() {
-                alpm::PackageReason::Explicit => explicit += 1,
-                alpm::PackageReason::Depend => dependencies += 1,
-            }
-        }
-        Ok(SystemStats {
-            explicit,
-            dependencies,
-            total: explicit + dependencies,
-        })
+        ops::get_stats()
     }
 
     async fn get_orphan_count(&self) -> Result<usize, BackendError> {
-        let alpm_handle = init_alpm_backend()?;
-        Ok(alpm_handle
-            .localdb()
-            .pkgs()
-            .iter()
-            .filter(|p| is_orphan(p))
-            .count())
+        ops::get_orphan_count()
     }
 
     async fn list_orphans(&self) -> Result<Vec<PackageModel>, BackendError> {
-        let alpm_handle = init_alpm_backend()?;
-        Ok(collect_orphans(&alpm_handle))
+        ops::list_orphans()
     }
 
     async fn owns_file(&self, path: &str) -> Result<Option<PackageModel>, BackendError> {
-        let alpm_handle = init_alpm_backend()?;
-        let target = Path::new(path)
-            .canonicalize()
-            .unwrap_or_else(|_| Path::new(path).to_path_buf());
-        let clean_target = target.to_string_lossy();
-        let clean_rel = clean_target.trim_start_matches('/');
-        let raw_rel = path.trim_start_matches('/');
-
-        for pkg in alpm_handle.localdb().pkgs() {
-            let files = pkg.files();
-            if files.contains(clean_rel).is_some() || files.contains(raw_rel).is_some() {
-                return Ok(Some(PackageModel {
-                    name: pkg.name().to_string(),
-                    version: pkg.version().to_string(),
-                    repo: "local".to_string(),
-                    is_installed: true,
-                    is_upgradable: false,
-                    size_mb: pkg.isize() as f64 / 1_048_576.0,
-                    desc: pkg.desc().map(|s| s.to_string()),
-                }));
-            }
-        }
-
-        Ok(None)
+        ops::owns_file(path)
     }
 
     async fn list_files(&self, package: &str) -> Result<Vec<String>, BackendError> {
-        let alpm_handle = init_alpm_backend()?;
-        let pkg = alpm_handle
-            .localdb()
-            .pkg(package)
-            .map_err(|_| BackendError::NotFound(package.to_string()))?;
-
-        Ok(pkg
-            .files()
-            .files()
-            .iter()
-            .map(|f| format!("/{}", String::from_utf8_lossy(f.name())))
-            .collect())
+        ops::list_files(package)
     }
 
     async fn locate_file(&self, file: &str) -> Result<Vec<String>, BackendError> {
@@ -696,8 +427,7 @@ impl PackageManager for PacmanBackend {
     }
 
     fn build_clean_orphans(&self) -> Result<CommandPlan, BackendError> {
-        let alpm_handle = init_alpm_backend()?;
-        let orphans = collect_orphans(&alpm_handle);
+        let orphans = ops::list_orphans()?;
         if orphans.is_empty() {
             return Err(BackendError::NotFound(
                 "no orphaned packages found".to_string(),
@@ -748,17 +478,10 @@ impl PackageManager for PacmanBackend {
         &self,
         package: &str,
     ) -> Result<(CommandPlan, &'static str), BackendError> {
-        let alpm_handle = init_alpm_backend()?;
-        let pkg = alpm_handle
-            .localdb()
-            .pkg(package)
-            .map_err(|_| BackendError::NotFound(package.to_string()))?;
-
-        match pkg.reason() {
-            alpm::PackageReason::Explicit => {
-                Ok((self.build_mark_dependency(package)?, "dependency"))
-            }
-            alpm::PackageReason::Depend => Ok((self.build_mark_explicit(package)?, "explicit")),
+        if ops::is_explicitly_installed(package)? {
+            Ok((self.build_mark_dependency(package)?, "dependency"))
+        } else {
+            Ok((self.build_mark_explicit(package)?, "explicit"))
         }
     }
 
@@ -789,21 +512,7 @@ impl PackageManager for PacmanBackend {
     }
 
     async fn check_external_updates(&self) -> Result<Vec<(String, String, String)>, BackendError> {
-        let foreign_pkgs: Vec<(String, String)> = {
-            let alpm_handle = init_alpm_backend()?;
-            alpm_handle
-                .localdb()
-                .pkgs()
-                .iter()
-                .filter(|pkg| {
-                    !alpm_handle
-                        .syncdbs()
-                        .iter()
-                        .any(|db| db.pkg(pkg.name()).is_ok())
-                })
-                .map(|pkg| (pkg.name().to_string(), pkg.version().to_string()))
-                .collect()
-        };
+        let foreign_pkgs = ops::foreign_versions()?;
 
         let mut updates = Vec::new();
         for chunk in foreign_pkgs.chunks(50) {

@@ -433,6 +433,7 @@ pub fn print_network_error(fallback_msg: &str) {
     println!("{}", network_error_message(fallback_msg, is_connected));
 }
 
+#[cfg(feature = "pacman")]
 pub fn get_all_packages(
     alpm: &alpm::Alpm,
 ) -> (Vec<crate::core::package::PackageModel>, usize, usize) {
@@ -493,6 +494,138 @@ pub fn get_all_packages(
     (package_list, installed_count, updates_count)
 }
 
+#[cfg(feature = "pacman")]
 pub fn vercmp(a: &str, b: &str) -> std::cmp::Ordering {
     alpm::vercmp(a, b)
+}
+
+#[cfg(not(feature = "pacman"))]
+pub fn vercmp(a: &str, b: &str) -> std::cmp::Ordering {
+    pure_vercmp(a, b)
+}
+
+#[cfg(any(not(feature = "pacman"), test))]
+fn pure_vercmp(a: &str, b: &str) -> std::cmp::Ordering {
+    if a == b {
+        return std::cmp::Ordering::Equal;
+    }
+
+    fn split_evr(v: &str) -> (&str, &str, Option<&str>) {
+        let (epoch, rest) = match v.split_once(':') {
+            Some((e, r)) if !e.is_empty() && e.bytes().all(|b| b.is_ascii_digit()) => (e, r),
+            _ => ("0", v),
+        };
+        match rest.rsplit_once('-') {
+            Some((ver, rel)) => (epoch, ver, Some(rel)),
+            None => (epoch, rest, None),
+        }
+    }
+
+    fn cmp_rpmver(mut s1: &[u8], mut s2: &[u8]) -> std::cmp::Ordering {
+        while !s1.is_empty() && !s2.is_empty() {
+            while let Some(&b) = s1.first() {
+                if b.is_ascii_alphanumeric() {
+                    break;
+                }
+                s1 = &s1[1..];
+            }
+            while let Some(&b) = s2.first() {
+                if b.is_ascii_alphanumeric() {
+                    break;
+                }
+                s2 = &s2[1..];
+            }
+            if s1.is_empty() || s2.is_empty() {
+                break;
+            }
+
+            let is_num1 = s1[0].is_ascii_digit();
+            let is_num2 = s2[0].is_ascii_digit();
+            if is_num1 != is_num2 {
+                return if is_num1 {
+                    std::cmp::Ordering::Greater
+                } else {
+                    std::cmp::Ordering::Less
+                };
+            }
+
+            let take = |s: &[u8], num: bool| -> usize {
+                s.iter()
+                    .take_while(|b| {
+                        if num {
+                            b.is_ascii_digit()
+                        } else {
+                            b.is_ascii_alphabetic()
+                        }
+                    })
+                    .count()
+            };
+
+            let len1 = take(s1, is_num1);
+            let len2 = take(s2, is_num2);
+            let (seg1, rest1) = s1.split_at(len1);
+            let (seg2, rest2) = s2.split_at(len2);
+            s1 = rest1;
+            s2 = rest2;
+
+            let ord = if is_num1 {
+                fn trim(seg: &[u8]) -> &[u8] {
+                    let i = seg.iter().position(|&b| b != b'0').unwrap_or(seg.len());
+                    &seg[i..]
+                }
+                let (t1, t2) = (trim(seg1), trim(seg2));
+                t1.len().cmp(&t2.len()).then_with(|| t1.cmp(t2))
+            } else {
+                seg1.cmp(seg2)
+            };
+
+            if ord != std::cmp::Ordering::Equal {
+                return ord;
+            }
+        }
+
+        if s1.is_empty() && s2.is_empty() {
+            std::cmp::Ordering::Equal
+        } else if s1.is_empty() {
+            if s2.first().is_some_and(|b| b.is_ascii_alphabetic()) {
+                std::cmp::Ordering::Greater
+            } else {
+                std::cmp::Ordering::Less
+            }
+        } else if s1.first().is_some_and(|b| b.is_ascii_alphabetic()) {
+            std::cmp::Ordering::Less
+        } else {
+            std::cmp::Ordering::Greater
+        }
+    }
+
+    let (e1, v1, r1) = split_evr(a);
+    let (e2, v2, r2) = split_evr(b);
+
+    let ord = cmp_rpmver(e1.as_bytes(), e2.as_bytes())
+        .then_with(|| cmp_rpmver(v1.as_bytes(), v2.as_bytes()));
+    if ord != std::cmp::Ordering::Equal {
+        return ord;
+    }
+
+    match (r1, r2) {
+        (Some(rel1), Some(rel2)) => cmp_rpmver(rel1.as_bytes(), rel2.as_bytes()),
+        _ => std::cmp::Ordering::Equal,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pure_vercmp;
+    use std::cmp::Ordering;
+
+    #[test]
+    fn pure_vercmp_matches_pacman_semantics() {
+        assert_eq!(pure_vercmp("1.0-1", "1.0-1"), Ordering::Equal);
+        assert_eq!(pure_vercmp("1.0-2", "1.0-1"), Ordering::Greater);
+        assert_eq!(pure_vercmp("1.10-1", "1.2-1"), Ordering::Greater);
+        assert_eq!(pure_vercmp("1:1.0-1", "9.9-1"), Ordering::Greater);
+        assert_eq!(pure_vercmp("1.0alpha-1", "1.0-1"), Ordering::Less);
+        assert_eq!(pure_vercmp("1.0", "1.0-5"), Ordering::Equal);
+    }
 }

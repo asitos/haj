@@ -112,11 +112,9 @@ where
             }
         }
 
-        let fallback_str = include_str!("../../resources/title.txt");
-        let text = fallback_str
-            .as_bytes()
-            .into_text()
-            .unwrap_or_else(|_| Text::raw(fallback_str));
+        let fallback_str = include_str!("../../resources/blahajowo.txt");
+        let text = Text::raw(fallback_str)
+            .style(ratatui::style::Style::default().fg(ratatui::style::Color::Cyan));
         let _ = tx_art.send(TuiEvent::DashboardArtFrame(text)).await;
     });
 
