@@ -3,15 +3,28 @@ use crate::core::ui::prompt_confirm;
 use crate::core::ui::{InstallChoice, handle_conflicts_ui, prompt_install};
 use crate::ui;
 use crossterm::style::Stylize;
+fn is_local_archive(arg: &str) -> bool {
+    arg.ends_with(".pkg.tar.zst")
+        || arg.ends_with(".pkg.tar.xz")
+        || arg.ends_with(".pkg.tar.gz")
+        || arg.ends_with(".deb")
+        || std::path::Path::new(arg).is_file()
+}
+
 pub async fn process_installation(
     packages: Vec<String>,
     backend: &dyn crate::backend::traits::PackageManager,
     cli: &Cli,
 ) {
+    let mut local_archives: Vec<String> = Vec::new();
     let mut native_pkgs: Vec<String> = Vec::new();
     let mut aur_pkgs: Vec<String> = Vec::new();
 
     for pkg in &packages {
+        if is_local_archive(pkg) {
+            local_archives.push(pkg.clone());
+            continue;
+        }
         if cli.aur && !cli.repo {
             if backend.capabilities().supports_external {
                 aur_pkgs.push(pkg.clone());
@@ -39,6 +52,26 @@ pub async fn process_installation(
                 return;
             }
         }
+    }
+
+    for archive in local_archives {
+        match backend.build_install_local(std::path::Path::new(&archive)) {
+            Ok(plan) => {
+                let _ = crate::core::process::execute_plan(
+                    &plan,
+                    &format!("installing local archive {archive}..."),
+                    &format!("installed {archive}."),
+                    cli.dry_run,
+                    cli.verbose,
+                )
+                .await;
+            }
+            Err(e) => eprintln!("{} {}", "✗".red(), e),
+        }
+    }
+
+    if native_pkgs.is_empty() && aur_pkgs.is_empty() {
+        return;
     }
 
     let mut native_summaries = Vec::new();

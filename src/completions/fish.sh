@@ -55,8 +55,8 @@ complete -c haj -s h -l help -d 'display help message'
 complete -c haj -n '__fish_haj_needs_command' -a 'tui' -d 'launch interactive package manager dashboard'
 complete -c haj -n '__fish_haj_needs_command' -a 'update' -d 'synchronize remote repositories'
 complete -c haj -n '__fish_haj_needs_command' -a 'jump' -d 'full system upgrade'
-complete -c haj -n '__fish_haj_needs_command' -a 'install' -d 'install one or more packages'
-complete -c haj -n '__fish_haj_needs_command' -a 'remove' -d 'remove packages & unneeded dependencies'
+complete -c haj -n '__fish_haj_needs_command' -a 'install add' -d 'install one or more packages'
+complete -c haj -n '__fish_haj_needs_command' -a 'remove uninstall drop' -d 'remove packages & unneeded dependencies'
 complete -c haj -n '__fish_haj_needs_command' -a 'search' -d 'search remote repositories'
 complete -c haj -n '__fish_haj_needs_command' -a 'show' -d 'show detailed package information'
 complete -c haj -n '__fish_haj_needs_command' -a 'group' -d 'browse and install package groups'
@@ -78,9 +78,9 @@ complete -c haj -n '__fish_haj_needs_command' -a 'pkgbuild' -d 'read and print t
 
 # --- DYNAMIC COMPLETIONS ---
 
-complete -c haj -n '__fish_seen_subcommand_from install i fetch f pkgbuild pb' -f -a '(__fish_haj_repo_packages)'
-complete -c haj -n '__fish_seen_subcommand_from remove rm toss mark m show info files lf' -f -a '(__fish_haj_installed_packages)'
-complete -c haj -n '__fish_seen_subcommand_from downgrade sink' -f -a '(__fish_haj_downgrades)'
+complete -c haj -n '__fish_seen_subcommand_from install add i a fetch f download get pkgbuild pb' -f -a '(__fish_haj_repo_packages)'
+complete -c haj -n '__fish_seen_subcommand_from remove rm toss uninstall delete drop mark m show info about describe files lf' -f -a '(__fish_haj_installed_packages)'
+complete -c haj -n '__fish_seen_subcommand_from downgrade sink rollback' -f -a '(__fish_haj_downgrades)'
 complete -c haj -n '__fish_seen_subcommand_from group g' -f -a '(__fish_haj_groups)'
 complete -c haj -n '__fish_seen_subcommand_from load l' -f -a '(__fish_complete_suffix pkg.tar.zst; __fish_complete_suffix pkg.tar.xz; __fish_complete_suffix pkg.tar.gz; __fish_complete_suffix pkg.tar)'
 complete -c haj -n '__fish_seen_subcommand_from owns ow' -F

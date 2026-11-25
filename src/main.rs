@@ -6,7 +6,6 @@ mod core;
 mod tui;
 mod ui;
 
-use clap::Parser;
 use cli::{Cli, Commands};
 use crossterm::style::Stylize;
 use std::fs::OpenOptions;
@@ -66,6 +65,57 @@ fn print_search_entry(
     }
 }
 
+async fn run_orphan_sweep(backend_ref: &dyn crate::backend::traits::PackageManager, cli: &Cli) {
+    match backend_ref.list_orphans().await {
+        Ok(orphans) => {
+            if orphans.is_empty() && backend_ref.name() == "pacman" {
+                println!(
+                    "{} no orphaned packages found. system is clean!",
+                    "✓".green()
+                );
+                return;
+            }
+            if !orphans.is_empty() {
+                println!("{}", "orphans found:".bold().white());
+                let mut total_mb = 0.0;
+                for pkg in &orphans {
+                    println!(
+                        "  {:<25} {} ({:.2} mb)",
+                        pkg.name.clone().magenta(),
+                        pkg.version.clone().dim(),
+                        pkg.size_mb
+                    );
+                    total_mb += pkg.size_mb;
+                }
+                println!("\n{:<15} {:.2} mb\n", "wasted space:", total_mb);
+
+                if !cli.dry_run
+                    && !cli.noconfirm
+                    && !core::ui::prompt_confirm("remove all orphaned packages? [Y/n]")
+                {
+                    println!("{} aborted.", "✗".red());
+                    return;
+                }
+            }
+
+            match backend_ref.build_clean_orphans() {
+                Ok(plan) => {
+                    let _ = crate::core::process::execute_plan(
+                        &plan,
+                        "cleaning orphans...",
+                        "orphans cleaned.",
+                        cli.dry_run,
+                        cli.verbose,
+                    )
+                    .await;
+                }
+                Err(e) => println!("{} {}", "::".blue(), e),
+            }
+        }
+        Err(e) => eprintln!("{} {}", "✗".red(), e),
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tokio::spawn(async move {
@@ -107,7 +157,7 @@ async fn main() -> anyhow::Result<()> {
 
     let _haj_lock = lock_file;
 
-    let cli = Cli::try_parse().unwrap_or_else(|e| {
+    let cli = crate::cli::parse_cli().unwrap_or_else(|e| {
         if e.kind() == clap::error::ErrorKind::DisplayHelp
             || e.kind() == clap::error::ErrorKind::DisplayVersion
         {
@@ -123,6 +173,11 @@ async fn main() -> anyhow::Result<()> {
     });
     let mut cli = cli;
     let config = config::load_config();
+    match cli.from {
+        Some(cli::SourceScope::Aur) => cli.aur = true,
+        Some(cli::SourceScope::Repo | cli::SourceScope::Repos) => cli.repo = true,
+        None => {}
+    }
     cli.aur = cli.aur || config.general.aur_only;
     cli.repo = cli.repo || config.general.repo_only;
     cli.verbose = cli.verbose || config.general.verbose;
@@ -304,7 +359,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
 
-        Commands::Upgrade { no_sync } => {
+        Commands::Upgrade { no_sync, packages } => {
             if !no_sync
                 && !cli.aur
                 && let Ok(plan) = backend_ref.build_update()
@@ -320,6 +375,11 @@ async fn main() -> anyhow::Result<()> {
                 if res.is_err() {
                     return Ok(());
                 }
+            }
+
+            if !packages.is_empty() {
+                commands::process_installation(packages, backend_ref, &cli).await;
+                return Ok(());
             }
 
             let native_updates = if cli.aur {
@@ -561,42 +621,59 @@ async fn main() -> anyhow::Result<()> {
             }
         }
 
-        Commands::Clean { keep } => match backend_ref.build_clean_keep(keep) {
-            Ok(plan) => {
-                let res = crate::core::process::execute_plan(
-                    &plan,
-                    &format!("scrubbing package cache (keeping {keep})..."),
-                    "cache scrubbed successfully.",
-                    cli.dry_run,
-                    cli.verbose,
-                )
-                .await;
+        Commands::Clean { target, keep } => {
+            if matches!(target.as_deref(), Some("orphans" | "orphan")) {
+                run_orphan_sweep(backend_ref, &cli).await;
+                return Ok(());
+            }
+            if let Some(ref t) = target
+                && t != "cache"
+            {
+                println!(
+                    "{} unknown clean target '{}'; expected 'cache' or 'orphans'.",
+                    "✗".red(),
+                    t
+                );
+                return Ok(());
+            }
 
-                if res.is_ok()
-                    && backend_ref.name() == "pacman"
-                    && plan.executable == "paccache"
-                    && !cli.dry_run
-                    && let Ok(home) = std::env::var("HOME").map(std::path::PathBuf::from)
-                {
-                    let aur_cache = home.join(".cache/haj/aur");
-                    if aur_cache.exists()
-                        && let Ok(entries) = std::fs::read_dir(&aur_cache)
+            match backend_ref.build_clean_keep(keep) {
+                Ok(plan) => {
+                    let res = crate::core::process::execute_plan(
+                        &plan,
+                        &format!("scrubbing package cache (keeping {keep})..."),
+                        "cache scrubbed successfully.",
+                        cli.dry_run,
+                        cli.verbose,
+                    )
+                    .await;
+
+                    if res.is_ok()
+                        && backend_ref.name() == "pacman"
+                        && plan.executable == "paccache"
+                        && !cli.dry_run
+                        && let Ok(home) = std::env::var("HOME").map(std::path::PathBuf::from)
                     {
-                        let keep_str = keep.to_string();
-                        for entry in entries.filter_map(Result::ok) {
-                            if entry.path().is_dir()
-                                && let Some(path_str) = entry.path().to_str()
-                            {
-                                let _ = std::process::Command::new("paccache")
-                                    .args(["-r", "-k", &keep_str, "-c", path_str])
-                                    .output();
+                        let aur_cache = home.join(".cache/haj/aur");
+                        if aur_cache.exists()
+                            && let Ok(entries) = std::fs::read_dir(&aur_cache)
+                        {
+                            let keep_str = keep.to_string();
+                            for entry in entries.filter_map(Result::ok) {
+                                if entry.path().is_dir()
+                                    && let Some(path_str) = entry.path().to_str()
+                                {
+                                    let _ = std::process::Command::new("paccache")
+                                        .args(["-r", "-k", &keep_str, "-c", path_str])
+                                        .output();
+                                }
                             }
                         }
                     }
                 }
+                Err(e) => println!("{} {}", "✗".red(), e),
             }
-            Err(e) => println!("{} {}", "✗".red(), e),
-        },
+        }
 
         Commands::Search { query } => {
             match backend_ref.search_filtered(&query, cli.repo, cli.aur).await {
@@ -701,54 +778,7 @@ async fn main() -> anyhow::Result<()> {
             Err(e) => eprintln!("{} {}", "✗".red(), e),
         },
 
-        Commands::Orphan => match backend_ref.list_orphans().await {
-            Ok(orphans) => {
-                if orphans.is_empty() && backend_ref.name() == "pacman" {
-                    println!(
-                        "{} no orphaned packages found. system is clean!",
-                        "✓".green()
-                    );
-                    return Ok(());
-                }
-                if !orphans.is_empty() {
-                    println!("{}", "orphans found:".bold().white());
-                    let mut total_mb = 0.0;
-                    for pkg in &orphans {
-                        println!(
-                            "  {:<25} {} ({:.2} mb)",
-                            pkg.name.clone().magenta(),
-                            pkg.version.clone().dim(),
-                            pkg.size_mb
-                        );
-                        total_mb += pkg.size_mb;
-                    }
-                    println!("\n{:<15} {:.2} mb\n", "wasted space:", total_mb);
-
-                    if !cli.dry_run
-                        && !cli.noconfirm
-                        && !core::ui::prompt_confirm("remove all orphaned packages? [Y/n]")
-                    {
-                        println!("{} aborted.", "✗".red());
-                        return Ok(());
-                    }
-                }
-
-                match backend_ref.build_clean_orphans() {
-                    Ok(plan) => {
-                        let _ = crate::core::process::execute_plan(
-                            &plan,
-                            "cleaning orphans...",
-                            "orphans cleaned.",
-                            cli.dry_run,
-                            cli.verbose,
-                        )
-                        .await;
-                    }
-                    Err(e) => println!("{} {}", "::".blue(), e),
-                }
-            }
-            Err(e) => eprintln!("{} {}", "✗".red(), e),
-        },
+        Commands::Orphan => run_orphan_sweep(backend_ref, &cli).await,
 
         Commands::Owns { file_path } => match backend_ref.owns_file(&file_path).await {
             Ok(Some(pkg)) => {
@@ -809,25 +839,144 @@ async fn main() -> anyhow::Result<()> {
             }
         }
 
-        Commands::Mark { package } => match backend_ref.toggle_mark(&package).await {
-            Ok((plan, new_state)) => {
-                let _ = crate::core::process::execute_plan(
-                    &plan,
-                    "updating database records...",
-                    &format!("marked {package} as {new_state}."),
-                    cli.dry_run,
-                    cli.verbose,
-                )
-                .await;
+        Commands::Mark {
+            package,
+            reason,
+            as_explicit,
+            as_deps,
+        } => {
+            let explicit_flag =
+                as_explicit || matches!(reason.as_deref(), Some("explicit" | "manual"));
+            let deps_flag = as_deps
+                || matches!(
+                    reason.as_deref(),
+                    Some("dep" | "deps" | "dependency" | "auto")
+                );
+
+            if explicit_flag && deps_flag {
+                println!("{} choose either explicit or dependency.", "✗".red());
+                return Ok(());
             }
-            Err(e) => println!("{} {}", "✗".red(), e),
-        },
+            if let Some(ref r) = reason
+                && !explicit_flag
+                && !deps_flag
+            {
+                println!(
+                    "{} unknown reason '{}'; expected 'explicit'/'manual' or 'dep'/'auto'.",
+                    "✗".red(),
+                    r
+                );
+                return Ok(());
+            }
+
+            let mark_res = if explicit_flag {
+                backend_ref
+                    .build_mark_explicit(&package)
+                    .map(|p| (p, "explicit"))
+            } else if deps_flag {
+                backend_ref
+                    .build_mark_dependency(&package)
+                    .map(|p| (p, "dependency"))
+            } else {
+                backend_ref.toggle_mark(&package).await
+            };
+
+            match mark_res {
+                Ok((plan, new_state)) => {
+                    let _ = crate::core::process::execute_plan(
+                        &plan,
+                        "updating database records...",
+                        &format!("marked {package} as {new_state}."),
+                        cli.dry_run,
+                        cli.verbose,
+                    )
+                    .await;
+                }
+                Err(e) => println!("{} {}", "✗".red(), e),
+            }
+        }
 
         Commands::List {
             explicit,
             deps,
             foreign,
+            filter,
         } => {
+            match filter.as_deref() {
+                Some("orphans" | "orphan") => {
+                    match backend_ref.list_orphans().await {
+                        Ok(orphans) if orphans.is_empty() => {
+                            println!("{} no orphaned packages found.", "✓".green());
+                        }
+                        Ok(orphans) => {
+                            for pkg in &orphans {
+                                if !safe_println(&format!(
+                                    "  {:<35} {:<25} {:.2} mb",
+                                    pkg.name.clone().magenta(),
+                                    pkg.version.clone().dim(),
+                                    pkg.size_mb
+                                )) {
+                                    break;
+                                }
+                            }
+                        }
+                        Err(e) => eprintln!("{} {}", "✗".red(), e),
+                    }
+                    return Ok(());
+                }
+                Some("updates" | "upgrade" | "upgrades") => {
+                    let native = if cli.aur {
+                        Vec::new()
+                    } else {
+                        backend_ref.check_native_updates().await.unwrap_or_default()
+                    };
+                    let aur = if cli.repo || !backend_ref.capabilities().supports_external {
+                        Vec::new()
+                    } else {
+                        backend_ref
+                            .check_external_updates()
+                            .await
+                            .unwrap_or_default()
+                    };
+                    if native.is_empty() && aur.is_empty() {
+                        println!("{} system is fully up to date!", "✓".green());
+                        return Ok(());
+                    }
+                    for (name, old, new) in &native {
+                        let _ = safe_println(&format!(
+                            "  {:<30} {} -> {}",
+                            name.clone().cyan().bold(),
+                            old.clone().red(),
+                            new.clone().green()
+                        ));
+                    }
+                    for (name, old, new) in &aur {
+                        let _ = safe_println(&format!(
+                            "  {:<30} {} -> {}",
+                            name.clone().magenta().bold(),
+                            old.clone().red(),
+                            new.clone().green()
+                        ));
+                    }
+                    return Ok(());
+                }
+                Some(f)
+                    if !matches!(f, "explicit" | "deps" | "dep" | "auto" | "aur" | "foreign") =>
+                {
+                    println!(
+                        "{} unknown filter '{}'; expected explicit, deps, aur, orphans, or updates.",
+                        "✗".red(),
+                        f
+                    );
+                    return Ok(());
+                }
+                _ => {}
+            }
+
+            let explicit = explicit || matches!(filter.as_deref(), Some("explicit"));
+            let deps = deps || matches!(filter.as_deref(), Some("deps" | "dep" | "auto"));
+            let foreign = foreign || matches!(filter.as_deref(), Some("aur" | "foreign"));
+
             match backend_ref
                 .list_installed_filtered(explicit, deps, foreign)
                 .await

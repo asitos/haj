@@ -50,6 +50,7 @@ _haj() {
                 'update:synchronize remote repositories'
                 'upgrade:full system upgrade'
                 'install:install one or more packages'
+                'add:install one or more packages'
                 'remove:remove packages & unneeded dependencies'
                 'search:search remote repositories'
                 'show:show detailed package information'
@@ -73,13 +74,13 @@ _haj() {
             ;;
         args)
             case $words[1] in
-                install|i|fetch|f|pkgbuild|pb)
+                install|add|i|a|fetch|f|download|get|pkgbuild|pb)
                     _haj_all_packages
                     ;;
-                remove|rm|toss|mark|m|show|info|files|lf)
+                remove|rm|toss|uninstall|delete|drop|mark|m|show|info|about|describe|files|lf)
                     _haj_installed_packages
                     ;;
-                downgrade|sink)
+                downgrade|sink|rollback)
                     _haj_downgrades
                     ;;
                 group|g)

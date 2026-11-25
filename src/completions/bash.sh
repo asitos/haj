@@ -6,15 +6,15 @@ _haj_completions() {
 
     # Complete options for commands
     case "$prev" in
-        install|i|fetch|f|pkgbuild|pb)
+        install|add|i|a|fetch|f|download|get|pkgbuild|pb)
             COMPREPLY=( $(compgen -W "$(pacman -Slq)" -- "$cur") )
             return 0
             ;;
-        remove|rm|toss|mark|m|show|info|files|lf)
+        remove|rm|toss|uninstall|delete|drop|mark|m|show|info|about|describe|files|lf)
             COMPREPLY=( $(compgen -W "$(pacman -Qq)" -- "$cur") )
             return 0
             ;;
-        downgrade|sink)
+        downgrade|sink|rollback)
             local pkgs
             pkgs=$( (ls /var/cache/pacman/pkg/ 2>/dev/null | grep -E '\.pkg\.tar\.(zst|xz|gz)$' | sed -E 's/-[^-]+-[^-]+-[^-]+\.pkg\.tar\..*$//'; ls ~/.cache/haj/aur/ 2>/dev/null) | sort -u )
             COMPREPLY=( $(compgen -W "$pkgs" -- "$cur") )
@@ -59,7 +59,7 @@ _haj_completions() {
 
     # Complete commands
     if [ $COMP_CWORD -eq 1 ]; then
-        opts="tui update upgrade install remove search show group list stats load fetch downgrade owns files locate history orphan clean mark diff pkgbuild"
+        opts="tui update refresh upgrade install add remove uninstall drop search find show about group list stats load fetch download downgrade rollback owns which files locate where history orphan orphans prune clean mark diff pacnew pkgbuild"
         COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
         return 0
     fi
