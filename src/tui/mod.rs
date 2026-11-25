@@ -557,9 +557,11 @@ impl App {
         if let Ok(lines) = backend.get_log(5000).await {
             let mut current_tx: Option<Transaction> = None;
 
-            for line in lines {
-                let line = line.message.as_str();
-                let ts = if line.starts_with('[') && line.len() > 18 {
+            for entry in lines {
+                let line = entry.message.as_str();
+                let ts = if !entry.timestamp.is_empty() {
+                    entry.timestamp.chars().take(16).collect()
+                } else if line.starts_with('[') && line.len() > 18 {
                     line[1..17].to_string()
                 } else {
                     "unknown".to_string()
@@ -613,33 +615,34 @@ impl App {
                 } else if let Some(ref mut tx) = current_tx {
                     tx.raw_log.push(line.to_string());
 
-                    if line.contains("[ALPM] installed") {
-                        let parts: Vec<&str> = line.split_whitespace().collect();
-                        if parts.len() >= 5 {
+                    let alpm_body = line.split("[ALPM] ").nth(1).unwrap_or(line);
+                    if let Some(rest) = alpm_body.strip_prefix("installed ") {
+                        let parts: Vec<&str> = rest.split_whitespace().collect();
+                        if parts.len() >= 2 {
                             tx.packages.push(PkgChange {
-                                name: parts[3].to_string(),
+                                name: parts[0].to_string(),
                                 old_version: None,
-                                new_version: parts[4].replace(['(', ')'], ""),
+                                new_version: parts[1].replace(['(', ')'], ""),
                                 action: TxAction::Install,
                             });
                         }
-                    } else if line.contains("[ALPM] upgraded") {
-                        let parts: Vec<&str> = line.split_whitespace().collect();
-                        if parts.len() >= 7 {
+                    } else if let Some(rest) = alpm_body.strip_prefix("upgraded ") {
+                        let parts: Vec<&str> = rest.split_whitespace().collect();
+                        if parts.len() >= 4 {
                             tx.packages.push(PkgChange {
-                                name: parts[3].to_string(),
-                                old_version: Some(parts[4].replace('(', "")),
-                                new_version: parts[6].replace(')', ""),
+                                name: parts[0].to_string(),
+                                old_version: Some(parts[1].replace('(', "")),
+                                new_version: parts[3].replace(')', ""),
                                 action: TxAction::Upgrade,
                             });
                         }
-                    } else if line.contains("[ALPM] removed") {
-                        let parts: Vec<&str> = line.split_whitespace().collect();
-                        if parts.len() >= 5 {
+                    } else if let Some(rest) = alpm_body.strip_prefix("removed ") {
+                        let parts: Vec<&str> = rest.split_whitespace().collect();
+                        if parts.len() >= 2 {
                             tx.packages.push(PkgChange {
-                                name: parts[3].to_string(),
+                                name: parts[0].to_string(),
                                 old_version: None,
-                                new_version: parts[4].replace(['(', ')'], ""),
+                                new_version: parts[1].replace(['(', ')'], ""),
                                 action: TxAction::Remove,
                             });
                         }

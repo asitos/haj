@@ -1,4 +1,4 @@
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct PackageModel {
     pub name: String,
     pub version: String,

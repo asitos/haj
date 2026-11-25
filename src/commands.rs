@@ -12,13 +12,32 @@ pub async fn process_installation(
     let mut aur_pkgs: Vec<String> = Vec::new();
 
     for pkg in &packages {
-        if cli.repo || backend.info(pkg).await.is_ok() {
-            native_pkgs.push(pkg.clone());
-        } else if backend.capabilities().supports_external {
-            aur_pkgs.push(pkg.clone());
-        } else {
-            println!("{} package '{}' not found", "✗".red(), pkg.clone().bold());
-            return;
+        if cli.aur && !cli.repo {
+            if backend.capabilities().supports_external {
+                aur_pkgs.push(pkg.clone());
+            } else {
+                println!(
+                    "{} external repositories not supported by this backend",
+                    "✗".red()
+                );
+                return;
+            }
+            continue;
+        }
+
+        match backend.info(pkg).await {
+            Ok(Some(info))
+                if info.repo != "aur" && info.repo != "local/aur" && info.repo != "local" =>
+            {
+                native_pkgs.push(pkg.clone());
+            }
+            Ok(_) if !cli.repo && backend.capabilities().supports_external => {
+                aur_pkgs.push(pkg.clone());
+            }
+            _ => {
+                println!("{} package '{}' not found", "✗".red(), pkg.clone().bold());
+                return;
+            }
         }
     }
 
@@ -155,8 +174,17 @@ pub async fn process_installation(
     if !native_pkgs.is_empty() {
         let native_pkgs_str: Vec<&str> = native_pkgs.iter().map(|s| s.as_str()).collect();
         if let Ok(mut plan) = backend.build_install(&native_pkgs_str) {
-            if allow_conflict_removal {
-                plan.args.push("--ask=4".to_string());
+            if backend.name() == "pacman" {
+                if allow_conflict_removal {
+                    plan.args.push("--ask=4".to_string());
+                }
+                if cli.needed {
+                    plan.args.push("--needed".to_string());
+                }
+                if !cli.ignore.is_empty() {
+                    plan.args.push("--ignore".to_string());
+                    plan.args.push(cli.ignore.join(","));
+                }
             }
             let _ = crate::core::process::execute_plan(
                 &plan,
@@ -211,7 +239,7 @@ pub async fn process_installation(
                         )
                     };
                     if let Ok(mut plan) = backend.build_install_local(&pkg_path) {
-                        if allow_conflict_removal {
+                        if backend.name() == "pacman" && allow_conflict_removal {
                             plan.args.push("--ask=4".to_string());
                         }
                         let _ = crate::core::process::execute_plan(
@@ -222,7 +250,6 @@ pub async fn process_installation(
                             cli.verbose,
                         )
                         .await;
-                        println!("{}", success_msg.green());
                     }
                 }
                 Err(e) => eprintln!("{} {}", "error:".red().bold(), e),

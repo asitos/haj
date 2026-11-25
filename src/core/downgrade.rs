@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 
 /// Extracts (`package_name`, `version_string`) from standard Arch package filenames
 /// e.g. "bash-5.2.026-1-x86_64.pkg.tar.zst" -> ("bash", "5.2.026-1")
-#[allow(dead_code)]
 fn parse_package_filename(filename: &str) -> Option<(&str, &str)> {
     let clean = filename
         .strip_suffix(".pkg.tar.zst")
@@ -28,7 +27,47 @@ fn parse_package_filename(filename: &str) -> Option<(&str, &str)> {
     Some((pkg_name, version_str))
 }
 
-#[allow(dead_code)]
+/// Lists cached package archives for `package`, sorted newest-first.
+pub fn list_candidates(package: &str) -> Vec<(PathBuf, String)> {
+    let mut candidate_entries: Vec<(PathBuf, String)> = Vec::new();
+
+    let scan_dir = |dir: &Path, entries_out: &mut Vec<(PathBuf, String)>| {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.filter_map(Result::ok) {
+                let file_name = entry.file_name().to_string_lossy().to_string();
+                if let Some((parsed_name, version)) = parse_package_filename(&file_name)
+                    && parsed_name == package
+                {
+                    entries_out.push((entry.path(), version.to_string()));
+                }
+            }
+        }
+    };
+
+    scan_dir(Path::new("/var/cache/pacman/pkg"), &mut candidate_entries);
+
+    if let Ok(home) = std::env::var("HOME").map(PathBuf::from) {
+        let aur_cache = home.join(format!(".cache/haj/aur/{package}"));
+        scan_dir(&aur_cache, &mut candidate_entries);
+    }
+
+    candidate_entries.sort_by(|a, b| match alpm::vercmp(a.1.as_str(), b.1.as_str()) {
+        Ordering::Greater => Ordering::Less,
+        Ordering::Less => Ordering::Greater,
+        Ordering::Equal => Ordering::Equal,
+    });
+
+    candidate_entries
+}
+
+/// Finds a cached archive matching an exact package version.
+pub fn find_cached_version(package: &str, version: &str) -> Option<PathBuf> {
+    list_candidates(package)
+        .into_iter()
+        .find(|(_, ver)| ver == version)
+        .map(|(path, _)| path)
+}
+
 pub fn select_downgrade_target(package: &str) -> Option<PathBuf> {
     println!(
         "{} searching caches for '{}'...",
@@ -54,51 +93,7 @@ pub fn select_downgrade_target(package: &str) -> Option<PathBuf> {
         );
     }
 
-    let mut candidate_entries: Vec<(PathBuf, String)> = Vec::new();
-
-    let native_cache = Path::new("/var/cache/pacman/pkg");
-    if let Ok(entries) = std::fs::read_dir(native_cache) {
-        for entry in entries.filter_map(Result::ok) {
-            let file_name = entry.file_name().to_string_lossy().to_string();
-            if let Some((parsed_name, version)) = parse_package_filename(&file_name)
-                && parsed_name == package
-            {
-                candidate_entries.push((entry.path(), version.to_string()));
-            }
-        }
-    }
-
-    if let Ok(home) = std::env::var("HOME").map(std::path::PathBuf::from) {
-        let aur_cache = home.join(format!(".cache/haj/aur/{package}"));
-        if let Ok(entries) = std::fs::read_dir(&aur_cache) {
-            for entry in entries.filter_map(Result::ok) {
-                let file_name = entry.file_name().to_string_lossy().to_string();
-                if let Some((parsed_name, version)) = parse_package_filename(&file_name)
-                    && parsed_name == package
-                {
-                    candidate_entries.push((entry.path(), version.to_string()));
-                }
-            }
-        }
-    }
-
-    if candidate_entries.is_empty() {
-        println!(
-            "{} no cached versions found for '{}'.",
-            "✗".red(),
-            package.bold()
-        );
-        return None;
-    }
-
-    candidate_entries.sort_by(|a, b| {
-        let cmp = alpm::vercmp(a.1.as_str(), b.1.as_str());
-        match cmp {
-            Ordering::Greater => Ordering::Less,
-            Ordering::Less => Ordering::Greater,
-            Ordering::Equal => Ordering::Equal,
-        }
-    });
+    let candidate_entries = list_candidates(package);
 
     println!("{}", "\navailable versions:".bold().white());
     for (i, (path, ver)) in candidate_entries.iter().enumerate() {

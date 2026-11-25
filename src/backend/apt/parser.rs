@@ -26,7 +26,7 @@ pub fn parse_apt_cache_search(stdout: &str) -> Vec<PackageModel> {
 pub fn parse_apt_cache_show(stdout: &str, package: &str) -> Option<PackageModel> {
     let mut version = String::new();
     let mut size_mb = 0.0;
-    
+
     for line in stdout.lines() {
         if line.trim().is_empty() {
             if !version.is_empty() {
@@ -38,13 +38,13 @@ pub fn parse_apt_cache_show(stdout: &str, package: &str) -> Option<PackageModel>
             if version.is_empty() {
                 version = v.trim().to_string();
             }
-        } else if let Some(s) = line.strip_prefix("Size: ") {
-            if let Ok(bytes) = s.trim().parse::<f64>() {
-                size_mb = bytes / 1_048_576.0;
-            }
+        } else if let Some(s) = line.strip_prefix("Size: ")
+            && let Ok(bytes) = s.trim().parse::<f64>()
+        {
+            size_mb = bytes / 1_048_576.0;
         }
     }
-    
+
     if version.is_empty() {
         None
     } else {
@@ -54,7 +54,8 @@ pub fn parse_apt_cache_show(stdout: &str, package: &str) -> Option<PackageModel>
             repo: "apt".to_string(),
             is_installed: false,
             is_upgradable: false,
-            size_mb, desc: None,
+            size_mb,
+            desc: None,
         })
     }
 }
@@ -81,30 +82,40 @@ pub fn parse_dpkg_query_list(stdout: &str) -> Vec<PackageModel> {
 pub fn parse_apt_get_install_dry_run(stdout: &str) -> Vec<InstallSummary> {
     let mut summaries = Vec::new();
     let mut in_new = false;
-    
+
     for line in stdout.lines() {
         if line.starts_with("The following NEW packages will be installed:") {
             in_new = true;
             continue;
-        } else if line.starts_with("The following packages will be") || line.starts_with("0 upgraded") {
+        } else if line.starts_with("The following packages will be")
+            || line.starts_with("0 upgraded")
+        {
             in_new = false;
         }
-        
+
         if in_new && line.starts_with("  ") {
-            let parts: Vec<&str> = line.trim().split_whitespace().collect();
+            let parts: Vec<&str> = line.split_whitespace().collect();
             let mut i = 0;
             while i < parts.len() {
                 let name = strip_arch(parts[i]);
                 let mut version = "Unknown".to_string();
-                if i + 1 < parts.len() && parts[i+1].starts_with('(') && parts[i+1].ends_with(')') {
-                    version = parts[i+1].trim_matches(|c| c == '(' || c == ')').to_string();
+                if i + 1 < parts.len()
+                    && parts[i + 1].starts_with('(')
+                    && parts[i + 1].ends_with(')')
+                {
+                    version = parts[i + 1]
+                        .trim_matches(|c| c == '(' || c == ')')
+                        .to_string();
                     i += 2;
                 } else {
                     i += 1;
                 }
                 summaries.push(InstallSummary {
                     action: TransactionAction::Install,
-                    name, version, download_size_mb: 0.0, install_size_mb: 0.0
+                    name,
+                    version,
+                    download_size_mb: 0.0,
+                    install_size_mb: 0.0,
                 });
             }
         }
@@ -115,7 +126,7 @@ pub fn parse_apt_get_install_dry_run(stdout: &str) -> Vec<InstallSummary> {
 pub fn parse_history_log(content: &str) -> Vec<HistoryEntry> {
     let mut entries = Vec::new();
     let mut current_date = String::new();
-    
+
     for line in content.lines() {
         if let Some(date) = line.strip_prefix("Start-Date: ") {
             current_date = date.trim().to_string();
@@ -141,7 +152,11 @@ pub fn parse_history_log(content: &str) -> Vec<HistoryEntry> {
                 if parts.len() >= 2 {
                     let name = strip_arch(parts[0].trim());
                     let versions: Vec<&str> = parts[1].split(", ").collect();
-                    let ver = if versions.len() >= 2 { versions[1].trim_end_matches(')').to_string() } else { parts[1].trim_end_matches(')').to_string() };
+                    let ver = if versions.len() >= 2 {
+                        versions[1].trim_end_matches(')').to_string()
+                    } else {
+                        parts[1].trim_end_matches(')').to_string()
+                    };
                     entries.push(HistoryEntry {
                         timestamp: current_date.clone(),
                         action: "upgraded".to_string(),
@@ -179,7 +194,8 @@ mod tests {
 
     #[test]
     fn test_parse_dpkg_query_list() {
-        let output = "bash\t5.1-6ubuntu1\tinstall ok installed\ncurl\t7.81.0\tinstall ok installed\n";
+        let output =
+            "bash\t5.1-6ubuntu1\tinstall ok installed\ncurl\t7.81.0\tinstall ok installed\n";
         let pkgs = parse_dpkg_query_list(output);
         assert_eq!(pkgs.len(), 2);
         assert_eq!(pkgs[0].name, "bash");
@@ -215,7 +231,6 @@ mod tests {
         let pkgs = parse_dpkg_query_list(output);
         assert_eq!(pkgs[0].name, "bash");
     }
-
 
     #[test]
     fn test_parse_history_log() {

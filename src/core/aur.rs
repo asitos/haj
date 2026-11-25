@@ -10,14 +10,16 @@ use tokio::process::Command;
 pub struct AurPackage {
     pub name: String,
     pub version: String,
-    #[allow(dead_code)]
     pub description: Option<String>,
     #[serde(default)]
-    #[allow(dead_code)]
     pub num_votes: u64,
     #[serde(default, rename = "Conflicts")]
     #[allow(dead_code)]
     pub conflicts: Vec<String>,
+    #[serde(default)]
+    pub depends: Vec<String>,
+    #[serde(default)]
+    pub opt_depends: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -268,9 +270,41 @@ pub async fn build(pkg_name: &str, is_verbose: bool) -> anyhow::Result<PathBuf> 
     }
 }
 
+fn aur_client() -> anyhow::Result<reqwest::Client> {
+    // AUR RPC gates empty User-Agent requests behind an Anubis HTML challenge.
+    reqwest::Client::builder()
+        .user_agent(concat!("haj/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .map_err(Into::into)
+}
+
 pub async fn search(query: &str) -> anyhow::Result<AurResponse> {
-    let url = format!("https://aur.archlinux.org/rpc/v5/search/{}", query);
-    let response = reqwest::get(&url).await?;
+    let mut url = reqwest::Url::parse("https://aur.archlinux.org/rpc/v5/search/")?;
+    url.path_segments_mut()
+        .map_err(|()| anyhow::anyhow!("invalid base URL"))?
+        .push(query);
+    url.query_pairs_mut().append_pair("by", "name");
+
+    let response = aur_client()?.get(url).send().await?.error_for_status()?;
+    let data = response.json::<AurResponse>().await?;
+    Ok(data)
+}
+
+pub async fn info(packages: &[&str]) -> anyhow::Result<AurResponse> {
+    if packages.is_empty() {
+        return Ok(AurResponse {
+            results: Vec::new(),
+        });
+    }
+    let mut url = reqwest::Url::parse("https://aur.archlinux.org/rpc/v5/info")?;
+    {
+        let mut qp = url.query_pairs_mut();
+        for pkg in packages {
+            qp.append_pair("arg[]", pkg);
+        }
+    }
+
+    let response = aur_client()?.get(url).send().await?.error_for_status()?;
     let data = response.json::<AurResponse>().await?;
     Ok(data)
 }

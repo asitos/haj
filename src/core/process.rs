@@ -37,25 +37,30 @@ pub async fn execute_plan(
 
     let mut child_cmd = if plan.requires_root && !is_root {
         let mut c = tokio::process::Command::new("sudo");
+        for (k, v) in &plan.env {
+            c.arg(format!("{k}={v}"));
+        }
         c.arg(&plan.executable);
         c
     } else {
-        {
         let mut cmd = tokio::process::Command::new(&plan.executable);
         for (k, v) in &plan.env {
             cmd.env(k, v);
         }
         cmd
-    }
     };
 
-    if is_verbose {
-        println!(
-            "{} [verbose] executing: {} {}",
-            "::".blue(),
-            plan.executable,
-            plan.args.join(" ")
-        );
+    let is_interactive = matches!(plan.executable.as_str(), "downgrade" | "pacdiff");
+
+    if is_verbose || is_interactive {
+        if is_verbose {
+            println!(
+                "{} [verbose] executing: {} {}",
+                "::".blue(),
+                plan.executable,
+                plan.args.join(" ")
+            );
+        }
         let mut child = match child_cmd
             .args(&plan.args)
             .stdin(std::process::Stdio::inherit())
@@ -87,7 +92,9 @@ pub async fn execute_plan(
         }
     }
 
-    child_cmd.arg("--color=never");
+    if plan.executable == "pacman" {
+        child_cmd.arg("--color=never");
+    }
 
     let spinner = ui::spinner(spinner_msg);
 
