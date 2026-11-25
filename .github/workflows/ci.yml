@@ -65,8 +65,6 @@ jobs:
 
     - uses: DeterminateSystems/nix-installer-action@main
 
-    - uses: DeterminateSystems/magic-nix-cache-action@main
-
     - name: validate flake outputs
       run: nix flake show --no-write-lock-file
 
@@ -77,7 +75,7 @@ jobs:
       run: |
         nix build --no-write-lock-file .#default -o result-default
         ./result-default/bin/haj --version
-        test -f ./result-default/share/bash-completion/completions/haj
+        test -f ./result-default/share/bash-completion/completions/haj.bash
         test -f ./result-default/share/fish/vendor_completions.d/haj.fish
         test -f ./result-default/share/zsh/site-functions/_haj
 
