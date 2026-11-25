@@ -40,7 +40,7 @@ jobs:
           pkgdesc="fast, quiet, beautiful package management for BlahArch"
           arch=('x86_64')
           url="https://github.com/asitos/haj"
-          license=('GPL-2.0-only')
+          license=('GPL-3.0-or-later')
           depends=('curl' 'pacman') 
           makedepends=('cargo')
           source=("https://github.com/asitos/haj/archive/refs/tags/v\${pkgver}.tar.gz")

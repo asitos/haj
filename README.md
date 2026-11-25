@@ -366,7 +366,7 @@ verbose = false
 
 ## license (BORING)
 
-GPL-2.0-only license. see `LICENSE` for more information.
+GPL-3.0-or-later license. see `LICENSE` for more information.
 
 ---
 

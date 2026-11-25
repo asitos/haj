@@ -1,6 +1,6 @@
 # haj v0.3.3
 
-focuses on optional dependencies, natural verb-action cli syntax, source installation scripting, and nix flake support under GPL-2.0-only licensing.
+focuses on optional dependencies, natural verb-action cli syntax, source installation scripting, and nix flake support under GPL-3.0-or-later licensing.
 
 ## dependency decoupling
 
@@ -23,4 +23,4 @@ focuses on optional dependencies, natural verb-action cli syntax, source install
 
 ## license
 
-- changed project license to GPLv2 (`GPL-2.0-only`).
+- kept `GPL-3.0-or-later` licensing for compatibility with `alpm`, `pacmanconf`, and Apache-2.0 dependencies.

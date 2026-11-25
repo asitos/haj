@@ -53,7 +53,7 @@
           meta = {
             description = cargoToml.package.description;
             homepage = cargoToml.package.repository;
-            license = lib.licenses.gpl2Only;
+            license = lib.licenses.gpl3Plus;
             mainProgram = "haj";
             platforms = lib.platforms.linux;
           };
