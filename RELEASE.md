@@ -1,100 +1,26 @@
-# haj v0.3.2
+# haj v0.3.3
 
-fixes pacman backend parity and aur query/install regressions while adopting GPL-3.0-or-later licensing.
+focuses on optional dependencies, natural verb-action cli syntax, source installation scripting, and nix flake support under GPL-2.0-only licensing.
 
-## fixes & pacman backend
+## dependency decoupling
 
-- **AUR Query & Install:** Added `User-Agent` header on AUR RPC v5 requests (avoiding empty-agent challenge responses), switched `resolve_external` and `show` to `/rpc/v5/info`, and fixed `process_installation` routing for AUR packages and `--aur`/`--needed`/`--ignore` flags.
-- **Pacman Commands:** Implemented `owns`, `files`, `locate`, `group` (groups + meta-packages like `base-devel`), `list` (`-e`/`-p`/`-f` filters on `localdb`), `history`/`log` (ISO-8601 `pacman.log`), `orphan` sweep, `clean` (`paccache -k`), `downgrade` cache lookup, `fetch`, `mark` toggle, `load`, `diff`, `pkgbuild`, and `upgrade` (`--no-sync` + AUR upgrades).
-- **TUI & Safety:** Fixed TUI transaction log parsing (`LogEntry.timestamp` + `[ALPM]` line tokens) and gated `pacman` sync checks behind `#[cfg(feature = "pacman")]` for APT-only builds.
+- **optional `libalpm` (`pacman` / `alpm` cargo features):** compiled with `libalpm` + `pacmanconf` by default, or built cleanly with `--no-default-features` (zero `libalpm.so` linkage) using pure `pacman` cli fallback and pure-rust `vercmp`.
+- **optional `display3d`:** `haj tui` launches without error when `display3d` is absent, falling back to static shark art.
+- **scoped lock cleanup:** `PackageManager::lock_file_path()` scopes `Ctrl+C` `/var/lib/pacman/db.lck` cleanup strictly to active pacman backends when the lock file exists.
+
+## install script
+
+- added `install.sh` to build `haj` from source (`--release --locked`), auto-detect `libalpm` via `pkg-config` (falling back to `--no-default-features`), install the binary and shell completions, and support `--uninstall`, `--prefix <dir>`, `--no-alpm`, and `--with-display3d`.
+
+## natural cli syntax
+
+- added typing-friendly verbs and aliases across commands (`install`/`add` `i`/`a`, `remove`/`uninstall`/`drop`, `search`/`find`, `show`/`about`/`describe`, `fetch`/`download`/`get`, `downgrade`/`rollback`, `owns`/`owner`/`which`, `locate`/`where`/`find-file`, `orphan`/`autoremove`/`prune`, `diff`/`pacnew`/`merge`, `--from aur|repo`, `upgrade --no-sync`).
+- added natural english phrase normalization (`haj add <pkg> from aur`, `haj who owns <path>`, `haj list files of <pkg>`, `haj downgrade <pkg> to <ver>`, `haj mark <pkg> as explicit|dep`, `haj list explicit|deps|aur|orphans|updates`, `haj clean cache|orphans`) while leaving bare interactive search (`haj <query>`) untouched.
+
+## nix flake
+
+- added `flake.nix` targeting `x86_64-linux` and `aarch64-linux` with default `--no-default-features` package, optional `#haj-alpm` variant, shell completions, and github actions nix flake CI checks.
 
 ## license
 
-- Changed project license from MIT to `GPL-3.0-or-later`.
-
-# haj v0.3.1
-
-this release brings a massive visual overhaul to the TUI dashboard, introduces a new CLI identity, and lays the groundwork for cross-distro package management (APT support coming soon).
-
-## tui & aesthetics
-
-- **Dashboard Rework:** Completely redesigned the TUI dashboard to be borderless and clean (inspired by WikiTUI). 
-- **Stats Bar Upgrade:** The package stats bar now uses a pastel color scheme with proper icons and margin spacing.
-- **Spinning Shark Fix:** The 3D spinning blahaj model (`display3d`) is now perfectly centered in its TUI frame without jittering or clipping.
-- **ASCII Logo:** Added a custom ASCII art logo (`resources/title.txt`) that gracefully prints above the CLI output when running `haj --help` or `haj --version`.
-
-## cross-distro preparation
-
-- **Universal Tagline:** Updated the project description across the CLI and `Cargo.toml` from being Arch-specific to: *"the beautiful, cross-distro package manager and tui."*
-- **Architecture Audit:** A comprehensive architectural audit was performed to decouple the core from `libalpm` and prepare a generic `Backend` trait for APT, DNF, and Portage.
-
-## ci & correctness
-
-- Fixed `cargo fmt` deviations.
-- Resolved `cargo clippy` warnings (`useless_vec` replaced with static arrays in action menus).
-
-# haj v0.3.0
-
-internal refactor release. no new user-facing commands; focus is correctness, safety, and making it easier for other people to contribute.
-
-## breaking internal changes
-
-- `src/tui/app.rs` deleted (373 lines). state split across `tui/mod.rs`, `tui/events.rs`, and `tui/news_fetch.rs`.
-- `src/core/escalate.rs`, `src/core/resolver.rs`, `src/core/pacnew.rs` deleted. logic now lives in `src/core/mod.rs`.
-- `src/commands/install.rs` + `src/commands/mod.rs` → `src/commands.rs`.
-- `src/ui/progress.rs` + `src/ui/mod.rs` → `src/ui.rs`.
-
-## ci
-
-- added `.github/workflows/release.yml` — automated release workflow triggered on version tags.
-- `.github/workflows/ci.yml` updated.
-
-### tui modularized (`src/tui/`)
-
-`tui/mod.rs` was a 2962-line dungeon or smth lmao (sorry i didnt think much while making). split into:
-
-- `tui/events.rs` — event loop and key-handling (1506 lines)
-- `tui/news_fetch.rs` — arch news xml fetch + caching (360 lines)
-- `tui/mod.rs` — state structs and module declarations only (1048 lines)
-
-blanket `#![allow(dead_code)]` suppression removed; dead fields surfaced and cleaned up.
-
-### consolidated root check
-
-`unsafe { libc::geteuid() == 0 }` was copy-pasted into 4 files:
-`escalate.rs`, `pacman.rs`, `aur.rs`, `tui/events.rs`.
-
-replaced with one function: `crate::core::is_root()`.
-
-### typed aur api responses
-
-all three aur rpc query sites used raw `serde_json::value` chained with `.get("name").and_then(|n| n.as_str())` etc.
-
-replaced with typed structs in `src/core/aur.rs`:
-
-```rust
-pub struct aurpackage {
-    pub name: string,
-    pub version: string,
-    pub description: option<string>,
-    pub num_votes: u64,
-    pub conflicts: vec<string>,  // used by install conflict detection
-}
-pub struct aurresponse { pub results: vec<aurpackage> }
-```
-
-covered: `main.rs` search, upgrade check, and `commands.rs` install resolution.
-
-### flattened premature module structure
-
-`commands/` and `ui/` directories each had one file and one `mod.rs`. flattened both.
-
-## safety
-
-removed 8 `.unwrap()` / `.expect()` panics in `src/main.rs` and `src/commands.rs`:
-
-## tests
-
-expanded `tests/cli_tests.rs` to cover all subcommand aliases (full command names + short aliases).
-added `tests/comprehensive_features_tests.rs` (later removed; commands requiring sudo caused ci hangs — test strategy moved to unit + dry-run integration tests).
-
+- changed project license to GPLv2 (`GPL-2.0-only`).

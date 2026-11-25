@@ -1,10 +1,10 @@
 [package]
 name = "haj"
-version = "0.3.2"
+version = "0.3.3"
 edition = "2024"
 authors = ["asitos 4shut0shparashar@gmail.com"]
 description = "the beautiful, cross-distro package manager and tui."
-license = "GPL-3.0-or-later"
+license = "GPL-2.0-only"
 repository = "https://github.com/asitos/haj"
 readme = "README.md"
 keywords = ["archlinux", "pacman", "tui", "ratatui", "wrapper"]

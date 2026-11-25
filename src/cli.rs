@@ -11,7 +11,7 @@ pub enum SourceScope {
 #[command(
     name = "haj",
     author = "asitos",
-    version = "0.3.2",
+    version = "0.3.3",
     about = "the beautiful, cross-distro package manager and tui.",
     long_about = None,
     disable_help_subcommand = true,

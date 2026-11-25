@@ -612,3 +612,82 @@ pub fn foreign_versions() -> Result<Vec<(String, String)>, BackendError> {
         })
         .collect())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SAMPLE_INFO: &str = "\
+Repository      : core
+Name            : bash
+Version         : 5.3.20-2
+Description     : The GNU Bourne Again shell
+Depends On      : readline  libreadline.so=8-64  glibc>=2.38  ncurses
+Optional Deps   : bash-completion: for tab completion
+                  less: for pager support
+Required By     : 7zip  base
+                  pacman
+Conflicts With  : None
+Download Size   : 2048.00 KiB
+Installed Size  : 10.00 MiB
+Install Reason  : Installed as a dependency for another package
+
+Repository      : extra
+Name            : ripgrep
+Version         : 15.2.0-1
+Description     : Search tool
+Depends On      : None
+Optional Deps   : None
+Installed Size  : 3584.00 KiB
+Install Reason  : Explicitly installed
+";
+
+    #[test]
+    fn test_parse_stanzas_and_fields() {
+        let stanzas = parse_stanzas(SAMPLE_INFO);
+        assert_eq!(stanzas.len(), 2);
+
+        let bash = &stanzas[0];
+        assert_eq!(field_str(bash, "Name").as_deref(), Some("bash"));
+        assert_eq!(field_str(bash, "Conflicts With"), None);
+        assert_eq!(
+            field_tokens(bash, "Depends On"),
+            vec!["readline", "libreadline.so", "glibc", "ncurses"]
+        );
+        assert_eq!(
+            field_tokens(bash, "Required By"),
+            vec!["7zip", "base", "pacman"]
+        );
+        assert_eq!(field_optdeps(bash), vec!["bash-completion", "less"]);
+        assert_eq!(
+            parse_install_reason(bash).as_deref(),
+            Some("installed as a dependency")
+        );
+
+        let model = model_from_stanza(bash, "core".to_string(), true);
+        assert_eq!(model.name, "bash");
+        assert_eq!(model.version, "5.3.20-2");
+        assert!(model.is_installed);
+        assert!((model.size_mb - 10.0).abs() < f64::EPSILON);
+
+        let rg = &stanzas[1];
+        assert!(field_tokens(rg, "Depends On").is_empty());
+        assert!(field_optdeps(rg).is_empty());
+        assert_eq!(
+            parse_install_reason(rg).as_deref(),
+            Some("explicitly installed")
+        );
+        assert!((parse_size_mb(field_str(rg, "Installed Size")) - 3.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_parse_size_units_and_regex_escape() {
+        assert!((parse_size_mb(Some("1048576.00 B".into())) - 1.0).abs() < f64::EPSILON);
+        assert!((parse_size_mb(Some("512.00 KiB".into())) - 0.5).abs() < f64::EPSILON);
+        assert!((parse_size_mb(Some("2.00 GiB".into())) - 2048.0).abs() < f64::EPSILON);
+        assert_eq!(parse_size_mb(None), 0.0);
+
+        assert_eq!(escape_regex("gtk+3.0[x]"), r"gtk\+3\.0\[x\]");
+        assert_eq!(strip_dep_constraint("foo>=1.2.3-1"), "foo");
+    }
+}

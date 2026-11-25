@@ -551,4 +551,11 @@ mod tests {
         assert_eq!(parsed[1].action, "upgraded");
         assert_eq!(parsed[1].package, "foo");
     }
+
+    #[test]
+    fn test_backend_lock_file_paths() {
+        let pacman = PacmanBackend::new().unwrap();
+        assert_eq!(pacman.lock_file_path(), Some("/var/lib/pacman/db.lck"));
+        assert_eq!(crate::backend::apt::AptBackend.lock_file_path(), None);
+    }
 }

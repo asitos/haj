@@ -29,15 +29,49 @@ jobs:
       - name: check formatting
         run: cargo fmt -- --check
 
+      - name: check portable build (--no-default-features)
+        run: cargo check --no-default-features
+
       - name: run clippy
-        run: cargo clippy -- -D warnings
+        run: |
+          cargo clippy --all-targets -- -D warnings
+          cargo clippy --no-default-features --all-targets -- -D warnings
 
       - name: run tests
-        run: cargo test --verbose
+        run: |
+          cargo test --locked --verbose
+          cargo test --no-default-features --verbose
+
+  nix-flake:
+    name: nix flake check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: DeterminateSystems/nix-installer-action@main
+
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: validate flake outputs
+        run: nix flake show --no-write-lock-file
+
+      - name: check flake and sandbox unit tests
+        run: nix flake check --no-write-lock-file
+
+      - name: verify built binaries and shell completions
+        run: |
+          nix build --no-write-lock-file .#default -o result-default
+          ./result-default/bin/haj --version
+          test -f ./result-default/share/bash-completion/completions/haj
+          test -f ./result-default/share/fish/vendor_completions.d/haj.fish
+          test -f ./result-default/share/zsh/site-functions/_haj
+
+          nix build --no-write-lock-file .#haj-alpm -o result-alpm
+          ./result-alpm/bin/haj --version
 
   github-release:
     name: github release
-    needs: check
+    needs: [check, nix-flake]
     runs-on: ubuntu-latest
     container: archlinux:latest
     permissions:
@@ -69,7 +103,7 @@ jobs:
 
   cargo-publish:
     name: publish to crates.io
-    needs: check
+    needs: [check, nix-flake]
     runs-on: ubuntu-latest
     container: archlinux:latest
     steps:

@@ -73,6 +73,28 @@ paru -S haj
 sudo pacman -Syu haj
 ```
 
+### nix
+
+install or run `haj` directly with nix flakes (builds with pure-cli fallback by default to avoid `libalpm` version skew):
+
+```bash
+# run once without installing
+nix run github:asitos/haj
+
+# install into your nix profile
+nix profile install github:asitos/haj
+
+# optional: opt into libalpm bindings
+nix profile install github:asitos/haj#haj-alpm
+```
+
+or add it to a flake config:
+
+```nix
+inputs.haj.url = "github:asitos/haj";
+# add inputs.haj.packages.${pkgs.stdenv.hostPlatform.system}.default to packages
+```
+
 ### cargo
 
 requires [rust + cargo](https://www.rust-lang.org/tools/install) to be installed:
@@ -167,41 +189,44 @@ docker run --rm -it \
 
 ## usage & commands
 
-`haj` provides highly aliased commands for a faster typing experience, and currently supports the full day-to-day arch package management workflow through both the cli and the interactive tui
+`haj` uses natural, typing-friendly verb-action syntax and short aliases across both the cli and the interactive tui.
 
-### options
+### commands & options
 
 | command | aliases | action |
 |---------|---------|--------|
 | `tui` | `t` | launch the interactive package manager dashboard |
-| `update` | `up`, `sync` | synchronize remote repositories |
-| `jump` | `upgrade` | full system upgrade |
-| `install <pkg>` | `i` | install one or more packages |
-| `remove <pkg>` | `rm`, `toss` | remove packages & unneeded dependencies |
-| `search <query>` | `s` | search remote repositories |
-| `show <pkg>` | `info` | show detailed package information |
-| `group <name>` | `g` | browse and install package groups |
-| `list` | `ls` | list installed packages |
+| `update` | `up`, `sync`, `refresh` | synchronize remote repositories |
+| `upgrade [pkg]` | `jump` | upgrade system or specific packages (`--no-sync`) |
+| `install <pkg\|file>` | `add`, `i`, `a` | install packages or local archive (`--from aur\|repo`) |
+| `remove <pkg>` | `rm`, `toss`, `uninstall`, `delete`, `drop` | remove packages & unneeded dependencies |
+| `search <query>` | `s`, `find` | search official repositories & aur |
+| `show <pkg>` | `info`, `about`, `describe` | show detailed package information |
+| `group <name>` | `g` | browse and install package groups / meta-packages |
+| `list [filter]` | `ls` | list installed packages (`explicit`, `deps`, `aur`, `foreign`, `orphans`, `updates`) |
 | `stats` | `st` | show system health and package statistics |
-| `load <file>` | `l` | install a local package archive (.pkg.tar.zst) |
-| `fetch <pkg>` | `f` | download a package without installing |
-| `downgrade <pkg>` | `sink` | downgrade an installed package |
-| `owns <file>` | `ow` | find which installed package owns a file |
-| `files <pkg>` | `lf` | list files installed by a package |
-| `locate <query>` | `loc` | search repositories for a file (pacman -F) |
-| `history` | `h` | show recent package changes |
-| `orphan` | `o` | detect orphaned dependencies |
-| `clean` | `c` | clean the package cache |
-| `mark <pkg>` | `m` | change a package's install reason |
-| `diff` | `pn` | interactively manage and merge .pacnew config files |
+| `load <file>` | `l` | install a local package archive (`.pkg.tar.zst`) |
+| `fetch <pkg>` | `f`, `download`, `get` | download packages without installing |
+| `downgrade <pkg> [to <ver>]` | `sink`, `rollback` | downgrade an installed package |
+| `owns <file>` | `ow`, `owner`, `which` | find which installed package owns a file (`who owns <path>`) |
+| `files [in\|of] <pkg>` | `lf` | list files installed by a package (`list files <pkg>`) |
+| `locate <query>` | `loc`, `where`, `find-file` | search repositories for a file (`pacman -F`) |
+| `history` | `h` | show recent package changes (`-l <n>`) |
+| `orphan` | `o`, `orphans`, `autoremove`, `prune` | detect or remove orphaned dependencies |
+| `clean [cache\|orphans]` | `c` | clean package cache (`-k <n>`) or orphans |
+| `mark <pkg> [as explicit\|dep]` | `m` | set or toggle a package's install reason |
+| `diff` | `pn`, `pacnew`, `merge` | interactively manage and merge `.pacnew` config files |
+| `pkgbuild <pkg>` | `pb` | read the `PKGBUILD` of an aur package |
 
 - `-a`, `--aur` : restrict operations to the aur.
 - `-r`, `--repo` : restrict operations to arch repositories.
+- `--from <source>` : restrict operations to `aur` or `repo`.
 - `-y`, `--noconfirm` : bypass all confirmation prompts.
 - `-n`, `--needed` : do not reinstall up-to-date packages.
 - `-i`, `--ignore <pkg>` : ignore a package upgrade (comma-separated: pkg1,pkg2).
 - `-c`, `--config <path>` : specify an alternate pacman config file.
 - `--root <path>` : specify an alternate installation root.
+- `--no-sync` : do not sync package databases before upgrading (`upgrade`).
 - `-v`, `--verbose` : enable verbose debug logging.
 - `-d`, `--dry-run` : preview a command without modifying the system.
 - `-h`, `--help` : display help information.
@@ -216,35 +241,46 @@ haj tui
 haj t
 ```
 
-search for a package:
+search and install with natural syntax or short aliases:
 ```bash
-# for interactive search and install
+# interactive search and install
 haj discord
 
-# show all searches
+# search repos or aur
 haj search discord
-# or
-haj s discord
+haj find foo in repo
+
+# install from repos or aur
+haj add neovim
+haj add yay-bin from aur
+haj i htop cmatrix
 ```
 
-keeping up to date:
+upgrade, inspect, and clean up naturally:
 ```bash
-# full system upgrade
-haj jump
-
-# sync repos
+# sync and upgrade
 haj sync
-# or
-haj up
+haj upgrade
+haj upgrade --no-sync
 
-haj install htop cmatrix
-# or
-haj i htop cmatrix
+# inspect packages, files, and ownership
+haj about neovim
+haj who owns /usr/bin/bash
+haj list files of bash
+haj list updates
+haj list explicit
+
+# manage marks, downgrades, cache, and orphans
+haj mark bash as explicit
+haj downgrade bash to 5.2.026-1
+haj clean cache -k 2
+haj clean orphans
+haj prune
 ```
 
 safely preview removing a package:
 ```bash
-haj -d toss firefox
+haj -d drop firefox
 ```
 
 ## shell autocompletion
@@ -330,7 +366,7 @@ verbose = false
 
 ## license (BORING)
 
-GPL-3.0 license. see `LICENSE` for more information.
+GPL-2.0-only license. see `LICENSE` for more information.
 
 ---
 
