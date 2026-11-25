@@ -1,3 +1,17 @@
+# haj v0.3.2
+
+fixes pacman backend parity and aur query/install regressions while adopting GPL-3.0-or-later licensing.
+
+## fixes & pacman backend
+
+- **AUR Query & Install:** Added `User-Agent` header on AUR RPC v5 requests (avoiding empty-agent challenge responses), switched `resolve_external` and `show` to `/rpc/v5/info`, and fixed `process_installation` routing for AUR packages and `--aur`/`--needed`/`--ignore` flags.
+- **Pacman Commands:** Implemented `owns`, `files`, `locate`, `group` (groups + meta-packages like `base-devel`), `list` (`-e`/`-p`/`-f` filters on `localdb`), `history`/`log` (ISO-8601 `pacman.log`), `orphan` sweep, `clean` (`paccache -k`), `downgrade` cache lookup, `fetch`, `mark` toggle, `load`, `diff`, `pkgbuild`, and `upgrade` (`--no-sync` + AUR upgrades).
+- **TUI & Safety:** Fixed TUI transaction log parsing (`LogEntry.timestamp` + `[ALPM]` line tokens) and gated `pacman` sync checks behind `#[cfg(feature = "pacman")]` for APT-only builds.
+
+## license
+
+- Changed project license from MIT to `GPL-3.0-or-later`.
+
 # haj v0.3.1
 
 this release brings a massive visual overhaul to the TUI dashboard, introduces a new CLI identity, and lays the groundwork for cross-distro package management (APT support coming soon).
